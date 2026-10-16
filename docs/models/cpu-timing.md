@@ -1,11 +1,111 @@
-# CPU timing (open investigation)
+# CPU timing
 
-**Status: open.** Nothing in the engine has changed yet. This page records what was measured,
-which causes were found, what was ruled out and what to do next.
+**Status: fixed-cost timing is implemented.** The CLI and app use CPI 2.0 with exception overhead.
+The instruction-level flash model remains future work. The study below records the earlier timing
+and its evidence.
+
+## Current timing
+
+`euc sim run`, `sim compare`, `sim serve`, and the app share `DEFAULT_CPI = 2.0`.
+Both CPU backends use the same exception costs:
+
+| Switch | HCLK cycles |
+|---|---|
+| Exception entry | 14 |
+| Exception return | 14 |
+| Tail-chain into a pending handler | 8 |
+
+Arm specifies 12-cycle entry and return, and 6-cycle tail-chaining, with zero-wait memory
+([Cortex-M3 TRM](https://documentation-service.arm.com/static/5e8e107f88295d1e18d34714)).
+The extra two cycles represent flash latency and remain an **ESTIMATE**.
+This model does not simulate individual flash fetches or bus contention.
+The scheduler checks timers after each context switch. A return inside an IT block keeps its
+switching time and does not stack an already-taken exception again.
+
+Reference tests explicitly use CPI 1.25 and `ExceptionTiming::REFERENCE`, with no exception cost.
+For a historical CLI run, add `--cpi 1.25 --no-exception-timing`.
+Changing `--cpi` alone retains the normal exception costs.
+
+### Cadence check
+
+With the owner's mode-1 preset, a 30-second stock idle run gave these results:
+
+| Measurement | Current model | Real recording |
+|---|---|---|
+| Light breathing period | mean 2.235 s; 2.18–2.28 s over nine periods | about 2.1 ±0.2 s, one video cycle |
+| BLE frame-group period | 307.44 ms | 309.6 ms |
+
+The light period is about 6% above the video estimate. The BLE period is about 0.7% below the capture.
+These checks support the fixed timing estimate. They do not establish exact instruction timing.
+
+### Clean firmware scheduling
+
+The slower model exposed a clean-firmware failure during ordinary balance.
+The display transfer blocked the RTC task long enough to trip the stale-command latch.
+The latch first appeared at 1.905 s, before stand release. Clean then fell at 5.19 s at all three quantum sizes.
+CPI 2.0 without exception overhead also failed. The exception-cost implementation alone did not cause the failure.
+
+Clean now sends display frames from the main loop (`DISPLAY_IN_BALANCE_TICK` off).
+The RTC task requests each refresh and keeps its normal strip-speed sample.
+The three-tick stale-command deadline remains in force. Compat retains the stock scheduling.
+Target presets also enable link-time optimization. This reduces interrupt cost and prevents early main-loop starvation in the 12 kHz preset.
+The freestanding memory routines stay outside LTO, so generated `memcpy` and `memset` calls can resolve.
+CI checks clean balance, ride, and pothole runs with the shipped timing.
+The pothole case requires at least 19 km/h, which rejects the early-limp regression.
+See [watchdog-and-overcurrent.md](../../firmware/docs/watchdog-and-overcurrent.md#display-transfers-and-the-stale-command-deadline).
 
 Evidence tags as elsewhere: **OBSERVED** = measured in the simulator or in a real recording;
 **INFERRED** = follows from the code or the measurements; **ESTIMATE** = a model or a figure from
 outside the project.
+
+## Scenario validation
+
+These checks use CPI 2.0, exception costs, and the LTO target builds.
+The frozen image hashes start with `3fe25c10` (compat) and `fe83cb1d` (clean).
+The stock image stays `cbfb328c` (GW1825007). The plant, rider, and firmware safety deadlines retain their prior settings.
+
+Each firmware ran all 16 shipped scenarios at quantum sizes 4000, 3000, and 2000.
+The table reports physical fall or hold states. Some scenario checks intentionally fail when stock cuts or clean avoids a stock fault.
+The borderline clean result lists states in quantum order: 4000, 3000, 2000.
+
+| Scenario | Stock | Compat | Clean |
+|---|---|---|---|
+| `balance-60s` | holds (3/3) | holds (3/3) | holds (3/3) |
+| `ble-service-cut-standing` | falls (3/3) | falls (3/3) | holds (3/3) |
+| `coasting-stop` | holds (3/3) | holds (3/3) | holds (3/3) |
+| `downhill-cruise-2pct` | holds (3/3) | holds (3/3) | holds (3/3) |
+| `hall-loss-while-riding` | falls (3/3) | falls (3/3) | falls (3/3) |
+| `hall-single-line-loss` | holds (3/3) | holds (3/3) | holds (3/3) |
+| `hard-braking-30kmh` | holds (3/3) | holds (3/3) | holds (3/3) |
+| `hill-climb-low-battery` | holds (3/3) | holds (3/3) | holds (3/3) |
+| `low-battery-tiltback` | holds (3/3) | holds (3/3) | holds (3/3) |
+| `overlean-no-pwm-tiltback` | falls (3/3) | falls (3/3) | holds (3/3) |
+| `overlean-top-speed-30pct` | falls (3/3) | falls (3/3) | holds (3/3) |
+| `overlean-top-speed` | falls (3/3) | falls (3/3) | **borderline**: falls, holds, holds |
+| `pothole-20kmh` | holds (3/3) | holds (3/3) | holds (3/3) |
+| `ride-20kmh-stop` | holds (3/3) | holds (3/3) | holds (3/3) |
+| `rider-steps-off-15kmh` | falls (3/3) | falls (3/3) | falls (3/3) |
+| `rider-steps-off-5kmh` | falls (3/3) | falls (3/3) | falls (3/3) |
+
+The rider-step-off cases intentionally end with the empty wheel on its side.
+All 16 stock-versus-compat comparisons pass their recorded limits.
+The hill's distance limit changes from 0.2 m to 0.5 m for a measured 0.315 m difference across about 150 m.
+The pitch limit and three-second step-off cutoff limit retain their prior values.
+
+Additional pothole runs change only the depth:
+
+| Pothole | Stock | Compat | Clean, quantum 4000 / 3000 / 2000 |
+|---|---|---|---|
+| 3 cm | holds (3/3) | holds (3/3) | holds / holds / holds |
+| 5 cm | holds (3/3) | holds (3/3) | **borderline**: holds / falls / falls |
+
+Every additional run reaches the hole. A run that never reaches the obstacle does not establish impact performance.
+Both riderless guard scenarios record zero detector triggers at all three quantum sizes.
+They also record no main-loop stall. The step-off diagnostic records one riderless trigger, which confirms that LTO retains the counter.
+
+The full-battery clean overlean result and the clean five-centimetre impact result remain borderline.
+These cases require further work. The earlier lean-sweep and sensitivity tables use the historical timing stated on their pages.
+They do not establish the same margins under this timing model.
 
 ## The question
 
@@ -19,7 +119,7 @@ that runs during a tick whose LED tick counter is a multiple of 10 steps the bri
 (0 to 131 and back). So the period is inversely proportional to the main-loop passes per RTC tick
 (496 Hz, 2.016 ms). In our runs, period × passes per tick × 49.6 Hz ≈ 289 steps per cycle.
 
-## Measurements at today's timing
+## Historical measurements at CPI 1.25
 
 Own core, stock GW1825007, idle (`euc sim run begode-extreme`), 20 simulated seconds. A study-only
 wrapper single-stepped the core and counted instructions per exception context, main-loop passes
@@ -50,14 +150,14 @@ count, same BLE frame times). OBSERVED.
    in LED mode 1 (the preset boots in mode 1, OBSERVED). The 0.49 s was measured in mode 0. A
    mode-1 pass costs 1.8 times a mode-0 pass, so mode 1 alone gives 0.92 s. This explains a
    factor of 1.9 of the 4.3.
-2. **CPI (ESTIMATE).** The machine charges a fixed 1.25 cycles per instruction. Our core's TRM
+2. **CPI (ESTIMATE).** The original machine charged a fixed 1.25 cycles per instruction. Our core's TRM
    model (`euc-armv7m` `timing`) gives 1.52 to 1.88 per context. The STM32F1 runs from flash with
    2 wait states at 72 MHz (the firmware sets latency 2 and the prefetch buffer on, OBSERVED). A
    flash model on top of the TRM counts:
    - fetch bandwidth: 8 bytes per 3 HCLK cycles in each straight-line run;
    - W extra cycles per taken branch and per data read from flash (literal pools, constant tables,
      TBB/TBH);
-   - 12 + W cycles for each exception entry and each return (today these cost nothing).
+   - 12 + W cycles for each exception entry and each return (the original model charged nothing).
 
    With W = 2 the effective CPI is 2.07 (thread 2.02, RTC 1.88, ADC1_2 2.01, TIM8_UP 2.40).
    Cross-check: ST's family figure of 177 CoreMark at 72 MHz (2.46 per MHz) against about 3.3 per
@@ -77,11 +177,11 @@ count, same BLE frame times). OBSERVED.
 
 Owner preset, idle, 30 simulated seconds. Fixed CPI = the machine's existing `cpi`. Model = the
 per-instruction flash model above, with the quantum's time taken from the model. OBSERVED in the
-snapshot.
+snapshot. Fixed-CPI prototype runs excluded exception overhead; the flash-model runs included it.
 
 | Timing | Breathing | Passes per tick | RTC ticks lost | BLE group period |
 |---|---|---|---|---|
-| CPI 1.25 (today) | 0.92 s | 6.32 | 0 | 304.4 ms |
+| CPI 1.25 (original) | 0.92 s | 6.32 | 0 | 304.4 ms |
 | CPI 2.0 | **2.17 s** | 2.70 | 0.98 % | 307.4 ms |
 | Model, W = 1 | 1.84 s | 3.16 | 0.98 % | 307.4 ms |
 | Model, W = 2 | **2.31 s** | 2.53 | 0.98 % | 307.5 ms |
@@ -119,21 +219,13 @@ Not modeled, small (ESTIMATE, not checked): the RTC `RTOFF` wait after clearing 
 
 ## Next steps
 
-1. Choose the fix:
-   - **Fixed CPI 2.0** in every caller (CLI `--cpi` default, `serve.rs`, `compare.rs`, the app's
-     `firmware.rs`). This is simple, and the own and Unicorn backends keep identical timing. Keep
-     1.25 where a test compares with the Python reference harness.
-   - **Per-instruction model** in `euc-armv7m` (the flash model above), with the machine taking
+1. **Per-instruction model** in `euc-armv7m` (the flash model above), with the machine taking
      quantum time from the core. It is more faithful when the code mix changes (delay loops,
      soft-float, our own firmware). Unicorn has no model, so its timing would then differ from our
      core's. It needs a cycle budget in `Cpu::run`, or a CPI estimate for the budget.
-2. Charge exception entry and return (12 + W cycles) in the machine for every backend.
-3. Re-run every scenario and the compat-versus-stock compare tolerances after the change.
-4. Correct [lights.md](../hardware/lights.md): 0.49 s is LED mode 0; the owner's wheel and preset
-   are LED mode 1 (0.92 s at today's timing).
-5. Better real data: a 20 s video on a tripod with the LED mode noted (period to ±2 %), and a
+2. Better real data: a 20 s video on a tripod with the LED mode noted (period to ±2 %), and a
    second BLE capture. Both pin W between 2 and 3.
-6. If the project wants a profiler, add an `euc sim profile` command, built from the prototype.
+3. If the project wants a profiler, add an `euc sim profile` command, built from the prototype.
 
 Prototype tools: private research repo, `research/timing-proto/` (the single-step profiler, the
 flash-model prototype and the analysis scripts, with a README on how to run them).

@@ -1,5 +1,10 @@
 # Stock firmware findings: Begode Extreme
 
+**Timing version.** The detailed measurements below use the former CPI 1.25 model, without exception overhead.
+The current default is CPI 2.0 with exception costs.
+See [current timing results](../models/cpu-timing.md#scenario-validation) for the new scenario checks.
+To reproduce the older timing, add `--cpi 1.25 --no-exception-timing` with the firmware builds listed below.
+
 What the simulator shows about the stock Begode Extreme controller firmware (build GW1825007), for
 people who write firmware for this wheel. Each finding gives the behaviour, the scenario that shows it
 and the command that reruns it, the numbers, how sure we are, and what our clean profile does about it.
@@ -83,6 +88,10 @@ so a second lost line still ends in this fault. Compat and clean cut at the same
 fault and alert 0x40.
 
 ## 3. Overlean: the PWM saturates, and the warning time depends on the motor
+
+**Current timing check.** Clean's full-battery outcome is now borderline across quantum sizes.
+The 30% and PWM-disabled cases still hold on clean at all three sizes.
+See [CPU timing results](../models/cpu-timing.md#scenario-validation). The detailed numbers below use the historical timing.
 
 **Behaviour.** A rider who keeps accelerating past what the motor can give, and ignores the tiltback,
 meets the voltage limit. The back-EMF and the winding's reactance use up the headroom, the q-current

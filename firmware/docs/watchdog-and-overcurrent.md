@@ -93,3 +93,21 @@ only for a current that limiting cannot explain (a shorted phase, a failed switc
    decide whether a hardware over-current path exists on the board (comparator, gate driver desaturation).
 6. A main-loop stall on the real wheel: confirm that the tick and the FOC keep running and the limp tiltback
    and beeps work (inject a stall in a bench build).
+
+## Display transfers and the stale-command deadline
+
+The TM1640 transfer runs in the RTC interrupt. With CPI 2.0 and exception overhead, it delays a
+balance command beyond 72 FOC steps at 12 kHz. This activates the stale-command latch during an
+ordinary idle run. The original clean image fell in `balance-60s` at all three quantum sizes.
+Removing exception overhead alone did not prevent the failure.
+
+Clean now queues display refreshes for the main loop (`DISPLAY_IN_BALANCE_TICK` off).
+The RTC task keeps the strip's display-speed sample on its normal 100-tick schedule.
+The main loop builds and sends the latest display frame. RTC and FOC interrupts can pre-empt it.
+A single pending flag combines display requests. The three-tick stale-command threshold and its latch stay intact.
+
+Compat keeps the blocking transfer in the RTC task.
+Target builds also use LTO to keep interrupt cost within the 12 kHz mode's CPU budget.
+CI runs clean's balance, ride, and pothole scenarios with the shipped timing.
+The pothole scenario requires at least 19 km/h, so an early limp does not count as a valid approach.
+CI also checks the compat-versus-stock comparisons.

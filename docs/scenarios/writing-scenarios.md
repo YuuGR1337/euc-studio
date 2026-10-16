@@ -32,6 +32,11 @@ The studio lists scenarios in its run bar: a development build reads every `scen
 web view connects (a new file shows without a rebuild); a release build offers the two built-in ones,
 `ride-20kmh-stop` and `balance-60s`.
 
+The CLI and studio use CPI 2.0 with exception overhead.
+For historical reference timing, `sim run` accepts `--cpi 1.25 --no-exception-timing`.
+Changing `--cpi` alone retains exception overhead.
+Record the timing settings with each result. See [CPU timing](../models/cpu-timing.md).
+
 ## The file
 
 ### Top level

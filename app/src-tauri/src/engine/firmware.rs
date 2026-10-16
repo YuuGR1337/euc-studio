@@ -68,7 +68,8 @@ pub fn build_host(id: &str, progress: &mut dyn FnMut(&str)) -> Result<Built, Str
         plant,
         injections: scenario.inject.iter().map(|i| (i.at_s, i.bytes.bytes().collect())).collect(),
         power_cycles: Vec::new(),
-        cpi: 1.25,
+        cpi: euc_sim::DEFAULT_CPI,
+        exception_timing: euc_sim::ExceptionTiming::default(),
         max_quantum: 4000,
         marker_window_s: 4.0,
     };

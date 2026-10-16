@@ -69,6 +69,7 @@ struct app {
     volatile bool erase_calibration_request;
     volatile bool storage_write_pending;
     volatile uint8_t service_reply; /* enum euc_service_reply, sent at the next telemetry group */
+    volatile bool display_pending;  /* clean: slow display I/O must not block the balance tick */
 
     /* Clean watchdog (quirk NO_WATCHDOG): fed by the tick, which also watches the main loop and the FOC */
     volatile uint32_t main_loop_passes; /* main loop -> tick */

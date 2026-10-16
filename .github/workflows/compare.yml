@@ -70,9 +70,11 @@ jobs:
       - name: Select Arm GNU Toolchain
         run: echo "ARM_GNU_TOOLCHAIN_DIR=$HOME/arm-gnu-toolchain" >> "$GITHUB_ENV"
 
-      - name: Our firmware, compat profile
+      - name: Our firmware, compat and clean profiles
         working-directory: firmware
-        run: cmake --workflow --preset target-compat
+        run: |
+          cmake --workflow --preset target-compat
+          cmake --workflow --preset target-clean
 
       - run: rustup toolchain install
       - uses: Swatinem/rust-cache@v2
@@ -89,6 +91,16 @@ jobs:
 
       - name: Build euc with the development CPU backend
         run: cargo build --release --locked -p euc-cli --features unicorn
+
+      - name: Clean firmware balances and rides in both drive modes with the shipped timing
+        run: |
+          mkdir -p compare-results
+          ./target/release/euc --json sim run --scenario scenarios/balance-60s.toml \
+            --firmware clean > compare-results/clean-balance.json
+          ./target/release/euc --json sim run --scenario scenarios/ride-20kmh-stop.toml \
+            --firmware clean > compare-results/clean-ride.json
+          ./target/release/euc --json sim run --scenario scenarios/pothole-20kmh.toml \
+            --firmware clean > compare-results/clean-pothole.json
 
       - name: Compare on every shipped scenario
         run: |

@@ -4,6 +4,7 @@
 //! `max_quantum` instructions that never cross the next event, interrupts taken at quantum
 //! boundaries (and tail-chained at exception return), `cpi` cycles per instruction, and a
 //! quantum cut short by a poll fast-forward, a reset or a halt costing one cycle plus the skip.
+//! Exception entry, return and tail-chaining add the configured context-switch costs.
 //! A quantum's cycles come from the instructions the backend retired, which an exact backend
 //! makes equal to the budget and a block-granular one makes at most one block more.
 
@@ -28,6 +29,34 @@ pub const PLANT: &str = "plant";
 /// xPSR bits holding the IT state; an interrupt is never taken inside an IT block.
 const XPSR_IT: u32 = 0x0600_FC00;
 
+/// Fixed instruction cost for the shipped simulator (ESTIMATE; see `docs/models/cpu-timing.md`).
+pub const DEFAULT_CPI: f64 = 2.0;
+
+/// Clock cycles spent switching exception contexts, independent of the CPU backend.
+#[derive(Debug, Clone, Copy)]
+pub struct ExceptionTiming {
+    /// Stack the interrupted context and fetch the handler vector.
+    pub entry: u64,
+    /// Unstack the interrupted context.
+    pub exit: u64,
+    /// Switch directly between handlers without unstacking and stacking again.
+    pub tail_chain: u64,
+}
+
+impl ExceptionTiming {
+    /// The Python reference harness charges no exception overhead. Only reference comparisons
+    /// should use this, together with CPI 1.25.
+    pub const REFERENCE: Self = Self { entry: 0, exit: 0, tail_chain: 0 };
+}
+
+impl Default for ExceptionTiming {
+    fn default() -> Self {
+        // Cortex-M3: 12 cycles for entry/exit and 6 for tail-chaining with zero-wait memory.
+        // An extra 2 cycles for flash is an ESTIMATE, not a bus-level flash model.
+        Self { entry: 14, exit: 14, tail_chain: 8 }
+    }
+}
+
 /// Everything needed to build a machine.
 pub struct MachineConfig<'a> {
     /// The board file.
@@ -48,6 +77,8 @@ pub struct MachineConfig<'a> {
     pub power_cycles: Vec<f64>,
     /// HCLK cycles per instruction (the Unicorn backend has no timing model).
     pub cpi: f64,
+    /// Exception switching costs; shared by the own and Unicorn backends.
+    pub exception_timing: ExceptionTiming,
     /// Most instructions in one quantum.
     pub max_quantum: u32,
     /// Markers are watched for this many simulated seconds (watching costs speed).
@@ -167,6 +198,7 @@ impl Machine {
             mcu.irq_names.clone(),
             markers.iter().cloned().collect::<HashMap<_, _>>(),
         );
+        sys.exception_timing = config.exception_timing;
         for wire in &file.wires {
             let from = resolve(&sys, &names, &wire.from)?;
             let to = resolve(&sys, &names, &wire.to)?;
@@ -233,33 +265,42 @@ impl Machine {
                 self.cpu.watch(&[]);
                 self.watching = false;
             }
-            self.take_interrupt();
+            if self.take_interrupt(end) || self.sys.diag.halted.is_some() {
+                // Recheck timers and higher-priority interrupts after stacking. Do not run a
+                // handler instruction past the end of this call or a newly due event.
+                continue;
+            }
             let next = self.sys.next_event().map_or(end, |at| at.min(end));
             let budget = ((next as f64 - self.cycles as f64) / self.cpi) as i64;
             let budget = budget.clamp(1, i64::from(self.max_quantum)) as u32;
-            self.sys.begin_quantum(self.cycles);
-            let before = self.cpu.retired();
-            let exit = self.cpu.run(&mut self.sys, budget);
-            let executed = self.cpu.retired() - before;
-            self.quanta += 1;
-            self.handle(exit);
-            if let Some(ccr) = self.sys.ccr_pending.take() {
-                self.cpu.set_ccr(ccr);
-            }
-            if self.sys.early || self.sys.reset_pending.is_some() || self.sys.diag.halted.is_some() {
-                self.early_quanta += 1;
-                self.cycles = self.sys.chunk_start + self.sys.skip + 1;
-            } else {
-                self.instr += executed;
-                self.cycles = self.sys.chunk_start + (executed as f64 * self.cpi) as u64 + self.sys.skip;
-                if matches!(exit, Exit::WaitForInterrupt | Exit::WaitForEvent) {
-                    self.sleep(end);
-                }
-            }
+            self.run_quantum(budget, end);
         }
         self.sys.chunk_start = self.cycles;
         self.sys.skip = 0;
         self.sys.diag.halted.as_deref()
+    }
+
+    /// Executes and accounts for a quantum, including exception returns and early skips.
+    fn run_quantum(&mut self, budget: u32, end: u64) {
+        self.sys.begin_quantum(self.cycles);
+        let before = self.cpu.retired();
+        let exit = self.cpu.run(&mut self.sys, budget);
+        let executed = self.cpu.retired() - before;
+        self.quanta += 1;
+        self.handle(exit);
+        if let Some(ccr) = self.sys.ccr_pending.take() {
+            self.cpu.set_ccr(ccr);
+        }
+        if self.sys.early || self.sys.reset_pending.is_some() || self.sys.diag.halted.is_some() {
+            self.early_quanta += 1;
+            self.cycles = self.sys.chunk_start + self.sys.skip + 1;
+        } else {
+            self.instr += executed;
+            self.cycles = self.sys.chunk_start + (executed as f64 * self.cpi) as u64 + self.sys.skip;
+            if matches!(exit, Exit::WaitForInterrupt | Exit::WaitForEvent) {
+                self.sleep(end);
+            }
+        }
     }
 
     fn handle(&mut self, exit: Exit) {
@@ -294,24 +335,21 @@ impl Machine {
     }
 
     /// Takes the best pending exception, after stepping out of an IT block.
-    fn take_interrupt(&mut self) {
+    fn take_interrupt(&mut self, end: u64) -> bool {
         let primask = self.cpu.regs().primask;
-        let Some(exception) = self.sys.exc.best_pending(primask) else { return };
-        for _ in 0..4 {
-            if self.cpu.regs().xpsr & XPSR_IT == 0 {
-                break;
-            }
-            let exit = self.cpu.run(&mut self.sys, 1);
-            self.handle(exit);
-            self.cycles += (self.cpi as u64).max(1);
-            self.instr += 1;
+        let Some(exception) = self.sys.exc.best_pending(primask) else { return false };
+        if self.cpu.regs().xpsr & XPSR_IT != 0 {
+            // The final IT slot can itself return from an exception and tail-chain. Account
+            // for that switch normally, then reselect pending exceptions in the scheduler.
+            self.run_quantum(1, end);
+            return true;
         }
         let entered = self.sys.exc.enter(exception, self.cpu.regs_mut(), &mut MemoryBus(&mut self.sys.mem));
         let entry = match entered {
             Ok(entry) => entry,
             Err(fault) => {
                 self.sys.blocker("cpu-exception", format!("exception entry: {fault}"), true);
-                return;
+                return false;
             }
         };
         let lowest = self.sys.diag.min_frame.get_or_insert(entry.frame);
@@ -324,6 +362,9 @@ impl Machine {
             let text = format!("{name} vector = 0x{:08X} (VTOR 0x{:08X})", entry.vector, self.sys.exc.vtor());
             self.sys.blocker("bad-vector", text, true);
         }
+        let cost = self.sys.exception_timing.entry;
+        self.cycles += cost;
+        cost != 0
     }
 
     fn system_reset(&mut self, kind: ResetKind, why: &str) {
@@ -605,6 +646,7 @@ release_after_latch_s = 0.1
             injections: Vec::new(),
             power_cycles: Vec::new(),
             cpi: 1.25,
+            exception_timing: ExceptionTiming::default(),
             max_quantum: 4000,
             marker_window_s: 0.0,
         };
@@ -634,6 +676,10 @@ release_after_latch_s = 0.1
 
     /// The machine on our own core.
     fn own(image: &[u8]) -> Machine {
+        on(image, crate::cpu::Backend::Own)
+    }
+
+    fn on(image: &[u8], backend: crate::cpu::Backend) -> Machine {
         let board: BoardFile = toml::from_str(BOARD).unwrap();
         let config = MachineConfig {
             board: &board,
@@ -645,12 +691,13 @@ release_after_latch_s = 0.1
             injections: Vec::new(),
             power_cycles: Vec::new(),
             cpi: 1.25,
+            exception_timing: ExceptionTiming::default(),
             max_quantum: 4000,
             marker_window_s: 0.0,
         };
         let mut registry = Registry::new();
         crate::board::register(&mut registry);
-        Machine::new(&config, &registry, crate::cpu::Backend::Own.factory().unwrap()).unwrap()
+        Machine::new(&config, &registry, backend.factory().unwrap()).unwrap()
     }
 
     #[test]
@@ -667,6 +714,120 @@ release_after_latch_s = 0.1
         assert_eq!(ticks, 10, "one handler run per millisecond");
         assert!(machine.slept_cycles > 72_000 * 9, "asleep most of the time: {} cycles", machine.slept_cycles);
         assert!(machine.instr < 1_000, "{} instructions", machine.instr);
+    }
+
+    fn interrupt_machine() -> Machine {
+        interrupt_machine_on(crate::cpu::Backend::Own)
+    }
+
+    fn interrupt_machine_on(backend: crate::cpu::Backend) -> Machine {
+        let mut code = image(0, &[0xE7FE], &[0x4770]); // thread spins; handler returns
+        code[56..60].copy_from_slice(&0x0800_3141_u32.to_le_bytes()); // PendSV also returns
+        let mut machine = on(&code, backend);
+        machine.cpi = 2.0;
+        machine.max_quantum = 1;
+        machine.sys.exc.write(0xD08, 0x0800_3000, u32::MAX, 0);
+        machine.sys.exc.pend(euc_core::SYSTICK);
+        machine
+    }
+
+    #[test]
+    fn exception_entry_uses_clock_cycles_before_the_handler_runs() {
+        let mut machine = interrupt_machine();
+        assert_eq!(machine.run(14), None);
+        assert_eq!(machine.cycles, 14);
+        assert_eq!(machine.instr, 0, "entry consumes cycles without retiring instructions");
+        assert_eq!(machine.cpu.regs().pc, 0x0800_3140);
+        assert_eq!(machine.sys.exc.active(), &[euc_core::SYSTICK]);
+
+        assert_eq!(machine.run(16), None); // BX LR at CPI 2, then 14 return cycles
+        assert_eq!(machine.cycles, 30);
+        assert_eq!(machine.instr, 1);
+        assert_eq!(machine.cpu.regs().pc, 0x0800_3100);
+        assert_eq!(machine.sys.exc.active(), &[] as &[u16]);
+    }
+
+    #[test]
+    fn exception_tail_chaining_keeps_the_frame_and_uses_eight_cycles() {
+        let mut machine = interrupt_machine();
+        machine.run(14);
+        let frame = machine.cpu.regs().sp();
+        machine.sys.exc.pend(euc_core::PENDSV);
+        assert_eq!(machine.run(10), None); // BX LR at CPI 2, then 8 tail-chain cycles
+        assert_eq!(machine.cycles, 24);
+        assert_eq!(machine.instr, 1);
+        assert_eq!(machine.cpu.regs().sp(), frame);
+        assert_eq!(machine.sys.exc.active(), &[euc_core::PENDSV]);
+
+        assert_eq!(machine.run(16), None);
+        assert_eq!(machine.cycles, 40);
+        assert_eq!(machine.instr, 2);
+        assert_eq!(machine.sys.exc.active(), &[] as &[u16]);
+        assert_eq!(machine.cpu.regs().sp(), 0x2000_1000);
+    }
+
+    #[test]
+    fn exception_return_yields_when_a_timer_becomes_due_during_unstacking() {
+        let mut machine = interrupt_machine();
+        machine.run(14);
+        machine.max_quantum = 4000;
+        // SysTick becomes due at cycle 22, in the middle of the return to thread mode.
+        machine.sys.exc.write(0x14, 7, u32::MAX, machine.cycles);
+        machine.sys.exc.write(0x10, 7, u32::MAX, machine.cycles);
+        assert_eq!(machine.sys.next_event(), Some(22));
+        assert_eq!(machine.run(16), None);
+        assert_eq!(machine.cycles, 30);
+        assert_eq!(machine.instr, 1, "no thread instruction runs before the timer is serviced");
+        assert_eq!(machine.run(14), None);
+        assert_eq!(machine.instr, 1, "the newly pending handler first pays its entry cost");
+        assert_eq!(machine.exceptions_taken()[usize::from(euc_core::SYSTICK)], 2);
+    }
+
+    #[test]
+    fn reference_timing_keeps_exception_switches_free() {
+        let mut machine = interrupt_machine();
+        machine.cpi = 1.25;
+        machine.sys.exception_timing = ExceptionTiming::REFERENCE;
+        assert_eq!(machine.run(1), None);
+        assert_eq!(machine.cycles, 1);
+        assert_eq!(machine.instr, 1);
+        assert_eq!(machine.cpu.regs().pc, 0x0800_3100);
+        assert_eq!(machine.sys.exc.active(), &[] as &[u16]);
+    }
+
+    #[test]
+    fn a_conditional_exception_return_keeps_its_cycles_and_does_not_stack_twice() {
+        let mut machine = interrupt_machine();
+        machine.run(14);
+        let frame = machine.cpu.regs().sp();
+        // A higher-priority PendSV arrives in the last slot of an IT EQ block, on BX LR.
+        machine.sys.exc.write(0xD20, 0x8000_0000, u32::MAX, machine.cycles);
+        machine.cpu.regs_mut().xpsr |= (1 << 30) | (8 << 8); // Z, IT EQ with one slot left
+        machine.sys.exc.pend(euc_core::PENDSV);
+        assert_eq!(machine.run(10), None);
+        assert_eq!(machine.cycles, 24, "one instruction and one tail-chain after cycle 14");
+        assert_eq!(machine.instr, 1);
+        assert_eq!(machine.cpu.regs().sp(), frame, "tail-chaining does not push another frame");
+        assert_eq!(machine.sys.exc.active(), &[euc_core::PENDSV]);
+        assert_eq!(machine.exceptions_taken()[usize::from(euc_core::PENDSV)], 1);
+    }
+
+    #[cfg(feature = "unicorn")]
+    #[test]
+    fn unicorn_and_our_core_charge_the_same_exception_cycles() {
+        for backend in [crate::cpu::Backend::Own, crate::cpu::Backend::Unicorn { exact: true }] {
+            let mut machine = interrupt_machine_on(backend);
+            assert_eq!(machine.run(14), None);
+            assert_eq!(machine.instr, 0);
+            machine.sys.exc.pend(euc_core::PENDSV);
+            assert_eq!(machine.run(10), None);
+            assert_eq!(machine.cycles, 24);
+            assert_eq!(machine.instr, 1);
+            assert_eq!(machine.run(16), None);
+            assert_eq!(machine.cycles, 40);
+            assert_eq!(machine.instr, 2);
+            assert_eq!(machine.cpu.regs().sp(), 0x2000_1000);
+        }
     }
 
     #[test]

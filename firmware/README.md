@@ -65,6 +65,11 @@ cmake --workflow --preset host-sil        # build/host-sil/libeuc_sil.{dylib,so}
 Every build uses `-ffp-contract=off` (no fused multiply-add), so host and target round floats the same way,
 and `-Wall -Wextra -Wpedantic -Wconversion -Wshadow -Wdouble-promotion -Werror` plus a few more.
 
+Target presets enable link-time optimization to reduce interrupt cost at 72 MHz.
+Without it, the CPI 2.0 model exposes missed RTC ticks and main-loop starvation in the 12 kHz mode.
+`freestanding.c` stays outside LTO, so compiler-generated memory operations retain their required library symbols.
+Host builds retain their normal compiler settings. See [CPU timing](../docs/models/cpu-timing.md).
+
 ## Image layout
 
 `boards/begode-extreme/link_app.ld` is the single source of the memory map and checks it at link time.

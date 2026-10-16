@@ -106,10 +106,11 @@ Details:
 - **Breathing speed depends on the CPU and the LED mode.** The breathing changes the brightness by
   one step per main-loop pass during every 10th tick, so its period depends on how many main-loop
   passes fit in a tick, and a mode-1 pass costs about 1.8 times a mode-0 pass. On the owner's wheel,
-  in LED mode 1, it is about 2.1 s (video). In the simulator with today's timing (CPI 1.25) mode 0
-  gives 0.49 s and mode 1 0.92 s; with a model of the flash wait states, mode 1 gives about 2.3 s
-  (2.5 passes per tick) and mode 0 about 1.1 s. The 0.49 s first compared with the video was mode 0
-  (blank settings), so most of the gap was the LED mode; the rest is the CPU timing model. See
+  in LED mode 1, it is about 2.1 s (video). The current simulator uses CPI 2.0 and exception overhead.
+  Mode 1 gives a mean period of 2.235 s over nine measured cycles.
+  The earlier CPI 1.25 model gave 0.49 s in mode 0 and 0.92 s in mode 1.
+  A separate flash-model prototype gave about 2.3 s in mode 1 and 1.1 s in mode 0.
+  The first 0.49 s comparison used mode 0 with blank settings. See
   [cpu-timing.md](../models/cpu-timing.md).
 - **Animation position.** `p` advances while the signed speed is above +4 and goes back while it is
   below -4 (firmware units), so tiny creep at a standstill can move it slowly. It wraps over 73

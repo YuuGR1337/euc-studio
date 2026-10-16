@@ -65,8 +65,11 @@ pub(crate) struct Args {
     #[arg(long, default_value_t = 4.0)]
     warmup: f64,
     /// HCLK cycles per instruction.
-    #[arg(long, default_value_t = 1.25)]
+    #[arg(long, default_value_t = euc_sim::DEFAULT_CPI)]
     cpi: f64,
+    /// Research only: omit exception overhead (with --cpi 1.25, reproduce reference-harness timing).
+    #[arg(long)]
+    no_exception_timing: bool,
     /// Most instructions per quantum.
     #[arg(long, default_value_t = 4000)]
     max_quantum: u32,
@@ -171,6 +174,11 @@ pub(crate) fn run(ctx: &Context, command: Command) -> anyhow::Result<Verdict> {
         injections: injections.clone(),
         power_cycles: args.power_cycles.clone(),
         cpi: args.cpi,
+        exception_timing: if args.no_exception_timing {
+            euc_sim::ExceptionTiming::REFERENCE
+        } else {
+            euc_sim::ExceptionTiming::default()
+        },
         max_quantum: args.max_quantum,
         marker_window_s: 4.0,
     };

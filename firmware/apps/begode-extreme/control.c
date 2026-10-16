@@ -194,13 +194,8 @@ static uint32_t to_display_units_u32(uint32_t value)
     return (app.settings.units_miles == UNITS_MILES) ? euc_sensors_miles_u32(value) : value;
 }
 
-static void display_tick(void)
+static void display_refresh(void)
 {
-    app.display_ticks++;
-    if (app.display_ticks < DISPLAY_PERIOD_TICKS) {
-        return;
-    }
-    app.display_ticks = 0U;
     const struct euc_display_in in = {
         sat_i32_to_i16(to_display_units(app.balance.speed_mm_per_s)),
         to_display_units_u32(euc_settings_odometer_units(&app.settings)),
@@ -213,6 +208,25 @@ static void display_tick(void)
     uint8_t grids[EUC_DISPLAY_GRIDS];
     euc_display_render(&in, grids);
     stm32f1_display_send(grids);
+}
+
+static void display_tick(void)
+{
+    app.display_ticks++;
+    if (app.display_ticks < DISPLAY_PERIOD_TICKS) {
+        return;
+    }
+    app.display_ticks = 0U;
+    if (EUC_QUIRK(DISPLAY_IN_BALANCE_TICK)) {
+        display_refresh();
+    } else {
+        /* The bit-banged transfer can exceed the stale-command deadline under FOC pre-emption.
+         * Keep the strip's speed sample on its old tick, but send the display from the main loop. */
+        app.display_speed =
+            (uint8_t)(euc_display_speed(sat_i32_to_i16(to_display_units(app.balance.speed_mm_per_s))) &
+                      0xFFU);
+        app.display_pending = true;
+    }
 }
 
 /* LED strip: the tick part reads the time base before this tick's alarm task, the render the one after. */
@@ -614,6 +628,10 @@ static void storage_write(const struct euc_storage_write *write)
 void app_main_loop_pass(void)
 {
     app.main_loop_passes++;
+    if (app.display_pending) {
+        app.display_pending = false;
+        display_refresh();
+    }
     bms_link();
     telemetry();
 

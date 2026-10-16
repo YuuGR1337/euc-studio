@@ -1,5 +1,10 @@
 # Scenario library: what the stock firmware does
 
+**Timing version.** The detailed measurements below use the former CPI 1.25 model, without exception overhead.
+The current default is CPI 2.0 with exception costs. Clean's full-battery overlean result is now borderline.
+See [current timing results](cpu-timing.md#scenario-validation) for the new scenario checks.
+To reproduce the older timing, add `--cpi 1.25 --no-exception-timing` with the firmware builds listed below.
+
 The situations EUC riders fear most, ridden in the simulator on the stock Begode Extreme firmware
 (GW1825007) with the electrical plant ([electrical.md](electrical.md)) and the body physics
 ([body.md](body.md)). Each scenario in `scenarios/` records what happened with `record` checks, which

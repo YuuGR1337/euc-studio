@@ -15,6 +15,7 @@ How bytes are counted
   - Each input section is charged to the module of the object file it comes from: the source directory
     relative to firmware/ (for example "ports/stm32f1"), "libgcc" for libgcc.a members, "(fill)" for alignment
     padding inside a section, "(padding)" for gaps between sections. Module totals add up to the image size.
+    LTO merges source modules; its temporary objects are reported as "(LTO combined)" instead of paths.
   - Flash: every output section whose load address is in FLASH, except NOBITS sections (.bss, .stack,
     .noinit), which have no bytes in the image. .data counts twice: initial values in flash, copy in RAM.
   - Static RAM: .data + .bss. The stack reservation is reported on its own and is not part of that budget.
@@ -88,6 +89,8 @@ def module_of(origin: str | None, build_dir: PurePosixPath) -> str:
         return "(fill)"
     if origin == "linker stubs":
         return "(linker)"
+    if re.search(r"(?:\.ltrans\d*(?:\.ltrans)?|\.debug\.temp)\.o$", origin):
+        return "(LTO combined)"
     archive = re.match(r"^(?P<archive>.+?\.a)\((?P<member>.+)\)$", origin)
     if archive:
         archive_path = PurePosixPath(archive.group("archive"))

@@ -196,7 +196,8 @@ impl Server {
             plant: PlantState::default(),
             injections,
             power_cycles: Vec::new(),
-            cpi: 1.25,
+            cpi: euc_sim::DEFAULT_CPI,
+            exception_timing: euc_sim::ExceptionTiming::default(),
             max_quantum: 4000,
             marker_window_s: 4.0,
         };
