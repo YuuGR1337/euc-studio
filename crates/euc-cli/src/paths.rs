@@ -1,37 +1,30 @@
-//! Where the profiles and the firmware cache live.
+//! Where the profiles and the firmware cache come from.
 
-use std::env;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
-use anyhow::{Context as _, bail};
+use anyhow::Context as _;
 use euc_fwsource::FirmwareCache;
-use euc_profile::{ProfileDir, WheelProfile};
+use euc_profile::{ProfileDir, ProfileSource, WheelProfile};
 
 use crate::Context;
+use crate::ui;
 
 impl Context {
-    /// The profiles folder: `--profiles` / `EUC_PROFILES`, else the nearest `profiles/` above
-    /// the working directory, else above the `euc` binary (so `target/debug/euc` works from
-    /// anywhere in a checkout).
-    pub(crate) fn profiles(&self) -> anyhow::Result<ProfileDir> {
-        if let Some(dir) = &self.profiles {
-            return Ok(ProfileDir::new(dir));
+    /// The built-in profiles, unless `--profiles` / `EUC_PROFILES` names a folder.
+    ///
+    /// Nothing is ever picked up from the working directory: profile pins decide which firmware
+    /// counts as official, so an override must be explicit and is announced on stderr once.
+    pub(crate) fn profiles(&self) -> ProfileSource {
+        let Some(dir) = &self.profiles else { return ProfileSource::Builtin };
+        if !self.warned.replace(true) {
+            ui::warn(format!("using profiles from {}, not the built-in set", ui::path(dir)));
         }
-        let exe_dir = env::current_exe().ok().and_then(|exe| exe.parent().map(Path::to_path_buf));
-        for start in [env::current_dir().ok(), exe_dir].into_iter().flatten() {
-            for dir in start.ancestors() {
-                let candidate = ProfileDir::new(dir.join("profiles"));
-                if candidate.ids().is_ok_and(|ids| !ids.is_empty()) {
-                    return Ok(candidate);
-                }
-            }
-        }
-        bail!("cannot find the profiles folder; run inside the euc-studio checkout or set EUC_PROFILES")
+        ProfileSource::Override(ProfileDir::new(dir))
     }
 
-    /// Loads one wheel profile.
+    /// Loads one wheel profile from [`Self::profiles`].
     pub(crate) fn wheel(&self, id: &str) -> anyhow::Result<WheelProfile> {
-        Ok(self.profiles()?.load(id)?)
+        Ok(self.profiles().load(id)?)
     }
 
     /// The firmware cache: `--cache-dir` / `EUC_CACHE_DIR`, else the per-user cache.

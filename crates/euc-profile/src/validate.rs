@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use thiserror::Error;
 
-use crate::{Channel, FirmwareSource, SCHEMA, Sha256, WheelProfile};
+use crate::{Channel, FirmwareSource, SCHEMA, Sha256, WheelProfile, is_unsafe_display_char, sanitize_display};
 
 /// Size of the board field in the `.euc_info` block.
 const BOARD_ID_MAX: usize = 16;
@@ -13,10 +13,10 @@ const INFO_BLOCK_LEN: u32 = 128;
 #[derive(Debug, Error)]
 pub enum ParseError {
     /// Not valid TOML, or a field has the wrong name or type. The message points at the line.
-    #[error("{0}")]
+    #[error(transparent)]
     Syntax(#[from] toml::de::Error),
     /// Valid TOML that breaks a rule of the schema.
-    #[error("{0}")]
+    #[error(transparent)]
     Invalid(#[from] Problem),
 }
 
@@ -29,6 +29,9 @@ pub enum Problem {
     /// A required text field is empty.
     #[error("`{0}` must not be empty")]
     Empty(&'static str),
+    /// Text with control or bidi characters, which could rewrite what a terminal shows.
+    #[error("`{0}` contains control or bidi characters")]
+    UnsafeText(&'static str),
     /// An id with characters outside `a-z`, `0-9` and `-`.
     #[error("`{field}` = \"{value}\" must use only lowercase letters, digits and dashes")]
     NotKebab {
@@ -76,13 +79,13 @@ impl WheelProfile {
             return Err(Problem::Schema(self.schema));
         }
         kebab("id", &self.id)?;
-        non_empty("name", &self.name)?;
-        non_empty("brand", &self.brand)?;
-        non_empty("board.mcu", &self.board.mcu)?;
-        non_empty("board.core", &self.board.core)?;
+        display_text("name", &self.name)?;
+        display_text("brand", &self.brand)?;
+        display_text("board.mcu", &self.board.mcu)?;
+        display_text("board.core", &self.board.core)?;
         kebab("board.id", &self.board.id)?;
         if self.board.id.len() > BOARD_ID_MAX {
-            return Err(Problem::BoardIdTooLong(self.board.id.clone()));
+            return Err(Problem::BoardIdTooLong(sanitize_display(&self.board.id)));
         }
         self.validate_app()?;
         let ram = self.board.ram;
@@ -133,18 +136,23 @@ impl WheelProfile {
     fn validate_firmware(&self) -> Result<(), Problem> {
         let mut seen = HashSet::new();
         for source in &self.firmware {
-            non_empty("firmware.label", source.label())?;
+            display_text("firmware.label", source.label())?;
             if let FirmwareSource::BegodeApi(build) = source {
                 let type_code = build.type_code.as_deref().unwrap_or_default();
                 if build.channel == Channel::Current {
                     non_empty("firmware.type_code", type_code)?;
                 }
                 if !type_code.bytes().all(|b| b.is_ascii_alphanumeric()) {
-                    return Err(Problem::TypeCode(type_code.to_owned()));
+                    return Err(Problem::TypeCode(sanitize_display(type_code)));
                 }
                 if !is_plain_file_name(&build.file) {
-                    return Err(Problem::FileName(build.file.clone()));
+                    return Err(Problem::FileName(sanitize_display(&build.file)));
                 }
+            }
+            if let FirmwareSource::Manual(build) = source
+                && build.hint.as_deref().is_some_and(|hint| hint.chars().any(is_unsafe_display_char))
+            {
+                return Err(Problem::UnsafeText("firmware.hint"));
             }
             if let Some(pin) = source.pin()
                 && !seen.insert(pin.sha256)
@@ -160,12 +168,18 @@ fn non_empty(field: &'static str, value: &str) -> Result<(), Problem> {
     if value.trim().is_empty() { Err(Problem::Empty(field)) } else { Ok(()) }
 }
 
+/// Text people will see: present, and free of characters that could drive their terminal.
+fn display_text(field: &'static str, value: &str) -> Result<(), Problem> {
+    non_empty(field, value)?;
+    if value.chars().any(is_unsafe_display_char) { Err(Problem::UnsafeText(field)) } else { Ok(()) }
+}
+
 fn kebab(field: &'static str, value: &str) -> Result<(), Problem> {
     non_empty(field, value)?;
     let ok = value.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
         && !value.starts_with('-')
         && !value.ends_with('-');
-    if ok { Ok(()) } else { Err(Problem::NotKebab { field, value: value.to_owned() }) }
+    if ok { Ok(()) } else { Err(Problem::NotKebab { field, value: sanitize_display(value) }) }
 }
 
 fn is_plain_file_name(name: &str) -> bool {
@@ -327,6 +341,18 @@ label = "ours"
             "[[firmware]]\nkind = \"begode-api\"\ntype_code = \"T\"\nfile = \"../x.bin\"\nsha256 = \"{SHA_A}\"\nlabel = \"x\"\n"
         );
         assert_eq!(problem(&firmware(&sneaky)), Problem::FileName("../x.bin".into()));
+    }
+
+    #[test]
+    fn rejects_terminal_escapes_in_text() {
+        let text = firmware("").replace(r#"name = "Test Wheel""#, r#"name = "Test\u001b[2J Wheel""#);
+        assert_eq!(problem(&text), Problem::UnsafeText("name"));
+        let label = format!("[[firmware]]\nkind = \"manual\"\nsha256 = \"{SHA_A}\"\nlabel = \"GW\\u202e1\"\n");
+        assert_eq!(problem(&firmware(&label)), Problem::UnsafeText("firmware.label"));
+        let hint = label.replace("label =", "hint = \"\\u009b31m\"\nlabel =").replace("GW\\u202e1", "ok");
+        assert_eq!(problem(&firmware(&hint)), Problem::UnsafeText("firmware.hint"));
+        let id = firmware("").replace(r#""test-wheel""#, r#""x\u001b""#);
+        assert_eq!(problem(&id), Problem::NotKebab { field: "id", value: r"x\u{1b}".into() });
     }
 
     #[test]

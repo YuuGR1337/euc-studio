@@ -2,7 +2,7 @@
 
 use std::fmt;
 
-use euc_profile::{AppLayout, Date, Ram, Sha256, WheelProfile};
+use euc_profile::{AppLayout, Date, Origin, Ram, Sha256, WheelProfile};
 use serde::Serialize;
 use serde::ser::{SerializeStruct, Serializer};
 use thiserror::Error;
@@ -198,12 +198,16 @@ pub enum Problem {
         computed: u32,
     },
     /// Not ours and not a pinned stock build.
-    #[error("no .euc_info block, and sha256 {sha256} is not a pinned build for {wheel}; unknown images are refused")]
+    #[error(
+        "no .euc_info block, and sha256 {sha256} is not a pinned build for {wheel} in {profiles}; unknown images are refused"
+    )]
     Unpinned {
         /// Digest of the image.
         sha256: Sha256,
         /// Wheel display name.
         wheel: String,
+        /// The profile source whose pins were searched.
+        profiles: Origin,
     },
 }
 
@@ -217,6 +221,8 @@ pub enum Identity {
         label: String,
         /// Release date, if pinned.
         date: Option<Date>,
+        /// The profile source that supplied the pin; only the built-in set is reviewed with the code.
+        pin_source: Origin,
     },
     /// A build from this repo, identified by its `.euc_info` block.
     Ours {
@@ -230,8 +236,8 @@ pub enum Identity {
 impl fmt::Display for Identity {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Stock { label, date: Some(date) } => write!(f, "pinned stock build {label} ({date})"),
-            Self::Stock { label, date: None } => write!(f, "pinned stock build {label}"),
+            Self::Stock { label, date: Some(date), .. } => write!(f, "pinned stock build {label} ({date})"),
+            Self::Stock { label, date: None, .. } => write!(f, "pinned stock build {label}"),
             Self::Ours { info } => {
                 let state = if info.is_sealed() { "sealed" } else { "unsealed" };
                 let dev = if info.dev { " dev" } else { "" };
@@ -369,14 +375,13 @@ fn identify(bytes: &[u8], wheel: &WheelProfile, sha256: Sha256) -> (Outcome, Out
         ),
         Ok(None) => {
             let none = Outcome::Skip("not present (stock builds have none)".to_owned());
-            match wheel.find_pin(&sha256) {
-                Some(pin) => {
-                    let identity = Identity::Stock { label: pin.label.to_owned(), date: pin.date };
-                    (none, Outcome::Pass(identity.to_string()), identity)
-                }
-                None => {
-                    (none, Outcome::Fail(Problem::Unpinned { sha256, wheel: wheel.name.clone() }), Identity::Unknown)
-                }
+            if let Some(pin) = wheel.find_pin(&sha256) {
+                let identity =
+                    Identity::Stock { label: pin.label.to_owned(), date: pin.date, pin_source: wheel.origin.clone() };
+                (none, Outcome::Pass(format!("{identity}; pin from {}", wheel.origin)), identity)
+            } else {
+                let problem = Problem::Unpinned { sha256, wheel: wheel.name.clone(), profiles: wheel.origin.clone() };
+                (none, Outcome::Fail(problem), Identity::Unknown)
             }
         }
         Ok(Some(info)) => {
@@ -508,9 +513,28 @@ date = 2025-01-02
         let report = validate(&Image::raw(stock.clone()), &wheel(&stock));
         assert!(report.passed, "{report:#?}");
         assert_eq!(report.identity.to_string(), "pinned stock build Synthetic 1 (2025-01-02)");
-        assert_eq!(outcome(&report, Gate::Provenance), &Outcome::Pass(report.identity.to_string()));
+        assert_eq!(
+            outcome(&report, Gate::Provenance).to_string(),
+            "pinned stock build Synthetic 1 (2025-01-02); pin from a profile of unspecified origin"
+        );
         assert!(matches!(outcome(&report, Gate::LoadAddress), Outcome::Skip(_)));
         assert_eq!(outcome(&report, Gate::Vectors).to_string(), "reset 0x08003201, 4 handlers inside the image");
+    }
+
+    #[test]
+    fn provenance_names_the_profile_source() {
+        let stock = app(0x1000);
+        let mut builtin = wheel(&stock);
+        builtin.origin = Origin::Builtin;
+        let report = validate(&Image::raw(stock.clone()), &builtin);
+        assert!(outcome(&report, Gate::Provenance).to_string().ends_with("; pin from the built-in profiles"));
+        let json = serde_json::to_value(&report).unwrap();
+        assert_eq!(json["identity"]["pin_source"], "builtin");
+
+        let mut other = wheel(b"x");
+        other.origin = Origin::Override("/tmp/fake".into());
+        let report = validate(&Image::raw(stock), &other);
+        assert!(only_problem(&report).to_string().contains("for Test Wheel in override profiles at /tmp/fake;"));
     }
 
     #[test]
@@ -518,7 +542,7 @@ date = 2025-01-02
         let report = validate(&Image::raw(app(0x1000)), &wheel(b"something else"));
         assert!(!report.passed);
         assert_eq!(report.identity, Identity::Unknown);
-        let Problem::Unpinned { sha256, wheel } = only_problem(&report) else { panic!("expected Unpinned") };
+        let Problem::Unpinned { sha256, wheel, .. } = only_problem(&report) else { panic!("expected Unpinned") };
         assert_eq!((*sha256, wheel.as_str()), (report.sha256, "Test Wheel"));
     }
 

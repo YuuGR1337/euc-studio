@@ -4,6 +4,7 @@
 //! each record's `apkWrap` is a path under `/imgs/`. Older builds stay downloadable at
 //! `/imgs/temp/<file>` after the listing moves on.
 
+use euc_profile::sanitize_display;
 use serde::{Deserialize, Serialize};
 
 use crate::FwError;
@@ -13,6 +14,9 @@ use crate::http::HttpClient;
 pub const ORIGIN: &str = "https://one-api.begode.com";
 
 /// A build the API lists for a product.
+///
+/// The server is not ours, so its text fields pass through [`sanitize_display`] as they are
+/// parsed and `path` must be plain segments: nothing from the reply can drive a terminal.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ServerBuild {
     /// Product code it was listed under.
@@ -53,7 +57,7 @@ pub fn file_url(file: &str) -> String {
 pub fn list_builds(http: &dyn HttpClient, type_code: &str) -> Result<Vec<ServerBuild>, FwError> {
     let url = listing_url(type_code);
     let body = http.get(&url)?;
-    let api = |reason: String| FwError::Api { url: url.clone(), reason };
+    let api = |reason: String| FwError::Api { url: url.clone(), reason: sanitize_display(&reason) };
     let reply: Reply = serde_json::from_slice(&body).map_err(|e| api(format!("not the expected JSON: {e}")))?;
     if reply.code != 0 {
         return Err(api(format!("server answered code {}: {}", reply.code, reply.msg.unwrap_or_default())));
@@ -68,9 +72,9 @@ pub fn list_builds(http: &dyn HttpClient, type_code: &str) -> Result<Vec<ServerB
             Ok(ServerBuild {
                 type_code: type_code.to_owned(),
                 path: record.apk_wrap,
-                title: record.brief_introduction.unwrap_or_default(),
-                notes: record.perfect_bug.unwrap_or_default(),
-                version: record.version_name.unwrap_or_default(),
+                title: sanitize_display(&record.brief_introduction.unwrap_or_default()),
+                notes: sanitize_display(&record.perfect_bug.unwrap_or_default()),
+                version: sanitize_display(&record.version_name.unwrap_or_default()),
             })
         })
         .collect()
@@ -131,6 +135,26 @@ mod tests {
             ("DEMO_FW2", "1.Update time:20990101", "02")
         );
         assert_eq!(http.requests(), [listing_url("TEST01")]);
+    }
+
+    #[test]
+    fn hostile_text_is_neutralized() {
+        let reply = r#"{"code":0,"data":{"records":[{"apkWrap":"temp/pwm_1.bin",
+            "briefIntroduction":"GW\u202e7001\u001b[2J","perfectBug":"1.a\n2.b\u001b]0;pwned\u0007",
+            "versionName":"\u009b31m01"}]}}"#;
+        let http = FakeHttp::default().with(&listing_url("T"), reply.as_bytes());
+        let build = &list_builds(&http, "T").unwrap()[0];
+        assert_eq!(build.title, r"GW\u{202e}7001\u{1b}[2J");
+        assert_eq!(build.notes, r"1.a 2.b\u{1b}]0;pwned\u{7}");
+        assert_eq!(build.version, r"\u{9b}31m01");
+
+        let http = FakeHttp::default()
+            .with(&listing_url("A"), br#"{"code":1,"msg":"\u001b[31mdown"}"#)
+            .with(&listing_url("B"), br#"{"code":0,"data":{"records":[{"apkWrap":"\u001b[2J"}]}}"#);
+        for code in ["A", "B"] {
+            let message = list_builds(&http, code).unwrap_err().to_string();
+            assert!(!message.contains('\u{1b}') && message.contains(r"\u{1b}"), "{message}");
+        }
     }
 
     #[test]

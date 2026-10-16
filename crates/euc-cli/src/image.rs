@@ -30,7 +30,7 @@ pub(crate) fn run(ctx: &Context, command: Command) -> anyhow::Result<Verdict> {
     let image = Image::from_bytes(&bytes).with_context(|| format!("cannot load {}", file.display()))?;
     let report = euc_image::validate(&image, &wheel);
     if ctx.json {
-        ui::json(&Output { file: &file, report: &report })?;
+        ui::json_with_profiles(&wheel.origin, &Output { file: &file, report: &report })?;
     } else {
         print(&file, &wheel, &report);
     }
@@ -48,7 +48,7 @@ fn pick_wheel(ctx: &Context, id: Option<&str>) -> anyhow::Result<WheelProfile> {
     if let Some(id) = id {
         return ctx.wheel(id);
     }
-    let profiles = ctx.profiles()?;
+    let profiles = ctx.profiles();
     match profiles.ids()?.as_slice() {
         [only] => Ok(profiles.load(only)?),
         ids => bail!("several wheel profiles ({}); choose one with --wheel", ids.join(", ")),
@@ -57,8 +57,8 @@ fn pick_wheel(ctx: &Context, id: Option<&str>) -> anyhow::Result<WheelProfile> {
 
 fn print(file: &Path, wheel: &WheelProfile, report: &Report) {
     let size = ui::thousands(report.size as u64);
-    ui::row(STRONG, "image", file.display());
-    ui::row(STRONG, "wheel", format!("{} ({})", wheel.name, wheel.id));
+    ui::row(STRONG, "image", ui::path(file));
+    ui::row(STRONG, "wheel", format!("{} ({}), from {}", wheel.name, wheel.id, wheel.origin));
     ui::row(STRONG, "format", format!("{}, {size} bytes at 0x{:08X}", report.format, report.load_addr));
     ui::row(STRONG, "sha256", report.sha256);
     let gate_width = report.checks.iter().map(|check| check.gate.to_string().len()).max().unwrap_or(0);

@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+use euc_profile::sanitize_display;
 use thiserror::Error;
 
 /// Largest body we accept. Firmware images are tens of KiB and API replies a few KiB; anything
@@ -54,7 +55,8 @@ impl Default for UreqClient {
 
 impl HttpClient for UreqClient {
     fn get(&self, url: &str) -> Result<Vec<u8>, HttpError> {
-        let error = |e: ureq::Error| HttpError { url: url.to_owned(), reason: e.to_string() };
+        // Error text can quote the server (a redirect target, for one).
+        let error = |e: ureq::Error| HttpError { url: url.to_owned(), reason: sanitize_display(&e.to_string()) };
         let mut response = self.agent.get(url).call().map_err(error)?;
         response.body_mut().with_config().limit(MAX_BODY).read_to_vec().map_err(error)
     }

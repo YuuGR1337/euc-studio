@@ -1,12 +1,17 @@
 //! Terminal output: aligned columns, color only on a TTY, JSON on request.
 //!
 //! Colors go through `anstream`, which strips them when stdout is not a terminal and honors
-//! `NO_COLOR` and `CLICOLOR_FORCE`.
+//! `NO_COLOR` and `CLICOLOR_FORCE`. Text from outside the program reaches these helpers already
+//! sanitized (`euc_fwsource` does it at the network and cache boundary); paths and error chains,
+//! which can quote user files, are sanitized here.
 
 use std::fmt::Display;
+use std::path::Path;
 
 use anstream::{eprintln, println};
 use anstyle::{AnsiColor, Style};
+use euc_fwsource::sanitize_display;
+use euc_profile::Origin;
 use serde::Serialize;
 
 pub(crate) const GOOD: Style = AnsiColor::Green.on_default().bold();
@@ -33,15 +38,37 @@ pub(crate) fn detail(text: impl Display) {
     println!("{:STATUS$}{text}", "");
 }
 
+/// A path, safe to print.
+pub(crate) fn path(path: &Path) -> String {
+    sanitize_display(&path.display().to_string())
+}
+
 /// Pretty JSON on stdout.
 pub(crate) fn json(value: &impl Serialize) -> anyhow::Result<()> {
     println!("{}", serde_json::to_string_pretty(value)?);
     Ok(())
 }
 
-/// The error and its causes on stderr.
+/// Pretty JSON for a command that used wheel profiles: `profiles_source` says where its pins came
+/// from (`builtin` or `override:<dir>`), next to the command's own fields.
+pub(crate) fn json_with_profiles(origin: &Origin, body: &impl Serialize) -> anyhow::Result<()> {
+    #[derive(Serialize)]
+    struct WithProfiles<'a, T> {
+        profiles_source: &'a Origin,
+        #[serde(flatten)]
+        body: &'a T,
+    }
+    json(&WithProfiles { profiles_source: origin, body })
+}
+
+/// A warning on stderr.
+pub(crate) fn warn(text: impl Display) {
+    eprintln!("{} {text}", paint(WARN, "warning:"));
+}
+
+/// The error and its causes on stderr. Sanitized: a cause can quote a user's file.
 pub(crate) fn error(error: &anyhow::Error) {
-    eprintln!("{} {error:#}", paint(BAD, "error:"));
+    eprintln!("{} {}", paint(BAD, "error:"), sanitize_display(&format!("{error:#}")));
 }
 
 /// `41596` as `41,596`.

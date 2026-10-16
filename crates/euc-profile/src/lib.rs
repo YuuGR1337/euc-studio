@@ -5,6 +5,11 @@
 //! line, and checks the cross-field rules TOML cannot express (the app must not reach the storage
 //! pages, pins must be unique, ...). It does no I/O beyond reading the profile files.
 //!
+//! The sha256 pins in a profile decide which firmware counts as official, so where a profile
+//! came from matters. [`ProfileSource::Builtin`] holds the repo's profiles, compiled into the
+//! binary; a folder on disk is used only when the caller names it ([`ProfileSource::Override`]),
+//! and every loaded profile records its [`Origin`].
+//!
 //! ```
 //! let profile = euc_profile::WheelProfile::parse(r#"
 //!     schema = 1
@@ -25,9 +30,12 @@
 //! # Ok::<(), euc_profile::ParseError>(())
 //! ```
 
+mod builtin;
 mod date;
 mod dir;
 mod sha;
+mod source;
+mod text;
 mod validate;
 
 use std::path::PathBuf;
@@ -37,6 +45,8 @@ use serde::Deserialize;
 pub use date::Date;
 pub use dir::{ProfileDir, ProfileError, WHEEL_FILE};
 pub use sha::{BadSha256, Sha256};
+pub use source::{Origin, ProfileSource};
+pub use text::{is_unsafe_display_char, sanitize_display};
 pub use validate::{ParseError, Problem};
 
 /// The schema version this build reads.
@@ -59,6 +69,9 @@ pub struct WheelProfile {
     /// Known firmware builds and where to get them.
     #[serde(default)]
     pub firmware: Vec<FirmwareSource>,
+    /// Where this profile was loaded from; set by the loader, not part of the file.
+    #[serde(skip)]
+    pub origin: Origin,
 }
 
 impl WheelProfile {

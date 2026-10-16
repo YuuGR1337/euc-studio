@@ -19,6 +19,9 @@ use std::path::PathBuf;
 use thiserror::Error;
 
 pub use cache::{CachedImage, FirmwareCache, Provenance, Trust};
+/// Escapes control and bidi characters in untrusted text. Everything this crate returns from the
+/// network or the cache has already been through it; consumers use it for their own input.
+pub use euc_profile::sanitize_display;
 pub use fetch::{
     FetchOptions, FetchReport, FetchStatus, Fetched, ImportStatus, Imported, Listing, ListingResult, fetch, import,
 };
@@ -39,12 +42,12 @@ pub enum FwError {
         reason: String,
     },
     /// The cache could not be read or written.
-    #[error("firmware cache {}: {source}", path.display())]
+    #[error("firmware cache {}: {error}", path.display())]
     Cache {
         /// The file or folder involved.
         path: PathBuf,
-        /// The OS error.
-        source: io::Error,
+        /// The OS error (shown in the message, so not repeated as the error source).
+        error: io::Error,
     },
 }
 

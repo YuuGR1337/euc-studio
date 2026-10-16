@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use thiserror::Error;
 
-use crate::{ParseError, WheelProfile};
+use crate::{Origin, ParseError, WheelProfile};
 
 /// File name of a wheel profile inside its folder.
 pub const WHEEL_FILE: &str = "wheel.toml";
@@ -13,20 +13,20 @@ pub const WHEEL_FILE: &str = "wheel.toml";
 #[derive(Debug, Error)]
 pub enum ProfileError {
     /// The file or folder could not be read.
-    #[error("cannot read {}: {source}", path.display())]
+    #[error("cannot read {}: {error}", path.display())]
     Io {
         /// What we tried to read.
         path: PathBuf,
-        /// The OS error.
-        source: io::Error,
+        /// The OS error (shown in the message, so not repeated as the error source).
+        error: io::Error,
     },
     /// The file is not a valid profile.
-    #[error("{}: {source}", path.display())]
+    #[error("{}: {error}", path.display())]
     Parse {
         /// The profile file.
         path: PathBuf,
-        /// What is wrong with it.
-        source: ParseError,
+        /// What is wrong with it (shown in the message, so not repeated as the error source).
+        error: ParseError,
     },
     /// The profile's `id` differs from its folder name, so `euc fetch <id>` would not find it.
     #[error("{}: id \"{id}\" must match its folder name \"{folder}\"", path.display())]
@@ -38,13 +38,13 @@ pub enum ProfileError {
         /// The folder name.
         folder: String,
     },
-    /// No folder for the requested wheel.
-    #[error("no wheel profile \"{id}\" in {} (available: {})", dir.display(), list_or_none(available))]
+    /// The source has no profile for the requested wheel.
+    #[error("no wheel profile \"{id}\" in {searched} (available: {})", list_or_none(available))]
     UnknownWheel {
         /// The requested id.
         id: String,
-        /// The profiles folder searched.
-        dir: PathBuf,
+        /// The source searched.
+        searched: Origin,
         /// Ids that do exist.
         available: Vec<String>,
     },
@@ -73,7 +73,7 @@ impl ProfileDir {
 
     /// Ids of every folder that holds a [`WHEEL_FILE`], sorted.
     pub fn ids(&self) -> Result<Vec<String>, ProfileError> {
-        let io_error = |source| ProfileError::Io { path: self.root.clone(), source };
+        let io_error = |error| ProfileError::Io { path: self.root.clone(), error };
         let mut ids = Vec::new();
         for entry in fs::read_dir(&self.root).map_err(io_error)? {
             let entry = entry.map_err(io_error)?;
@@ -85,29 +85,33 @@ impl ProfileDir {
         Ok(ids)
     }
 
-    /// Loads and validates the profile of wheel `id`.
+    /// Loads and validates the profile of wheel `id`. It carries [`Origin::Override`].
     pub fn load(&self, id: &str) -> Result<WheelProfile, ProfileError> {
+        let origin = Origin::Override(self.root.clone());
+        // Ids are kebab case; anything else (`..`, separators) never becomes a path.
+        let plain = !id.is_empty() && id.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-');
         let path = self.root.join(id).join(WHEEL_FILE);
-        if !path.is_file() {
+        if !plain || !path.is_file() {
             return Err(ProfileError::UnknownWheel {
                 id: id.to_owned(),
-                dir: self.root.clone(),
+                searched: origin,
                 available: self.ids().unwrap_or_default(),
             });
         }
-        let text = fs::read_to_string(&path).map_err(|source| ProfileError::Io { path: path.clone(), source })?;
-        let profile =
-            WheelProfile::parse(&text).map_err(|source| ProfileError::Parse { path: path.clone(), source })?;
-        if profile.id != id {
-            return Err(ProfileError::IdMismatch { path, id: profile.id, folder: id.to_owned() });
-        }
-        Ok(profile)
+        let text = fs::read_to_string(&path).map_err(|error| ProfileError::Io { path: path.clone(), error })?;
+        from_text(&text, id, path, origin)
     }
+}
 
-    /// Loads every profile, sorted by id.
-    pub fn load_all(&self) -> Result<Vec<WheelProfile>, ProfileError> {
-        self.ids()?.iter().map(|id| self.load(id)).collect()
+/// Parses a profile that must have id `id`, and stamps it with `origin`.
+/// `path` names the file in error messages.
+pub(crate) fn from_text(text: &str, id: &str, path: PathBuf, origin: Origin) -> Result<WheelProfile, ProfileError> {
+    let mut profile = WheelProfile::parse(text).map_err(|error| ProfileError::Parse { path: path.clone(), error })?;
+    if profile.id != id {
+        return Err(ProfileError::IdMismatch { path, id: profile.id, folder: id.to_owned() });
     }
+    profile.origin = origin;
+    Ok(profile)
 }
 
 #[cfg(test)]
@@ -142,8 +146,9 @@ ram = { base = 0x2000_0000, size = 0xC000 }
 
         let dir = ProfileDir::new(tmp.path());
         assert_eq!(dir.ids().unwrap(), ["demo"], "folders without wheel.toml are not wheels");
-        assert_eq!(dir.load("demo").unwrap().name, "Demo");
-        assert_eq!(dir.load_all().unwrap().len(), 1);
+        let wheel = dir.load("demo").unwrap();
+        assert_eq!(wheel.name, "Demo");
+        assert_eq!(wheel.origin, Origin::Override(tmp.path().to_owned()));
     }
 
     #[test]
@@ -153,6 +158,18 @@ ram = { base = 0x2000_0000, size = 0xC000 }
         let message = ProfileDir::new(tmp.path()).load("nope").unwrap_err().to_string();
         assert!(message.starts_with("no wheel profile \"nope\" in "), "{message}");
         assert!(message.ends_with("(available: demo)"), "{message}");
+    }
+
+    #[test]
+    fn ids_never_walk_out_of_the_folder() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_wheel(tmp.path(), "profiles/demo", WHEEL);
+        write_wheel(tmp.path(), "outside", WHEEL);
+        let dir = ProfileDir::new(tmp.path().join("profiles"));
+        for id in ["../outside", "demo/../demo", "", "DEMO"] {
+            let err = dir.load(id).unwrap_err();
+            assert!(matches!(err, ProfileError::UnknownWheel { .. }), "{id}: {err}");
+        }
     }
 
     #[test]
@@ -170,13 +187,5 @@ ram = { base = 0x2000_0000, size = 0xC000 }
         let message = ProfileDir::new(tmp.path()).load("demo").unwrap_err().to_string();
         assert!(message.contains(WHEEL_FILE), "{message}");
         assert!(message.ends_with("schema 9 is not supported; this build reads schema 1"), "{message}");
-    }
-
-    /// The real profiles in the repo must always load.
-    #[test]
-    fn repo_profiles_load() {
-        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../profiles");
-        let profiles = ProfileDir::new(root).load_all().unwrap();
-        assert!(profiles.iter().any(|p| p.id == "begode-extreme"));
     }
 }

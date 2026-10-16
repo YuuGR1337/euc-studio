@@ -3,7 +3,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use directories::ProjectDirs;
-use euc_profile::Sha256;
+use euc_profile::{Sha256, sanitize_display};
 use serde::{Deserialize, Serialize};
 
 use crate::FwError;
@@ -21,6 +21,9 @@ pub enum Trust {
 }
 
 /// Where a cached image came from, stored next to it as `<sha256>.json`.
+///
+/// Sanitized with [`sanitize_display`] when written and again when read: the label may come from
+/// the vendor server, the origin from a file name, and the sidecar itself sits in a user folder.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Provenance {
     /// Wheel profile id.
@@ -29,6 +32,16 @@ pub struct Provenance {
     pub label: String,
     /// Download URL or imported file path.
     pub origin: String,
+}
+
+impl Provenance {
+    fn sanitized(&self) -> Self {
+        Self {
+            wheel: sanitize_display(&self.wheel),
+            label: sanitize_display(&self.label),
+            origin: sanitize_display(&self.origin),
+        }
+    }
 }
 
 /// One image found in the cache.
@@ -101,7 +114,8 @@ impl FirmwareCache {
         let dir = path.parent().unwrap_or(&self.root);
         fs::create_dir_all(dir).map_err(|e| cache_error(dir, e))?;
         let sidecar_path = path.with_extension("json");
-        let sidecar = serde_json::to_vec_pretty(provenance).map_err(|e| cache_error(&sidecar_path, e.into()))?;
+        let sidecar =
+            serde_json::to_vec_pretty(&provenance.sanitized()).map_err(|e| cache_error(&sidecar_path, e.into()))?;
         write_atomic(&sidecar_path, &sidecar)?;
         write_atomic(&path, bytes)?;
         Ok(path)
@@ -127,7 +141,10 @@ fn list_dir(dir: &Path, trust: Trust) -> Result<Vec<CachedImage>, FwError> {
         let digest = path.file_name().and_then(|n| n.to_str()).and_then(|n| n.strip_suffix(".bin"));
         let Some(sha256) = digest.and_then(|d| d.parse::<Sha256>().ok()) else { continue };
         let bytes = fs::read(&path).map_err(|e| cache_error(&path, e))?;
-        let provenance = fs::read(path.with_extension("json")).ok().and_then(|j| serde_json::from_slice(&j).ok());
+        let provenance = fs::read(path.with_extension("json"))
+            .ok()
+            .and_then(|json| serde_json::from_slice::<Provenance>(&json).ok())
+            .map(|provenance| provenance.sanitized());
         images.push(CachedImage {
             sha256,
             size: bytes.len() as u64,
@@ -149,8 +166,8 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), FwError> {
     fs::rename(&tmp, path).map_err(|e| cache_error(path, e))
 }
 
-fn cache_error(path: &Path, source: io::Error) -> FwError {
-    FwError::Cache { path: path.to_owned(), source }
+fn cache_error(path: &Path, error: io::Error) -> FwError {
+    FwError::Cache { path: path.to_owned(), error }
 }
 
 #[cfg(test)]
@@ -190,6 +207,22 @@ mod tests {
         fs::write(&path, b"stock bytez").unwrap();
         assert_eq!(cache.verified(&Sha256::digest(b"stock bytes")), None);
         assert!(!cache.list().unwrap()[0].intact);
+    }
+
+    #[test]
+    fn sidecars_never_hold_or_return_escapes() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cache = FirmwareCache::new(tmp.path());
+        let hostile =
+            Provenance { wheel: "demo".into(), label: "FW\u{1b}[2J".into(), origin: "/x/\u{202e}nib.exe".into() };
+        let path = cache.store(b"bytes", Trust::Unverified, &hostile).unwrap();
+        let on_disk = fs::read_to_string(path.with_extension("json")).unwrap();
+        assert!(!on_disk.contains('\u{1b}') && !on_disk.contains('\u{202e}'), "{on_disk}");
+
+        // A sidecar edited by hand with raw escapes comes back sanitized.
+        fs::write(path.with_extension("json"), r#"{"wheel":"d","label":"\u001b[31mred","origin":"o"}"#).unwrap();
+        let listed = cache.list().unwrap();
+        assert_eq!(listed[0].provenance.as_ref().unwrap().label, r"\u{1b}[31mred");
     }
 
     #[test]

@@ -1,16 +1,13 @@
 //! Talks to Begode's real update server. Ignored by default; run with
 //! `cargo test -p euc-fwsource --test live -- --ignored`.
 
-use std::path::Path;
-
 use euc_fwsource::{FetchOptions, FetchStatus, FirmwareCache, UreqClient, begode, fetch};
-use euc_profile::{Channel, FirmwareSource, ProfileDir};
+use euc_profile::{Channel, FirmwareSource, ProfileSource};
 
 #[test]
 #[ignore = "needs network access to one-api.begode.com"]
 fn current_begode_extreme_build_matches_its_pin() {
-    let profiles = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../profiles");
-    let wheel = ProfileDir::new(profiles).load("begode-extreme").unwrap();
+    let wheel = ProfileSource::Builtin.load("begode-extreme").unwrap();
     let http = UreqClient::new();
 
     let current = wheel

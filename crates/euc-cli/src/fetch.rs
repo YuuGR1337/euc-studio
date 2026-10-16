@@ -26,7 +26,7 @@ pub(crate) fn run(ctx: &Context, args: &Args) -> anyhow::Result<Verdict> {
     let options = FetchOptions { force: args.force, archive: args.archive, accept_unpinned: args.accept_unpinned };
     let report = euc_fwsource::fetch(&wheel, &UreqClient::new(), &cache, options)?;
     if ctx.json {
-        ui::json(&report)?;
+        ui::json_with_profiles(&wheel.origin, &report)?;
     } else {
         print(&report, &wheel.name);
     }
@@ -63,13 +63,13 @@ fn print(report: &FetchReport, name: &str) {
                 let word = if matches!(build.status, FetchStatus::Verified { .. }) { "verified" } else { "cached" };
                 ui::row(GOOD, word, what);
                 ui::detail(format!("sha256 {sha256} {}", ui::paint(GOOD, "matches the pin")));
-                ui::detail(ui::paint(DIM, path.display()));
+                ui::detail(ui::paint(DIM, ui::path(path)));
             }
             FetchStatus::Unpinned { sha256, path } => {
                 ui::row(WARN, "unpinned", what);
                 ui::detail(format!("sha256 {sha256} matches no pin of this wheel"));
                 match path {
-                    Some(path) => ui::detail(format!("kept as unverified: {}", path.display())),
+                    Some(path) => ui::detail(format!("kept as unverified: {}", ui::path(path))),
                     None => ui::detail(ui::paint(
                         DIM,
                         "not cached; review it and pin it in the wheel profile, or pass --accept-unpinned",

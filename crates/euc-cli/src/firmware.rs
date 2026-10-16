@@ -39,25 +39,25 @@ fn import(ctx: &Context, wheel_id: &str, file: &Path, accept_unpinned: bool) -> 
     let bytes = fs::read(file).with_context(|| format!("cannot read {}", file.display()))?;
     let imported = euc_fwsource::import(&wheel, &cache, &bytes, file, accept_unpinned)?;
     if ctx.json {
-        ui::json(&imported)?;
+        ui::json_with_profiles(&wheel.origin, &imported)?;
     } else {
         match &imported.status {
             ImportStatus::Verified { label, path } => {
                 ui::row(GOOD, "verified", format!("{}  pinned build of {}", ui::paint(STRONG, label), wheel.name));
                 ui::detail(format!("sha256 {}", imported.sha256));
-                ui::detail(ui::paint(DIM, path.display()));
+                ui::detail(ui::paint(DIM, ui::path(path)));
             }
             ImportStatus::Unverified { path } => {
                 ui::row(
                     WARN,
                     "kept",
-                    format!("{} matches no pin of {}; cached as unverified", file.display(), wheel.name),
+                    format!("{} matches no pin of {}; cached as unverified", ui::path(file), wheel.name),
                 );
                 ui::detail(format!("sha256 {}", imported.sha256));
-                ui::detail(ui::paint(DIM, path.display()));
+                ui::detail(ui::paint(DIM, ui::path(path)));
             }
             ImportStatus::Refused => {
-                ui::row(BAD, "refused", format!("{} is not a pinned build of {}", file.display(), wheel.name));
+                ui::row(BAD, "refused", format!("{} is not a pinned build of {}", ui::path(file), wheel.name));
                 ui::detail(format!("sha256 {}", imported.sha256));
                 ui::detail(ui::paint(DIM, "pass --accept-unpinned to keep it as unverified"));
             }
@@ -80,7 +80,7 @@ fn list(ctx: &Context) -> anyhow::Result<Verdict> {
         return Ok(Verdict::Ok);
     }
     if images.is_empty() {
-        println!("no cached firmware in {}; run `euc fetch <wheel>`", cache.root().display());
+        println!("no cached firmware in {}; run `euc fetch <wheel>`", ui::path(cache.root()));
         return Ok(Verdict::Ok);
     }
     let label_width = images.iter().map(|image| label(image).len()).max().unwrap_or(0);
@@ -101,7 +101,7 @@ fn list(ctx: &Context) -> anyhow::Result<Verdict> {
                 image.sha256.short()
             ),
         );
-        ui::detail(ui::paint(DIM, image.path.display()));
+        ui::detail(ui::paint(DIM, ui::path(&image.path)));
     }
     Ok(Verdict::Ok)
 }

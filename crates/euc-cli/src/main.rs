@@ -6,6 +6,7 @@ mod image;
 mod paths;
 mod ui;
 
+use std::cell::Cell;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -19,7 +20,8 @@ struct Cli {
     #[arg(long, global = true)]
     json: bool,
 
-    /// Wheel profiles folder [default: profiles/ of the euc-studio checkout]
+    /// Wheel profiles folder that replaces the built-in profiles; its pins decide what counts as
+    /// official firmware, so every run that uses it warns [default: the built-in profiles]
     #[arg(long, global = true, env = "EUC_PROFILES", value_name = "DIR")]
     profiles: Option<PathBuf>,
 
@@ -55,11 +57,13 @@ struct Context {
     json: bool,
     profiles: Option<PathBuf>,
     cache_dir: Option<PathBuf>,
+    /// Set once the profiles override warning has been printed.
+    warned: Cell<bool>,
 }
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
-    let ctx = Context { json: cli.json, profiles: cli.profiles, cache_dir: cli.cache_dir };
+    let ctx = Context { json: cli.json, profiles: cli.profiles, cache_dir: cli.cache_dir, warned: Cell::new(false) };
     let result = match cli.command {
         Command::Fetch(args) => fetch::run(&ctx, &args),
         Command::Firmware(command) => firmware::run(&ctx, command),
