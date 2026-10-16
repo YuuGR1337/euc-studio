@@ -1,0 +1,20 @@
+---
+# Firmware C style. Check: cmake --build --preset <any> --target format-check. Fix: --target format.
+# CI pins the same clang-format release (see .github/workflows/ci-firmware.yml).
+BasedOnStyle: LLVM
+Language: Cpp
+ColumnLimit: 110
+IndentWidth: 4
+ContinuationIndentWidth: 4
+BreakBeforeBraces: Linux
+AllowShortFunctionsOnASingleLine: None
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+AllowShortBlocksOnASingleLine: Never
+AlignConsecutiveMacros: Consecutive
+AlignTrailingComments: true
+IndentCaseLabels: false
+PointerAlignment: Right
+InsertBraces: true
+SortIncludes: CaseSensitive
+IncludeBlocks: Preserve

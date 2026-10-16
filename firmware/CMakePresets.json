@@ -1,0 +1,106 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": { "major": 3, "minor": 25, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      }
+    },
+    {
+      "name": "target-base",
+      "hidden": true,
+      "inherits": "base",
+      "toolchainFile": "${sourceDir}/cmake/toolchain-arm-none-eabi.cmake",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "MinSizeRel",
+        "EUC_BOARD": "begode-extreme"
+      }
+    },
+    {
+      "name": "target-compat",
+      "displayName": "Target image, compat profile (stock behaviour, lock-step with the stock binary)",
+      "inherits": "target-base",
+      "cacheVariables": { "EUC_PROFILE": "compat" }
+    },
+    {
+      "name": "target-clean",
+      "displayName": "Target image, clean profile (known stock defects fixed)",
+      "inherits": "target-base",
+      "cacheVariables": { "EUC_PROFILE": "clean" }
+    },
+    {
+      "name": "host-debug",
+      "displayName": "Host unit tests with AddressSanitizer and UndefinedBehaviorSanitizer",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "EUC_SANITIZERS": "ON"
+      }
+    },
+    {
+      "name": "host-sil",
+      "displayName": "Host software-in-the-loop shared library for the simulator",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo"
+      }
+    }
+  ],
+  "buildPresets": [
+    { "name": "target-compat", "configurePreset": "target-compat" },
+    { "name": "target-clean", "configurePreset": "target-clean" },
+    { "name": "host-debug", "configurePreset": "host-debug" },
+    { "name": "host-sil", "configurePreset": "host-sil" }
+  ],
+  "testPresets": [
+    {
+      "name": "host-debug",
+      "configurePreset": "host-debug",
+      "output": { "outputOnFailure": true },
+      "execution": { "noTestsAction": "error" }
+    },
+    {
+      "name": "host-sil",
+      "configurePreset": "host-sil",
+      "output": { "outputOnFailure": true },
+      "execution": { "noTestsAction": "error" }
+    }
+  ],
+  "workflowPresets": [
+    {
+      "name": "target-compat",
+      "steps": [
+        { "type": "configure", "name": "target-compat" },
+        { "type": "build", "name": "target-compat" }
+      ]
+    },
+    {
+      "name": "target-clean",
+      "steps": [
+        { "type": "configure", "name": "target-clean" },
+        { "type": "build", "name": "target-clean" }
+      ]
+    },
+    {
+      "name": "host-debug",
+      "steps": [
+        { "type": "configure", "name": "host-debug" },
+        { "type": "build", "name": "host-debug" },
+        { "type": "test", "name": "host-debug" }
+      ]
+    },
+    {
+      "name": "host-sil",
+      "steps": [
+        { "type": "configure", "name": "host-sil" },
+        { "type": "build", "name": "host-sil" },
+        { "type": "test", "name": "host-sil" }
+      ]
+    }
+  ]
+}

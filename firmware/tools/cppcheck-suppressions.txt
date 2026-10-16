@@ -1,0 +1,73 @@
+# cppcheck suppressions for the firmware. For the MISRA C:2012 addon this file is our deviation record:
+# every entry names the rule, where it applies and why. Keep each deviation as narrow as the reason.
+# The MISRA addon runs on firmware sources only (apps, core, ports); test code gets the general checks.
+# Format: <check id>[:<file pattern>[:<line>]]
+
+# --- Project-wide ------------------------------------------------------------------------------------------
+
+# 15.5 (advisory, single point of exit): guard clauses that return early keep functions flat and easier to
+# read than one return at the end.
+misra-c2012-15.5
+
+# --- core -------------------------------------------------------------------------------------------------
+
+# 20.1, 20.5, 20.10 (#include after code, #undef, # and ##): the quirk list is an X-macro. config/quirks.def
+# is included inside enum and table definitions, with EUC_QUIRK_DEF defined and undefined around each use,
+# so the list is written once and every table follows it.
+# 2.5 (advisory, unused macro): each translation unit uses only one profile's EUC_QUIRK definition.
+misra-c2012-20.1:*/core/include/euc/quirks.h
+misra-c2012-20.5:*/core/include/euc/quirks.h
+misra-c2012-20.10:*/core/include/euc/quirks.h
+misra-c2012-2.5:*/core/include/euc/quirks.h
+
+# 10.1 (shift of a signed operand) and cppcheck shiftNegativeLHS: fixed-point helpers drop fraction bits with
+# an arithmetic right shift, the rounding the stock code uses. C11 makes it implementation-defined; fixed.h
+# asserts at build time that the compiler shifts arithmetically.
+misra-c2012-10.1:*/core/include/euc/math/fixed.h
+shiftNegativeLHS:*/core/include/euc/math/fixed.h
+
+# --- ports/sim ----------------------------------------------------------------------------------------------
+
+# 20.1, 20.5, 20.10: the same quirk X-macro, for the SIL quirk tables.
+# 8.7 (advisory, external linkage used in one unit): the euc_sil_* functions are the library's C ABI; the
+# simulator engine calls them through the dynamic loader, which cppcheck cannot see.
+misra-c2012-20.1:*/ports/sim/sil.c
+misra-c2012-20.5:*/ports/sim/sil.c
+misra-c2012-20.10:*/ports/sim/sil.c
+misra-c2012-8.7:*/ports/sim/sil.c
+
+# --- ports/stm32f1 ------------------------------------------------------------------------------------------
+
+# device.h is a CMSIS device header; CMSIS fixes its shape and names:
+#   21.1 (#define of a reserved identifier): __CM3_REV, __NVIC_PRIO_BITS and friends are CMSIS names.
+#   20.1 (#include after code): core_cm3.h must come after IRQn_Type and the core configuration.
+#   2.3, 2.4, 2.5 (unused type, tag, macro): core_cm3.h consumes them.
+misra-c2012-21.1:*/ports/stm32f1/include/stm32f1/device.h
+misra-c2012-20.1:*/ports/stm32f1/include/stm32f1/device.h
+misra-c2012-2.3:*/ports/stm32f1/include/stm32f1/device.h
+misra-c2012-2.4:*/ports/stm32f1/include/stm32f1/device.h
+misra-c2012-2.5:*/ports/stm32f1/include/stm32f1/device.h
+
+# 8.11 (extern array without a size): linker-script symbols mark addresses and have no C size.
+# 11.4 (pointer to integer): region sizes are differences of linker-symbol addresses.
+# 20.7 (unparenthesised macro parameter): STM32F1_WEAK_HANDLER's parameter is a function name in a
+# declarator, which cannot take parentheses.
+misra-c2012-8.11:*/ports/stm32f1/startup.c
+misra-c2012-11.4:*/ports/stm32f1/startup.c
+misra-c2012-20.7:*/ports/stm32f1/startup.c
+
+# 11.4 (pointer to integer): VTOR takes the address of the vector table.
+# 17.3 (implicit declaration): __DSB() is a CMSIS intrinsic defined per compiler; cppcheck does not take
+# the GCC branch of cmsis_compiler.h, so it does not see the definition.
+misra-c2012-11.4:*/ports/stm32f1/system.c
+misra-c2012-17.3:*/ports/stm32f1/system.c
+
+# freestanding.c defines memcpy, memmove, memset and memcmp because -nostdlib images have no C library and
+# GCC emits calls to them. Their standard prototypes need the reserved names (21.2), restrict (8.14) and
+# void pointers (11.5), memmove compares addresses (11.4), and the declarations cppcheck should match are in
+# the C library headers (8.4).
+misra-c2012-21.2:*/ports/stm32f1/freestanding.c
+misra-c2012-8.14:*/ports/stm32f1/freestanding.c
+misra-c2012-11.5:*/ports/stm32f1/freestanding.c
+misra-c2012-11.4:*/ports/stm32f1/freestanding.c
+misra-c2012-8.4:*/ports/stm32f1/freestanding.c

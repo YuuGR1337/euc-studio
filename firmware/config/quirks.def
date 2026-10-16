@@ -1,0 +1,67 @@
+/*
+ * Quirk list: every known place where the stock Begode Extreme firmware behaves in a way we would not choose.
+ * The compat profile reproduces each one so our image can run in lock-step with the stock binary; the clean
+ * profile fixes them. Code tests a quirk with `if (EUC_QUIRK(ID))` (core/include/euc/quirks.h).
+ *
+ * X-macro, one entry per quirk:
+ *
+ *   EUC_QUIRK_DEF(ID, COMPAT, CLEAN, STOCK_REF, SUMMARY)
+ *
+ *   ID         name used in code as EUC_QUIRK(ID)
+ *   COMPAT     1 = the compat profile has the stock behaviour
+ *   CLEAN      1 = the clean profile keeps the stock behaviour, 0 = clean fixes it
+ *   STOCK_REF  where the behaviour is in the stock image: address and our name for the function
+ *   SUMMARY    one line for docs/quirks.md and the studio's quirk switches (describes the stock behaviour)
+ *
+ * Rules:
+ *   - The order is the bit order of the SIL quirk mask. Append new quirks to the end of their group, and only
+ *     reorder before the first release.
+ *   - Never reuse an ID for a different behaviour.
+ *   - Neither profile changes telemetry frame bytes, command letters, the `!@` update entry, the flash map or
+ *     USART1 (PA9/PA10, 115200 8N1). Those are contracts with apps and the bootloader, not quirks.
+ *   - After an edit, regenerate the table: cmake --build --preset <any> --target quirks-doc
+ */
+
+/* Attitude estimation and numerics */
+EUC_QUIRK_DEF(ASIN_ACCEL, 1, 0, "0x080037A8 ahrs_update",
+              "Each low-passed accelerometer axis goes through asin() before the Mahony normalisation.")
+EUC_QUIRK_DEF(SEQ_QUAT_UPDATE, 1, 0, "0x080037A8 ahrs_update",
+              "The quaternion is integrated in place, so q1..q3 use components already updated in this step.")
+EUC_QUIRK_DEF(FAST_INV_SQRT, 1, 0, "0x080070AC invSqrt",
+              "Normalisation uses the 0x5F3759DF inverse square root with one Newton step.")
+EUC_QUIRK_DEF(KEIL_FTZ, 1, 0, "Keil soft-float library (every float and double operation)",
+              "Float and double results that would be denormal are flushed to zero, as in the Keil library.")
+
+/* Commands and telemetry (USART1, BLE module) */
+EUC_QUIRK_DEF(CMD_LAST_BYTE_WINS, 1, 0, "0x08009A94 usart1_isr_body",
+              "One pending command byte: a new byte replaces one that no task has consumed yet.")
+EUC_QUIRK_DEF(TLM_HOLDOFF, 1, 0, "0x08008038 telemetry_task",
+              "Every received byte pauses telemetry for two frame groups (about 0.6 s).")
+EUC_QUIRK_DEF(W_ARM_STICKY, 1, 0, "0x08008460..0x08008778 W command parsers",
+              "A 'W' arms every W sub-command until it completes, so a much later letter can complete it.")
+EUC_QUIRK_DEF(WC_DEAD, 1, 1, "0x080086A8 cmd_WC_digit",
+              "'W' 'C' d is stored, saved and echoed in frame 07, but nothing uses it; clean keeps it.")
+
+/* Motor drive and protection */
+EUC_QUIRK_DEF(NO_OVERCURRENT_TRIP, 1, 0, "0x08007C04 phase current check",
+              "Phase current over 31500 counts is only counted: no trip, and the TIM8 break input is off.")
+EUC_QUIRK_DEF(PHASE_SAT_SWAPPED, 1, 0, "0x08007B4C phase current read",
+              "Phase-current saturation branches are swapped (unreachable with the ADC offset mid-scale).")
+
+/* Alarms and user interface */
+EUC_QUIRK_DEF(VOLUME_ZERO_MAX, 1, 0, "0x080058BC buzzer_set_volume",
+              "'W' 'B' 0 underflows to the loudest buzzer setting (CCR4 = 270) instead of the quietest.")
+
+/* Settings storage (flash journal at 0x0800F000) */
+EUC_QUIRK_DEF(SAVE_ONLY_POWEROFF, 1, 0, "0x08004F6C settings_save",
+              "Settings and odometer reach flash only in the firmware's own power-off paths.")
+EUC_QUIRK_DEF(SAVE_SLOT_REUSE, 1, 0, "0x08004F6C settings_save",
+              "The journal slot is fixed at boot, so each extra save in a power cycle erases the page again.")
+EUC_QUIRK_DEF(NO_RECORD_CRC, 1, 0, "0x08004D48 settings_load",
+              "Records have no CRC or sequence number; a torn write that is not all 0xFFFF loads as valid.")
+
+/* Platform */
+EUC_QUIRK_DEF(NO_WATCHDOG, 1, 0, "none: IWDG and WWDG are never started",
+              "No watchdog: a hung main loop or ISR leaves every output in its last state.")
+EUC_QUIRK_DEF(HSE_START_HANG, 1, 0, "0x080083B8 SetSysClock",
+              "If the HSE crystal does not start, clock setup loops forever.")

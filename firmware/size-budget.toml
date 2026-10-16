@@ -1,0 +1,11 @@
+# Size budgets, checked by tools/size_report.py after every target image link.
+# One table per board, named like the board directory. Bytes, so the numbers compare directly with the
+# map file.
+
+[begode-extreme]
+# 44 KiB: time to read the per-module table in size-report.json before the image grows further.
+flash_warn_bytes = 45056
+# 48 KiB: 0x08003000..0x0800EFFF. The next byte is the settings page; the build fails above this.
+flash_fail_bytes = 49152
+# .data + .bss. Of the 20 KiB of RAM we assume, the rest is the 2 KiB stack and margin.
+ram_static_fail_bytes = 16384
