@@ -1,0 +1,35 @@
+name: vendor-guard
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Unit tests
+        run: python -m unittest discover -s tools/vendor-guard -p 'test_*.py'
+      - name: Fetch stock images for the deep check (never stored)
+        id: stock
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          dir="$RUNNER_TEMP/stock"
+          mkdir -p "$dir"
+          for f in pwm_1762161713192.bin pwm_1752633683492.bin pwm_1731034782043.bin; do
+            curl -fsSL --retry 3 -A "euc-studio-ci (+https://github.com/tarikbc/euc-studio)" \
+              -o "$dir/$f" "https://one-api.begode.com/imgs/temp/$f"
+          done
+          echo "dir=$dir" >> "$GITHUB_OUTPUT"
+      - name: Guard (deep check when the images were fetched)
+        env:
+          EUC_STOCK_DIR: ${{ steps.stock.outputs.dir }}
+        run: python tools/vendor-guard/check.py --all

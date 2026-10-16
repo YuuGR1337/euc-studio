@@ -1,2 +1,22 @@
+# Private research repo (vendor material) and local agent worktrees
 /research/
 /.claude/
+
+# Rust
+/target/
+
+# Node
+node_modules/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Firmware build outputs
+/firmware/build/
+
+# OS and editors
+.DS_Store
+*.swp
+.idea/

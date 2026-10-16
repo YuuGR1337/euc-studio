@@ -1,0 +1,67 @@
+# Vendor material that must never be committed to the public euc-studio repo.
+# Read by tools/vendor-guard/check.py. Every rule says why it exists.
+
+# Exact copies of vendor files. These hashes are also the pins that `euc fetch` verifies.
+[sha256]
+"cbfb328cab1e0b8219790dd3ef710bb266569c70b6ac396ccd06c247da9fd27d" = "Begode Extreme stock image GW1825007 (pwm_1762161713192.bin)"
+"7e6a518a9ebbc5e8982d0e215171ab073b92027e3925bbb93f11a93fa3bb6425" = "Begode Extreme stock image (pwm_1752633683492.bin)"
+"4fc1a6fa4f6fa461559404bca68546db42ce48367b04c3ca89c2c523089cd4c7" = "Begode Extreme stock image (pwm_1731034782043.bin)"
+"9932985d8f2bc309666f12c9cca9c8e128df554a8f9e12893a5d0d264ed0df30" = "Begode Extreme decompressed RW init image (same in all three builds)"
+
+[[path]]
+glob = "research/**"
+reason = "the private research repo lives here; it is ignored and must never be added"
+
+[[path]]
+glob = "**/*.gbf"
+reason = "Ghidra database (contains the analysed binary)"
+
+[[path]]
+glob = "**/*.gpr"
+reason = "Ghidra project file"
+
+[[path]]
+glob = "**/*.rep/**"
+reason = "Ghidra project repository folder"
+
+[[path]]
+glob = "**/*.idb"
+reason = "IDA database"
+
+[[path]]
+glob = "**/*.i64"
+reason = "IDA database"
+
+[[path]]
+glob = "**/*.hop"
+reason = "Hopper database"
+
+[[path]]
+glob = "**/decomp*.c"
+reason = "decompiler output"
+
+[[token]]
+name = "decompiler-symbol"
+regex = '\b(?:FUN|DAT|LAB|PTR|SUB|thunk_FUN)_[0-9A-Fa-f]{8}\b'
+reason = "Ghidra-style auto symbol; decompiled vendor code does not belong here"
+
+[[token]]
+name = "decompiler-type"
+regex = '\bundefined[1248]\b'
+reason = "Ghidra decompiler type; decompiled vendor code does not belong here"
+
+[[token]]
+name = "disassembly-listing"
+regex = '^\s*(?:0x)?0800[0-9A-Fa-f]{4}:\s+[0-9A-Fa-f]{4}(?:[0-9A-Fa-f]{4})?\s+[a-z]'
+reason = "address + opcode + mnemonic listing line of vendor flash; disassembly does not belong here"
+
+# Cortex-M images are allowed only where our own builds land (these paths are also gitignored).
+[image]
+allow = ["firmware/build/**", "target/**"]
+
+# Narrow exceptions. Each one needs a path, the rules it waives, and a reason.
+# Example:
+# [[allow]]
+# path = "docs/spec/example.md"
+# rules = ["token:disassembly-listing"]
+# reason = "documents the listing format with a synthetic address"

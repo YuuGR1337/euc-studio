@@ -1,0 +1,6 @@
+#!/bin/sh
+# euc-studio pre-commit hook. Install once per clone:
+#   git config core.hooksPath tools/hooks
+# Blocks vendor firmware material (see tools/vendor-guard/README.md).
+top=$(git rev-parse --show-toplevel) || exit 1
+exec python3 "$top/tools/vendor-guard/check.py" --staged
