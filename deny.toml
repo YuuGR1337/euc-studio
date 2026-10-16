@@ -1,0 +1,57 @@
+# cargo-deny policy for the engine workspace. Run: `cargo deny check`.
+
+[graph]
+# The platforms the CLI and the studio ship on.
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+    "x86_64-apple-darwin",
+    "aarch64-apple-darwin",
+    "x86_64-pc-windows-msvc",
+    "aarch64-pc-windows-msvc",
+]
+all-features = true
+
+[advisories]
+ignore = []
+
+[licenses]
+# Anything not listed is refused. That covers every GPL and LGPL variant: no copyleft code may
+# reach a binary we ship. The future `euc-unicorn` crate (Unicorn is GPL-2.0-only) is a dev and CI
+# oracle that never ships; it will get a scoped `exceptions` entry for exactly those crates.
+allow = [
+    "LicenseRef-PolyForm-Noncommercial-1.0.0", # this repo
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "Unicode-3.0",
+    "Unicode-DFS-2016",
+    "MPL-2.0",                                 # file-level copyleft only (option-ext via directories)
+    "CC0-1.0",
+    "OFL-1.1",                                 # fonts bundled by the studio
+    "CDLA-Permissive-2.0",                     # Mozilla root certificates (webpki-roots via ureq)
+]
+confidence-threshold = 0.9
+# The list is policy, not inventory: some entries wait for crates the studio and later milestones add.
+unused-allowed-license = "allow"
+exceptions = []
+
+[licenses.private]
+# Our crates are `publish = false` but still checked against the list above.
+ignore = false
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+# Workspace path dependencies carry no version; that is not a wildcard on crates.io.
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

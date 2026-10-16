@@ -1,0 +1,22 @@
+[package]
+name = "euc-image"
+description = "Firmware image gate: size, vectors, .euc_info block and provenance checks"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+crc32fast.workspace = true
+euc-profile.workspace = true
+object.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+
+[lints]
+workspace = true

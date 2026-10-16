@@ -1,0 +1,55 @@
+# Begode Extreme: main controller, its flash layout and the official firmware builds.
+# Schema: crates/euc-profile. The stock binaries are never stored in this repo; `euc fetch`
+# downloads them from Begode's public update server and checks them against the pins below.
+
+schema = 1
+id = "begode-extreme"
+name = "Begode Extreme"
+brand = "Begode"
+
+[board]
+id = "begode-extreme"
+mcu = "STM32F103RC-class"   # high-density STM32F1 or a GD32/APM32/AT32 clone; not settled
+core = "Cortex-M3"
+hclk_hz = 72_000_000        # HSE 8 MHz x 9
+
+[board.app]
+# The vendor bootloader owns 0x0800_0000-0x0800_2FFF; the app and its vector table start here.
+base = 0x0800_3000
+max_size = 49_152           # ends at 0x0800_EFFF, just below the first storage page
+vectors = 76                # STM32F1 high-density table: SP + 15 system + 60 IRQ entries
+info_offset = 0x140         # .euc_info block, see docs/spec/euc-info.md
+storage_pages = [0x0800_F000, 0x0800_F800, 0x0801_0000, 0x0801_0800]
+
+[board.ram]
+base = 0x2000_0000
+size = 0xC000               # 48 KiB
+
+# Official builds. Files live at https://one-api.begode.com/imgs/temp/<file>. The product query
+# (firmwareTypeCode GW1825001) lists only the current build; the archive builds are still served.
+# Labels and dates come from the server's notes.
+
+[[firmware]]
+kind = "begode-api"
+channel = "current"
+type_code = "GW1825001"
+file = "pwm_1762161713192.bin"
+sha256 = "cbfb328cab1e0b8219790dd3ef710bb266569c70b6ac396ccd06c247da9fd27d"
+label = "GW1825007"
+date = 2025-11-01
+
+[[firmware]]
+kind = "begode-api"
+channel = "archive"
+file = "pwm_1752633683492.bin"
+sha256 = "7e6a518a9ebbc5e8982d0e215171ab073b92027e3925bbb93f11a93fa3bb6425"
+label = "GW1825001 v04"
+date = 2025-07-16
+
+[[firmware]]
+kind = "begode-api"
+channel = "archive"
+file = "pwm_1731034782043.bin"
+sha256 = "4fc1a6fa4f6fa461559404bca68546db42ce48367b04c3ca89c2c523089cd4c7"
+label = "GW1825020 v20"
+date = 2024-11-08

@@ -1,0 +1,76 @@
+//! `euc`: the headless EUC Studio command line.
+
+mod fetch;
+mod firmware;
+mod image;
+mod paths;
+mod ui;
+
+use std::path::PathBuf;
+use std::process::ExitCode;
+
+use clap::{Parser, Subcommand};
+
+/// EUC Studio engine: fetch, verify and inspect electric unicycle firmware.
+#[derive(Debug, Parser)]
+#[command(name = "euc", version, propagate_version = true)]
+struct Cli {
+    /// Print JSON instead of text.
+    #[arg(long, global = true)]
+    json: bool,
+
+    /// Wheel profiles folder [default: profiles/ of the euc-studio checkout]
+    #[arg(long, global = true, env = "EUC_PROFILES", value_name = "DIR")]
+    profiles: Option<PathBuf>,
+
+    /// Firmware cache folder [default: the per-user cache, e.g. ~/Library/Caches/euc-studio/firmware]
+    #[arg(long, global = true, env = "EUC_CACHE_DIR", value_name = "DIR")]
+    cache_dir: Option<PathBuf>,
+
+    #[command(subcommand)]
+    command: Command,
+}
+
+#[derive(Debug, Subcommand)]
+enum Command {
+    /// Download a wheel's official firmware and check it against the pinned sha256.
+    Fetch(fetch::Args),
+    /// Manage the firmware cache.
+    #[command(subcommand)]
+    Firmware(firmware::Command),
+    /// Inspect firmware images.
+    #[command(subcommand)]
+    Image(image::Command),
+}
+
+/// Whether a command's verdict was positive. Errors are separate: they abort with a message.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Verdict {
+    Ok,
+    Refused,
+}
+
+/// Settings every command shares.
+struct Context {
+    json: bool,
+    profiles: Option<PathBuf>,
+    cache_dir: Option<PathBuf>,
+}
+
+fn main() -> ExitCode {
+    let cli = Cli::parse();
+    let ctx = Context { json: cli.json, profiles: cli.profiles, cache_dir: cli.cache_dir };
+    let result = match cli.command {
+        Command::Fetch(args) => fetch::run(&ctx, &args),
+        Command::Firmware(command) => firmware::run(&ctx, command),
+        Command::Image(command) => image::run(&ctx, command),
+    };
+    match result {
+        Ok(Verdict::Ok) => ExitCode::SUCCESS,
+        Ok(Verdict::Refused) => ExitCode::FAILURE,
+        Err(error) => {
+            ui::error(&error);
+            ExitCode::FAILURE
+        }
+    }
+}

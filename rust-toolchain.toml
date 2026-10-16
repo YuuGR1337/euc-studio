@@ -1,0 +1,5 @@
+# One pinned toolchain for the engine, the CLI and CI. mujoco-rs (M2) needs >= 1.88.
+[toolchain]
+channel = "1.99.1"
+profile = "minimal"
+components = ["rustfmt", "clippy"]
