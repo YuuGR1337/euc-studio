@@ -1,0 +1,171 @@
+import { AnimatePresence, motion } from "motion/react";
+import { useState } from "react";
+import { smooth } from "../../design/motion.ts";
+import { series } from "../../design/tokens.ts";
+import { cx } from "../../lib/cx.ts";
+import { useLive } from "../../sim/engine.ts";
+import { type CameraMode, useUi } from "../../state/ui.ts";
+import { Gauge } from "../../ui/Gauge.tsx";
+import { Crosshair, Orbit } from "../../ui/icons.tsx";
+import { RollingNumber } from "../../ui/RollingNumber.tsx";
+import { SegmentedControl } from "../../ui/SegmentedControl.tsx";
+import { Wait } from "../../ui/Wait.tsx";
+import { PitchProtractor } from "./PitchProtractor.tsx";
+import { Scene } from "./Scene.tsx";
+
+function HudCard({ children, className }: { children: React.ReactNode; className?: string }) {
+  return (
+    <div
+      className={cx(
+        "rounded-12 border border-hairline bg-card/75 backdrop-blur-[12px] backdrop-saturate-150",
+        className,
+      )}
+    >
+      {children}
+    </div>
+  );
+}
+
+function Speed() {
+  const speed = useLive((l) => l.speed, 8, 1);
+  return (
+    <div className="flex flex-col px-16 pt-8 pb-16">
+      <span className="label">Speed</span>
+      <span className="mt-4 flex items-baseline gap-4">
+        <RollingNumber
+          value={speed}
+          decimals={1}
+          className="text-44 font-medium tracking-[-0.03em] text-fg"
+        />
+        <span className="text-13 font-semibold text-fg-2">km/h</span>
+      </span>
+    </div>
+  );
+}
+
+function Pwm() {
+  const pwm = useLive((l) => l.pwm, 8, 0);
+  return (
+    <div className="grid place-items-center px-8">
+      <Gauge
+        value={pwm}
+        label="PWM"
+        unit="%"
+        size={84}
+        color={series.pwm}
+        zones={[
+          { from: 70, tone: "caution" },
+          { from: 85, tone: "danger" },
+        ]}
+      />
+    </div>
+  );
+}
+
+function Battery() {
+  const pct = useLive((l) => l.battery, 2, 0);
+  const volts = useLive((l) => l.voltage, 4, 1);
+  const tone = pct < 15 ? "bg-danger" : pct < 30 ? "bg-caution" : "bg-ok";
+  return (
+    <div className="flex min-w-[112px] flex-col px-16 pt-8 pb-16">
+      <span className="label">Battery</span>
+      <span className="mt-4 flex items-baseline gap-2 text-20 font-medium text-fg">
+        <RollingNumber value={pct} />
+        <span className="text-13 font-semibold text-fg-2">%</span>
+      </span>
+      <span className="relative mt-8 h-[4px] w-full overflow-hidden rounded-pill bg-track">
+        <span
+          className={cx(
+            "absolute inset-y-0 left-0 rounded-pill transition-[width] duration-(--dur-data) ease-data",
+            tone,
+          )}
+          style={{ width: `${pct}%` }}
+        />
+      </span>
+      <span className="mt-8 text-12 text-fg-2">
+        <RollingNumber value={volts} decimals={1} /> V, 32S
+      </span>
+    </div>
+  );
+}
+
+function Pitch() {
+  const pitch = useLive((l) => l.pitch, 8, 1);
+  return (
+    <HudCard className="px-16 pt-8 pb-8">
+      <div className="flex items-center justify-between">
+        <span className="label">Pitch</span>
+        <span className="text-11 text-fg-2">nose up +</span>
+      </div>
+      <PitchProtractor pitch={pitch} className="mt-4" />
+    </HudCard>
+  );
+}
+
+export function Viewport({ active }: { active: boolean }) {
+  const camera = useUi((s) => s.camera);
+  const setCamera = useUi((s) => s.setCamera);
+  const [ready, setReady] = useState(false);
+
+  return (
+    <div
+      className="relative h-full overflow-hidden rounded-12 border border-hairline bg-bg"
+      data-testid="viewport"
+    >
+      <div className="absolute inset-0">
+        <Scene active={active} onReady={() => setReady(true)} />
+      </div>
+
+      <AnimatePresence>
+        {!ready && (
+          <motion.div
+            className="absolute inset-0 grid place-items-center bg-bg"
+            exit={{ opacity: 0 }}
+            transition={smooth}
+          >
+            <Wait step="Building the scene" detail="Lighting, floor and wheel model" />
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <div className="pointer-events-none absolute inset-0 flex flex-col justify-between p-16">
+        <div className="flex items-start justify-between">
+          <div className="pointer-events-auto">
+            <SegmentedControl<CameraMode>
+              aria-label="Camera"
+              size="sm"
+              value={camera}
+              onValueChange={setCamera}
+              options={[
+                {
+                  value: "follow",
+                  label: "Follow",
+                  icon: <Crosshair />,
+                  tooltip: "Camera follows the wheel",
+                  shortcut: "c",
+                },
+                {
+                  value: "orbit",
+                  label: "Orbit",
+                  icon: <Orbit />,
+                  tooltip: "Drag to orbit, scroll to zoom",
+                  shortcut: "c",
+                },
+              ]}
+            />
+          </div>
+          <div className="pointer-events-auto">
+            <Pitch />
+          </div>
+        </div>
+        <div className="flex items-end justify-between">
+          <HudCard className="pointer-events-auto flex items-stretch divide-x divide-hairline">
+            <Speed />
+            <Pwm />
+            <Battery />
+          </HudCard>
+        </div>
+      </div>
+    </div>
+  );
+}

@@ -1,0 +1,244 @@
+import { RoundedBox } from "@react-three/drei";
+import { useFrame } from "@react-three/fiber";
+import { useMemo, useRef } from "react";
+import * as THREE from "three";
+import { series } from "../../design/tokens.ts";
+import { engine } from "../../sim/engine.ts";
+
+// A stylized electric unicycle built from primitives, about the size of a Begode Extreme
+// (22 inch tire). Units are meters; the wheel rolls about z and travels along +x. The shell is
+// narrower than the tire so the tire shows in front, behind and below, like the real wheel.
+
+const TIRE_R = 0.28;
+const TIRE_TUBE = 0.05;
+const DEG = Math.PI / 180;
+const SHELL_W = 0.4; // fore-aft
+const SHELL_Z = 0.092; // side panel offset from the wheel plane
+
+function TreadBlocks() {
+  const count = 44;
+  const matrices = useMemo(() => {
+    const m = new THREE.Matrix4();
+    const q = new THREE.Quaternion();
+    const axis = new THREE.Vector3(0, 0, 1);
+    const one = new THREE.Vector3(1, 1, 1);
+    return Array.from({ length: count }, (_, i) => {
+      const a = (i / count) * Math.PI * 2;
+      q.setFromAxisAngle(axis, a);
+      return m
+        .compose(
+          new THREE.Vector3(Math.cos(a) * (TIRE_R - 0.003), Math.sin(a) * (TIRE_R - 0.003), 0),
+          q,
+          one,
+        )
+        .clone();
+    });
+  }, []);
+  return (
+    <instancedMesh
+      ref={(mesh) => {
+        if (!mesh) return;
+        matrices.forEach((m, i) => mesh.setMatrixAt(i, m));
+        mesh.instanceMatrix.needsUpdate = true;
+      }}
+      args={[undefined, undefined, count]}
+      castShadow
+    >
+      <boxGeometry args={[0.014, 0.02, 0.074]} />
+      <meshStandardMaterial color="#18181A" roughness={0.95} />
+    </instancedMesh>
+  );
+}
+
+/** Rounds the corners of a polygon with quadratic curves of radius `r`. */
+function roundedShape(points: [number, number][], r: number): THREE.Shape {
+  const shape = new THREE.Shape();
+  const n = points.length;
+  points.forEach(([x, y], i) => {
+    const [px, py] = points[(i - 1 + n) % n] as [number, number];
+    const [nx, ny] = points[(i + 1) % n] as [number, number];
+    const l1 = Math.hypot(px - x, py - y);
+    const l2 = Math.hypot(nx - x, ny - y);
+    const ax = x + ((px - x) / l1) * r;
+    const ay = y + ((py - y) / l1) * r;
+    if (i === 0) shape.moveTo(ax, ay);
+    else shape.lineTo(ax, ay);
+    shape.quadraticCurveTo(x, y, x + ((nx - x) / l2) * r, y + ((ny - y) / l2) * r);
+  });
+  shape.closePath();
+  return shape;
+}
+
+/**
+ * Side panel profile: taller than wide and tapered toward the top, like a Begode shell. The
+ * bevel adds 12 mm all round, so the outline is drawn that much smaller.
+ */
+function useSideShell() {
+  return useMemo(() => {
+    const bevel = 0.012;
+    const w0 = SHELL_W / 2 - bevel;
+    const w1 = w0 - 0.045;
+    const shape = roundedShape(
+      [
+        [-w0, -0.25 + bevel],
+        [w0, -0.25 + bevel],
+        [w1, 0.25 - bevel],
+        [-w1, 0.25 - bevel],
+      ],
+      0.07,
+    );
+    const depth = 0.026;
+    const geo = new THREE.ExtrudeGeometry(shape, {
+      depth,
+      bevelEnabled: true,
+      bevelThickness: bevel,
+      bevelSize: bevel,
+      bevelSegments: 5,
+      curveSegments: 16,
+    });
+    geo.translate(0, 0, -depth / 2);
+    geo.computeVertexNormals();
+    return geo;
+  }, []);
+}
+
+function ShellMaterial() {
+  return (
+    <meshPhysicalMaterial
+      color="#3A3A3C"
+      roughness={0.42}
+      metalness={0.05}
+      clearcoat={0.7}
+      clearcoatRoughness={0.25}
+    />
+  );
+}
+
+export function EucModel({ accent }: { accent: string }) {
+  const spin = useRef<THREE.Group>(null);
+  const body = useRef<THREE.Group>(null);
+  const root = useRef<THREE.Group>(null);
+
+  useFrame(() => {
+    const l = engine.latest;
+    if (spin.current) spin.current.rotation.z = -l.wheelAngle;
+    // Nose up (positive pitch) tilts the shell back around the axle; roll is a slight sway.
+    if (body.current) body.current.rotation.z = l.pitch * DEG;
+    if (root.current) root.current.rotation.x = l.roll * DEG;
+  });
+
+  const led = useMemo(() => new THREE.Color(accent), [accent]);
+  const sideShell = useSideShell();
+
+  return (
+    <group ref={root} position={[0, TIRE_R, 0]}>
+      {/* Rotating parts: tire, tread, rim, hub motor. */}
+      <group ref={spin}>
+        <mesh castShadow receiveShadow>
+          <torusGeometry args={[TIRE_R - TIRE_TUBE, TIRE_TUBE, 32, 120]} />
+          <meshStandardMaterial color="#111113" roughness={0.85} />
+        </mesh>
+        <TreadBlocks />
+        <mesh>
+          <torusGeometry args={[TIRE_R - TIRE_TUBE * 1.95, 0.011, 12, 96]} />
+          <meshStandardMaterial color="#AEAEB2" roughness={0.25} metalness={0.95} />
+        </mesh>
+        <mesh rotation={[Math.PI / 2, 0, 0]} castShadow>
+          <cylinderGeometry args={[0.155, 0.155, 0.09, 64]} />
+          <meshStandardMaterial color="#2C2C2E" roughness={0.35} metalness={0.85} />
+        </mesh>
+        {/* Hub caps with a slot so the spin reads even at rest. */}
+        {[1, -1].map((s) => (
+          <group key={s} position={[0, 0, s * 0.047]}>
+            <mesh rotation={[Math.PI / 2, 0, 0]}>
+              <cylinderGeometry args={[0.075, 0.075, 0.006, 48]} />
+              <meshStandardMaterial color="#636366" roughness={0.3} metalness={0.95} />
+            </mesh>
+            <mesh position={[0.04, 0, s * 0.0035]}>
+              <boxGeometry args={[0.05, 0.01, 0.002]} />
+              <meshStandardMaterial color="#111113" roughness={0.7} />
+            </mesh>
+          </group>
+        ))}
+      </group>
+
+      {/* Shell, pedals and lights pitch together around the axle. */}
+      <group ref={body}>
+        {[1, -1].map((s) => (
+          <group key={s} position={[0, 0.16, s * SHELL_Z]}>
+            <mesh geometry={sideShell} castShadow receiveShadow>
+              <ShellMaterial />
+            </mesh>
+            {/* Light strip: follows the UI accent until the emulated firmware drives the LEDs. */}
+            <mesh position={[0, -0.17, s * 0.0262]}>
+              <boxGeometry args={[0.3, 0.014, 0.002]} />
+              <meshStandardMaterial
+                color={led}
+                emissive={led}
+                emissiveIntensity={1.1}
+                toneMapped={false}
+              />
+            </mesh>
+            {/* Vent detail. */}
+            {[0, 1, 2, 3].map((i) => (
+              <mesh key={i} position={[-0.09 + i * 0.06, 0.14, s * 0.0262]}>
+                <boxGeometry args={[0.035, 0.006, 0.002]} />
+                <meshStandardMaterial color="#0A0A0B" roughness={1} />
+              </mesh>
+            ))}
+          </group>
+        ))}
+        {/* Fairing over the tire and the top bridge with the trolley handle. */}
+        <RoundedBox
+          args={[SHELL_W - 0.04, 0.12, 0.14]}
+          radius={0.04}
+          smoothness={4}
+          position={[0, 0.34, 0]}
+          castShadow
+        >
+          <ShellMaterial />
+        </RoundedBox>
+        <mesh position={[0, 0.405, 0]} castShadow>
+          <torusGeometry args={[0.085, 0.013, 12, 40, Math.PI]} />
+          <meshStandardMaterial color="#48484A" roughness={0.35} metalness={0.7} />
+        </mesh>
+        {/* Headlight on the front of the fairing, tail light behind. */}
+        <mesh position={[(SHELL_W - 0.04) / 2 + 0.001, 0.335, 0]}>
+          <boxGeometry args={[0.004, 0.036, 0.1]} />
+          <meshStandardMaterial
+            color="#F2F2F7"
+            emissive="#F2F2F7"
+            emissiveIntensity={1.4}
+            toneMapped={false}
+          />
+        </mesh>
+        <mesh position={[-(SHELL_W - 0.04) / 2 - 0.001, 0.335, 0]}>
+          <boxGeometry args={[0.004, 0.024, 0.08]} />
+          <meshStandardMaterial
+            color={series.current}
+            emissive={series.current}
+            emissiveIntensity={1.1}
+            toneMapped={false}
+          />
+        </mesh>
+        {/* Pedals: grip plate, edge and hinge bracket. */}
+        {[1, -1].map((s) => (
+          <group key={s} position={[0.01, -0.12, s * 0.17]}>
+            <mesh castShadow>
+              <boxGeometry args={[0.15, 0.018, 0.105]} />
+              <meshStandardMaterial color="#2C2C2E" roughness={0.6} metalness={0.5} />
+            </mesh>
+            <mesh position={[0, 0.0095, 0]}>
+              <boxGeometry args={[0.14, 0.002, 0.095]} />
+              <meshStandardMaterial color="#0E0E10" roughness={1} />
+            </mesh>
+            <mesh position={[0, 0.03, -s * 0.05]} castShadow>
+              <boxGeometry args={[0.05, 0.06, 0.016]} />
+              <meshStandardMaterial color="#48484A" roughness={0.4} metalness={0.7} />
+            </mesh>
+          </group>
+        ))}
+      </group>
+    </group>
+  );
+}

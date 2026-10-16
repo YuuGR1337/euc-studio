@@ -1,0 +1,360 @@
+@import "tailwindcss";
+@import "./tokens.css";
+@import "@fontsource/jetbrains-mono/latin-400.css";
+@import "@fontsource/jetbrains-mono/latin-500.css";
+@import "@fontsource/jetbrains-mono/latin-600.css";
+
+/* Interactive states: hover raises one surface step, press scales to 0.97 with the snappy
+   spring, focus is a 2px accent ring with a 2px offset. `live:` = not disabled, so a disabled
+   control keeps pointer events (its tooltip says why) without reacting to hover. */
+@custom-variant live (&:where(:not([aria-disabled="true"], :disabled, [data-disabled])));
+/* Static state previews for the gallery: data-force="hover|press|focus". */
+@custom-variant force-hover (&[data-force="hover"]);
+@custom-variant force-press (&[data-force="press"]);
+@custom-variant force-focus (&[data-force="focus"]);
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  html {
+    color-scheme: dark;
+    background: var(--color-bg);
+    color: var(--color-fg);
+    font-family: var(--font-ui);
+    font-size: 13px;
+    line-height: 18px;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+    font-synthesis-weight: none;
+  }
+
+  body {
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    cursor: default;
+  }
+
+  ::selection {
+    background: var(--color-accent-tint);
+    color: var(--color-fg);
+  }
+
+  :focus {
+    outline: none;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+  }
+
+  button,
+  [role="button"],
+  [role="tab"],
+  [role="switch"],
+  [role="option"],
+  [role="menuitem"] {
+    cursor: default;
+  }
+
+  /* Native scrollbars kept thin and quiet. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-track) transparent;
+  }
+
+  input,
+  textarea {
+    user-select: text;
+    -webkit-user-select: text;
+  }
+}
+
+/* Small caps-like label: 11px, 700, +1px tracking. A utility, so variants can apply it. */
+@utility label {
+  font-size: 11px;
+  line-height: 14px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--color-fg-2);
+}
+
+/* Numbers: JetBrains Mono with tabular figures, so digits never shift. */
+@utility num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+
+@layer components {
+  /* Press feedback shared by every pressable control (snappy spring via CSS linear()). */
+  .pressable {
+    transition-property: background-color, color, border-color, box-shadow, opacity, transform;
+    transition-duration:
+      var(--dur-hover), var(--dur-hover), var(--dur-hover), var(--dur-hover), var(--dur-hover),
+      var(--dur-snappy);
+    transition-timing-function:
+      var(--ease-hover), var(--ease-hover), var(--ease-hover), var(--ease-hover), var(--ease-hover),
+      var(--ease-snappy);
+  }
+  .pressable:active:where(:not([aria-disabled="true"], :disabled)),
+  .pressable[data-force="press"] {
+    transform: scale(0.97);
+  }
+
+  /* Gallery: a static focus ring identical to :focus-visible. */
+  [data-force="focus"] {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+  }
+}
+
+/* macOS overlay title bar (Tauri): leave room for the inset traffic lights. */
+[data-titlebar="overlay"] .runbar {
+  padding-left: 84px;
+}
+
+/* Dock collapse/expand animates flex-grow with the smooth token, but never while dragging. */
+.dock-animate > [data-panel] {
+  transition: flex-grow var(--dur-smooth) var(--ease-smooth);
+}
+
+/* Separators are the 8px gutters between dock cards. At rest they are empty; hover shows a short
+   grabber; dragging or keyboard focus shows a full-length accent line. */
+[data-separator] {
+  position: relative;
+  background: transparent;
+  outline: none;
+  z-index: 5;
+}
+[data-separator]::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  border-radius: 9999px;
+  background: var(--color-fg-3);
+  opacity: 0;
+  transform: translate(-50%, -50%);
+  transition:
+    opacity var(--dur-hover) var(--ease-hover),
+    background-color var(--dur-hover) var(--ease-hover),
+    width var(--dur-snappy) var(--ease-snappy),
+    height var(--dur-snappy) var(--ease-snappy);
+}
+[aria-orientation="vertical"][data-separator]::after {
+  width: 3px;
+  height: 32px;
+}
+[aria-orientation="horizontal"][data-separator]::after {
+  width: 32px;
+  height: 3px;
+}
+[data-separator="hover"]::after {
+  opacity: 1;
+}
+[data-separator="active"]::after,
+[data-separator="focus"]::after {
+  opacity: 1;
+  background: var(--color-accent);
+}
+[aria-orientation="vertical"][data-separator="active"]::after,
+[aria-orientation="vertical"][data-separator="focus"]::after {
+  width: 2px;
+  height: calc(100% - 24px);
+}
+[aria-orientation="horizontal"][data-separator="active"]::after,
+[aria-orientation="horizontal"][data-separator="focus"]::after {
+  width: calc(100% - 24px);
+  height: 2px;
+}
+
+/* Toasts slide in from the right with the smooth token and can be swiped away. */
+.toast[data-state="open"] {
+  animation: toast-in var(--dur-smooth) var(--ease-smooth);
+}
+.toast[data-state="closed"] {
+  animation: toast-out 160ms ease-in forwards;
+}
+.toast[data-swipe="move"] {
+  transform: translateX(var(--radix-toast-swipe-move-x));
+}
+.toast[data-swipe="cancel"] {
+  transform: translateX(0);
+  transition: transform var(--dur-snappy) var(--ease-snappy);
+}
+.toast[data-swipe="end"] {
+  animation: toast-swipe-out 160ms ease-out forwards;
+}
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateX(24px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes toast-out {
+  to {
+    opacity: 0;
+    transform: translateX(12px) scale(0.98);
+  }
+}
+@keyframes toast-swipe-out {
+  from {
+    transform: translateX(var(--radix-toast-swipe-end-x));
+  }
+  to {
+    opacity: 0;
+    transform: translateX(110%);
+  }
+}
+
+/* Indeterminate progress sweep for named waits. */
+@keyframes sweep {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(250%);
+  }
+}
+
+@keyframes live-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.45;
+    transform: scale(0.82);
+  }
+}
+
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes pop-out {
+  from {
+    opacity: 1;
+    transform: none;
+  }
+  to {
+    opacity: 0;
+    transform: translateY(2px) scale(0.98);
+  }
+}
+
+/* Radix popovers (tooltip, select, menu) enter with the snappy spring, leave quickly. */
+.pop[data-state="open"],
+.pop[data-state="delayed-open"],
+.pop[data-state="instant-open"] {
+  animation: pop-in var(--dur-snappy) var(--ease-snappy);
+}
+.pop[data-state="closed"] {
+  animation: pop-out 120ms ease-in forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+  }
+}
+
+/* uPlot: base styles (we skip uPlot.min.css to keep its legend and cursor in our language). */
+.uplot,
+.uplot *,
+.uplot *::before,
+.uplot *::after {
+  box-sizing: border-box;
+}
+.uplot {
+  font-family: var(--font-mono);
+  line-height: 1;
+  width: min-content;
+}
+.u-wrap {
+  position: relative;
+  user-select: none;
+}
+.u-over,
+.u-under {
+  position: absolute;
+}
+.u-under {
+  overflow: hidden;
+}
+.uplot canvas {
+  display: block;
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+.u-axis {
+  position: absolute;
+}
+.u-legend {
+  display: none;
+}
+.u-select {
+  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+  position: absolute;
+  pointer-events: none;
+}
+.u-cursor-x,
+.u-cursor-y {
+  position: absolute;
+  left: 0;
+  top: 0;
+  pointer-events: none;
+  will-change: transform;
+}
+.u-hz .u-cursor-x,
+.u-vt .u-cursor-y {
+  height: 100%;
+  border-right: 1px solid var(--color-hairline-strong);
+}
+.u-hz .u-cursor-y,
+.u-vt .u-cursor-x {
+  width: 100%;
+  border-bottom: 1px dashed transparent;
+}
+.u-cursor-pt {
+  position: absolute;
+  top: 0;
+  left: 0;
+  border-radius: 50%;
+  border: 0 solid;
+  pointer-events: none;
+  will-change: transform;
+  background-clip: padding-box !important;
+}
+.u-axis.u-off,
+.u-select.u-off,
+.u-cursor-x.u-off,
+.u-cursor-y.u-off,
+.u-cursor-pt.u-off {
+  display: none;
+}

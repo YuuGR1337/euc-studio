@@ -1,0 +1,27 @@
+EUC Studio
+Copyright 2026 Tarik Caramanico
+Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+
+Third-party components
+----------------------
+This repository does not vendor third-party source code. Components are fetched at build time from their
+registries or pinned releases and keep their own licenses:
+
+- Rust crates of the engine and CLI: see crates/THIRD_PARTY.md (all permissive; GPL is denied by deny.toml).
+- Firmware: CMSIS 6 Core headers (Apache-2.0) and Unity (MIT), downloaded at configure time with pinned
+  versions and sha256 checks; see firmware/README.md.
+- EUC Studio app: npm packages and fonts, see app/THIRD_PARTY.md.
+
+Binary releases include the full license texts of everything they bundle.
+
+Trademarks
+----------
+Begode, Gotway and other brand and product names are trademarks of their respective owners. EUC Studio is an
+independent project. It is not affiliated with, endorsed by or sponsored by any EUC manufacturer. Brand names
+are used only to say which hardware a profile or firmware targets.
+
+Stock firmware
+--------------
+EUC Studio does not include or redistribute any manufacturer's firmware. The `euc fetch` command downloads
+official images from the manufacturer's public update server to the user's own machine and checks them against
+pinned sha256 hashes.
