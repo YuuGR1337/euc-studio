@@ -92,3 +92,4 @@ The bit is the quirk's position in the SIL mask.
 |---|---|---|---|---|---|
 | 42 | `NO_WATCHDOG` | on | off | none: IWDG and WWDG are never started | No watchdog: a hung main loop or ISR leaves every output in its last state. |
 | 43 | `HSE_START_HANG` | on | off | 0x080083B8 SetSysClock | If the HSE crystal does not start, clock setup loops forever. |
+| 44 | `DISPLAY_IN_BALANCE_TICK` | on | off | display refresh in RTC tick | The blocking display transfer runs in the balance interrupt and can delay a balance command. |

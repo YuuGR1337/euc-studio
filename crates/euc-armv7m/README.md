@@ -101,7 +101,7 @@ Apple M3 Max, release build:
 | `benches/mips.rs` (criterion, medians) | 181 MIPS load/ALU/store loop, 165 MIPS CRC-32 with an IT block, 162 MIPS calls with `PUSH`/`POP` |
 | `examples/spin` (quanta of 4000, as the machine runs) | 200, 170 and 160 MIPS on the same kernels |
 | Stock image, whole machine on our core (`tests/stock_boot.rs`) | 30 s simulated in 11.0 s: **2.7x real time**, 150 MIPS of firmware with the engine |
-| Modeled CPI of the stock image (TRM cycle model) | 1.57 (the machine charges a fixed 1.25 today) |
+| Modeled CPI of the stock image (TRM cycle model) | 1.57 (the machine uses CPI 2.0 plus exception overhead; see [CPU timing](../../docs/models/cpu-timing.md)) |
 
 The cycle model is the Cortex-M3 TRM's at zero flash wait states, with three choices where the
 TRM gives a range: pipeline refill `P = 2`, early-terminating multiplies and divides spread over

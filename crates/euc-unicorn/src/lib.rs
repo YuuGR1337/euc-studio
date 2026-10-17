@@ -52,7 +52,7 @@ pub enum Quantum {
     /// and a run overshoots by less than one block. One callback per block.
     #[default]
     Block,
-    /// Stop after exactly the budget, with Unicorn's per-instruction counter: identical quanta
+    /// Stop after exactly the budget, with a per-instruction hook: identical quanta
     /// to the Python reference harness, at one callback per instruction (expensive on Apple
     /// Silicon, where every Unicorn callback toggles JIT write protection).
     Exact,
@@ -80,10 +80,12 @@ struct Shared {
     spent: Vec<UcHookId>,
     /// How runs count their budget.
     quantum: Quantum,
-    /// Instruction budget of the current run ([`Quantum::Block`]).
+    /// Instruction budget of the current run.
     budget: u64,
-    /// Instructions of the blocks entered so far in the current run ([`Quantum::Block`]).
+    /// Instructions entered so far (whole blocks with [`Quantum::Block`]).
     executed: u64,
+    /// PC counted by the last exact hook; a failed target fetch has no hook of its own.
+    instruction_pc: Option<u32>,
     /// Instructions per translated block, by `(address, size in bytes)`.
     block_sizes: HashMap<(u32, u32), u32>,
 }
@@ -123,7 +125,6 @@ fn stop(uc: &mut Unicorn<'_, Shared>, exit: Exit) {
 /// Unicorn running a Cortex-M3.
 pub struct UnicornCpu {
     uc: Unicorn<'static, Shared>,
-    quantum: Quantum,
     regs: CoreRegs,
     synced: CoreRegs,
     retired: u64,
@@ -179,9 +180,11 @@ impl UnicornCpu {
             .map_err(UnicornError)?;
         if quantum == Quantum::Block {
             uc.add_block_hook(1, 0, on_block).map_err(UnicornError)?;
+        } else {
+            uc.add_code_hook(1, 0, on_instruction).map_err(UnicornError)?;
         }
         let regs = read_regs(&uc);
-        Ok(Self { uc, quantum, regs: regs.clone(), synced: regs, retired: 0, timeout_us: 0 })
+        Ok(Self { uc, regs: regs.clone(), synced: regs, retired: 0, timeout_us: 0 })
     }
 }
 
@@ -370,6 +373,18 @@ fn on_block(uc: &mut Unicorn<'_, Shared>, addr: u64, size: u32) {
     uc.get_data_mut().executed += u64::from(count);
 }
 
+/// Keep the exact count even when a bus access or exception return yields early. Unicorn's
+/// built-in count bounds a run but does not report how many instructions ran before a yield.
+fn on_instruction(uc: &mut Unicorn<'_, Shared>, addr: u64, _size: u32) {
+    let shared = uc.get_data_mut();
+    if shared.executed >= shared.budget || shared.exit.is_some() {
+        let _ = uc.emu_stop();
+        return;
+    }
+    shared.executed += 1;
+    shared.instruction_pc = Some(addr as u32);
+}
+
 /// Instructions in `size` bytes of Thumb code at `addr`: a first halfword starting `0b11101`,
 /// `0b11110` or `0b11111` opens a 32-bit instruction, anything else is 16-bit.
 fn thumb_instructions(uc: &Unicorn<'_, Shared>, addr: u64, size: u32) -> u32 {
@@ -431,16 +446,21 @@ impl Cpu for UnicornCpu {
         shared.exit = None;
         shared.budget = u64::from(max_instr);
         shared.executed = 0;
-        let count = if self.quantum == Quantum::Exact { max_instr as usize } else { 0 };
-        let result = self.uc.emu_start(u64::from(self.regs.pc | 1), 0, self.timeout_us, count);
+        shared.instruction_pc = None;
+        let result = self.uc.emu_start(u64::from(self.regs.pc | 1), 0, self.timeout_us, 0);
+        let stopped_pc = read_reg(&self.uc, RegisterARM::PC) & !1;
         let shared = self.uc.get_data_mut();
         shared.bus = None;
         let exit = shared.exit.take();
-        let executed = match self.quantum {
-            Quantum::Block => shared.executed,
-            Quantum::Exact if exit.is_none() => u64::from(max_instr),
-            Quantum::Exact => 0,
-        };
+        let mut executed = shared.executed;
+        if shared.quantum == Quantum::Exact
+            && (matches!(exit, Some(Exit::Fault(_) | Exit::Breakpoint(_))) || result.is_err())
+            && shared.instruction_pc == Some(stopped_pc)
+        {
+            // The hook runs before the instruction. A fault or BKPT leaves that instruction
+            // at PC, so only earlier instructions retired.
+            executed = executed.saturating_sub(1);
+        }
         for hook in std::mem::take(&mut shared.spent) {
             let _ = self.uc.remove_hook(hook);
         }
@@ -463,8 +483,7 @@ impl Cpu for UnicornCpu {
         &mut self.regs
     }
 
-    /// Exact with [`Quantum::Block`]. With [`Quantum::Exact`], a run stopped early adds nothing:
-    /// Unicorn's counter cannot say how far it got.
+    /// Includes instructions before an early yield. Block quanta count the whole entered block.
     fn retired(&self) -> u64 {
         self.retired
     }
@@ -612,7 +631,35 @@ mod tests {
         let mut rig = rig_with(Quantum::Exact);
         let mut bus = TestBus { yield_on_read: true, ..TestBus::default() };
         assert_eq!(rig.cpu.run(&mut bus, 20), Exit::Yield);
-        assert_eq!(rig.cpu.retired(), 0, "an early stop retires nothing Unicorn can count");
+        assert_eq!(rig.cpu.retired(), 1, "the load retires before its bus access yields");
+    }
+
+    #[test]
+    fn exact_quanta_do_not_retire_a_faulting_or_breakpoint_instruction() {
+        let mut rig = rig_with(Quantum::Exact);
+        rig.cpu.regs_mut().r[1] = 0x6000_0000;
+        assert!(matches!(rig.cpu.run(&mut TestBus::default(), 10), Exit::Fault(_)));
+        assert_eq!(rig.cpu.retired(), 0);
+        assert_eq!(rig.cpu.regs().pc, FLASH);
+
+        let mut rig = rig_with(Quantum::Exact);
+        rig.flash[4..6].copy_from_slice(&0xBE00_u16.to_le_bytes()); // BKPT after load and add
+        let mut bus = TestBus::default();
+        assert!(matches!(rig.cpu.run(&mut bus, 10), Exit::Breakpoint(_)));
+        assert_eq!(rig.cpu.retired(), 2, "the preceding load and add completed");
+        assert_eq!(rig.cpu.regs().pc, FLASH + 4);
+    }
+
+    #[test]
+    fn an_instruction_fetch_fault_keeps_the_completed_branch_in_the_count() {
+        let mut rig = rig_with(Quantum::Exact);
+        rig.flash[..2].copy_from_slice(&0x2103_u16.to_le_bytes()); // movs r1, #3
+        rig.flash[2..4].copy_from_slice(&0x4700_u16.to_le_bytes()); // bx r0
+        rig.cpu.regs_mut().r[0] = 0x6000_0001;
+        assert!(matches!(rig.cpu.run(&mut TestBus::default(), 10), Exit::Fault(_)));
+        assert_eq!(rig.cpu.regs().r[1], 3);
+        assert_eq!(rig.cpu.regs().pc, 0x6000_0000);
+        assert_eq!(rig.cpu.retired(), 2, "both instructions completed before the target fetch failed");
     }
 
     #[test]

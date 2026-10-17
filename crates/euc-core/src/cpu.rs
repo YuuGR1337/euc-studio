@@ -94,8 +94,8 @@ pub trait Cpu {
 pub enum Exit {
     /// The instruction budget was used (see [`Cpu::run`]).
     Budget,
-    /// The bus asked for the run loop ([`Bus::take_yield`]). Backends that cannot count every
-    /// instruction (Unicorn) may have retired some instructions they do not report.
+    /// The bus asked for the run loop ([`Bus::take_yield`]). Exact backends retain the completed
+    /// instruction count; block backends may execute through the end of the current block.
     Yield,
     /// `SVC #imm` retired; PC is the return address the exception frame needs.
     Svc(u8),

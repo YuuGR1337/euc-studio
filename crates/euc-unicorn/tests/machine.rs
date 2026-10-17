@@ -132,7 +132,8 @@ fn interrupts_polls_and_returns_work_end_to_end() {
         plant: PlantState::default(),
         injections: Vec::new(),
         power_cycles: Vec::new(),
-        cpi: 1.25,
+        cpi: euc_sim::DEFAULT_CPI,
+        exception_timing: euc_sim::ExceptionTiming::default(),
         max_quantum: 4000,
         marker_window_s: 0.0,
     };

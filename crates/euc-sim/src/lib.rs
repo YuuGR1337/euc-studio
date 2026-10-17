@@ -3,8 +3,9 @@
 //! A [`Machine`] is built from a wheel's `board.toml` (instances, wiring, analog channels) and
 //! a firmware image, with any [`euc_core::Cpu`] backend. Components come from a
 //! [`euc_core::Registry`]; [`registry`] holds every kind this repo models. The run loop and the
-//! access path are ports of the Python reference harness, so a run makes the same decisions at
-//! the same simulated cycles.
+//! access path are ports of the Python reference harness. Explicit reference timing (CPI 1.25
+//! and [`ExceptionTiming::REFERENCE`]) preserves its cycle accounting; shipped callers use
+//! [`DEFAULT_CPI`] and the default exception costs.
 //!
 //! With a live [`Plant`] (the electrical plant and the body physics, see [`plant`]) a
 //! [`Session`] runs the wheel with its rider, samples [`euc_telemetry::Snapshot`]s for viewers
@@ -30,7 +31,9 @@ mod wheel;
 use euc_core::Registry;
 
 pub use board::{Action, BoardLogic, Dwt};
-pub use machine::{BOARD, BuildError, CpuFactory, Machine, MachineConfig, PLANT, exception_name};
+pub use machine::{
+    BOARD, BuildError, CpuFactory, DEFAULT_CPI, ExceptionTiming, Machine, MachineConfig, PLANT, exception_name,
+};
 pub use plant::{Live, Plant, PlantState};
 pub use report::Report;
 pub use session::Session;

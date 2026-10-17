@@ -127,3 +127,5 @@ EUC_QUIRK_DEF(NO_WATCHDOG, 1, 0, "none: IWDG and WWDG are never started",
               "No watchdog: a hung main loop or ISR leaves every output in its last state.")
 EUC_QUIRK_DEF(HSE_START_HANG, 1, 0, "0x080083B8 SetSysClock",
               "If the HSE crystal does not start, clock setup loops forever.")
+EUC_QUIRK_DEF(DISPLAY_IN_BALANCE_TICK, 1, 0, "display refresh in RTC tick",
+              "The blocking display transfer runs in the balance interrupt and can delay a balance command.")

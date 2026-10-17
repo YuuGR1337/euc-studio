@@ -12,6 +12,7 @@ use euc_core::{
 };
 
 use crate::config::{MemoryMap, Span};
+use crate::machine::ExceptionTiming;
 use crate::memory::{Memory, MemoryBus};
 use crate::plant::Plant;
 
@@ -96,8 +97,9 @@ pub struct System {
     pub(crate) hclk: u64,
     /// Cycle the current quantum started at.
     pub(crate) chunk_start: u64,
-    /// Cycles a poll fast-forward skipped inside the current quantum.
+    /// Extra cycles for poll fast-forwards and exception returns inside the current quantum.
     pub(crate) skip: u64,
+    pub(crate) exception_timing: ExceptionTiming,
     /// A poll fast-forward ended the current quantum early.
     pub(crate) early: bool,
     /// End of the current `run` call; caps fast-forwards.
@@ -146,6 +148,7 @@ impl System {
             hclk,
             chunk_start: 0,
             skip: 0,
+            exception_timing: ExceptionTiming::default(),
             early: false,
             run_end: None,
             mem,
@@ -597,8 +600,17 @@ impl Bus for System {
             self.blocker("cpu-exception", text, true);
             return;
         }
-        if let Err(fault) = self.exc.exit(exc_return, regs, &mut MemoryBus(&mut self.mem)) {
-            self.blocker("cpu-exception", format!("exception return: {fault}"), true);
+        match self.exc.exit(exc_return, regs, &mut MemoryBus(&mut self.mem)) {
+            Ok(next) => {
+                let cost = if next.is_some() { self.exception_timing.tail_chain } else { self.exception_timing.exit };
+                self.skip += cost;
+                // Return to the scheduler before executing in the restored context. A timer
+                // or a higher-priority interrupt can become due during the context switch.
+                if cost != 0 {
+                    self.yield_pending = true;
+                }
+            }
+            Err(fault) => self.blocker("cpu-exception", format!("exception return: {fault}"), true),
         }
     }
 

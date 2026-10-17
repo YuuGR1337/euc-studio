@@ -17,7 +17,8 @@ target_include_directories(euc_port_stm32f1 PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/
 target_link_libraries(euc_port_stm32f1 PUBLIC cmsis_core euc_core_headers euc_profile)
 
 # Keep GCC from recognising the loops in memcpy/memset as memcpy/memset calls (infinite recursion).
+# Keep these routines outside LTO so late compiler-generated libc calls still find their symbols.
 # clang-tidy cannot parse that GCC-only option, so this one file is not linted (SKIP_LINTING, CMake 3.27+).
 set_source_files_properties(freestanding.c PROPERTIES
-    COMPILE_OPTIONS "-fno-tree-loop-distribute-patterns"
+    COMPILE_OPTIONS "-fno-tree-loop-distribute-patterns;-fno-lto"
     SKIP_LINTING ON)

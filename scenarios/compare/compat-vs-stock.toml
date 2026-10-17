@@ -71,10 +71,10 @@ note = "As overlean-top-speed-30pct with the PWM tiltback off: near the limit th
 until_s = 18.0
 
 [scenario.hill-climb-low-battery]
-note = "The low pack sags several volts under the climb's current, so its voltage and current differ more; the 150 m ride adds up more distance."
+note = "The low pack sags several volts under the climb's current, so its voltage and current differ more. With CPI 2.0, exception costs and the LTO target build, the 150 m ride accumulates 0.315 m of distance difference; pitch and speed retain their default limits."
 [scenario.hill-climb-low-battery.channels]
 battery_v = 1.5       # 0.81 V measured
-distance_m = 0.2      # 0.088 m measured
+distance_m = 0.5      # 0.315 m measured with CPI 2.0 and the LTO target build
 [scenario.hill-climb-low-battery.channels_rms]
 battery_a = 2.0
 

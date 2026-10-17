@@ -402,8 +402,17 @@ impl Cpu for LockStep {
 
 #[test]
 fn stock_image_runs_in_lockstep_with_unicorn() {
-    let Some((wheel, image)) = common::stock() else { return };
     let seconds = common::seconds("EUC_LOCKSTEP_SECONDS", 30.0);
+    check_stock_lockstep(seconds, 1.25, euc_sim::ExceptionTiming::REFERENCE);
+}
+
+#[test]
+fn stock_image_keeps_lockstep_with_shipped_exception_timing() {
+    check_stock_lockstep(6.0, euc_sim::DEFAULT_CPI, euc_sim::ExceptionTiming::default());
+}
+
+fn check_stock_lockstep(seconds: f64, cpi: f64, exception_timing: euc_sim::ExceptionTiming) {
+    let Some((wheel, image)) = common::stock() else { return };
     let stats = Rc::new(RefCell::new(Stats::default()));
     let shared = Rc::clone(&stats);
     let cpu = Box::new(move |regions: &[Region]| {
@@ -412,7 +421,8 @@ fn stock_image_runs_in_lockstep_with_unicorn() {
         let cpu = unsafe { LockStep::new(regions, shared) }?;
         Ok(Box::new(cpu) as Box<dyn Cpu>)
     });
-    let common::Run { report, wall, .. } = common::boot(&wheel, &image, seconds, cpu);
+    let common::Run { report, wall, .. } =
+        common::boot_with_timing(&wheel, &image, seconds, cpu, cpi, exception_timing);
     let stats = stats.borrow();
     eprintln!(
         "lockstep: {seconds} s simulated in {wall:.1} s: {} quanta, {} instructions, {} bus calls, {} exception \

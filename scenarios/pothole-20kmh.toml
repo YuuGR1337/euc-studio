@@ -77,6 +77,10 @@ by_s = 22.0
 check = "upright"
 
 [[expect]]
+check = "speed_reached"
+kmh = 19.0           # reject a run that limps before the intended 20 km/h approach
+
+[[expect]]
 check = "no_cutoff"
 
 [[expect]]

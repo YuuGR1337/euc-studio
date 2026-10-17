@@ -18,6 +18,7 @@
       "toolchainFile": "${sourceDir}/cmake/toolchain-arm-none-eabi.cmake",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "MinSizeRel",
+        "CMAKE_INTERPROCEDURAL_OPTIMIZATION": "ON",
         "EUC_BOARD": "begode-extreme"
       }
     },

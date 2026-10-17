@@ -48,8 +48,21 @@ pub struct Run {
 }
 
 /// Boots the image on `cpu` and runs it for `seconds` of simulated time, with the stock CLI
-/// settings (CPI 1.25, quanta of at most 4000 instructions) and the `V`/`N` injections.
+/// reference-harness settings (CPI 1.25, no exception overhead, quanta of at most 4000
+/// instructions) and the `V`/`N` injections. These are not the shipped timing defaults.
 pub fn boot(wheel: &WheelProfile, image: &[u8], seconds: f64, cpu: Box<CpuFactory<'_>>) -> Run {
+    boot_with_timing(wheel, image, seconds, cpu, 1.25, euc_sim::ExceptionTiming::REFERENCE)
+}
+
+/// Boots with explicit timing, so lock-step tests cover both historical and shipped defaults.
+pub fn boot_with_timing(
+    wheel: &WheelProfile,
+    image: &[u8],
+    seconds: f64,
+    cpu: Box<CpuFactory<'_>>,
+    cpi: f64,
+    exception_timing: euc_sim::ExceptionTiming,
+) -> Run {
     let source = ProfileSource::Builtin;
     let board: BoardFile = toml::from_str(&source.read(WHEEL, "board.toml").unwrap()).unwrap();
     let stockmap: StockMap = toml::from_str(&source.read(WHEEL, "stockmap.toml").unwrap()).unwrap();
@@ -64,7 +77,8 @@ pub fn boot(wheel: &WheelProfile, image: &[u8], seconds: f64, cpu: Box<CpuFactor
         plant: PlantState::default(),
         injections: injections.clone(),
         power_cycles: Vec::new(),
-        cpi: 1.25,
+        cpi,
+        exception_timing,
         max_quantum: 4000,
         marker_window_s: 4.0,
     };
