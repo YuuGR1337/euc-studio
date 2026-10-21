@@ -150,9 +150,10 @@ The sampled battery-voltage difference reaches 0.53842 V against the unchanged 0
 Quanta 4000 and 2000 pass that window only.
 The [full-effort report](full-effort-acceptance.md#comparison-limits) records this limit separately from the later phase failures.
 
-The standard scenario reports do not expose the first disabling detector.
-Trace the matching ELF's detector counters and first disable store before changing compat behavior.
-Keep the current scenario commands, verdicts, and comparison thresholds during that investigation.
+The [SOC50 investigation](soc50-investigation.md) now identifies error detection as the first cutoff in all six stock/compat cases.
+Its launch trace also identifies similar PWM transients on opposite sides of the failing sample.
+The earlier trajectory and timing causes remain open.
+Keep the current scenario commands, verdicts, and comparison thresholds during further investigation.
 
 The inductance study uses estimated motor values and 100 Hz voltage samples.
 Warning onset does not establish a useful pedal-angle lead or an exact circle-limiter activation time.

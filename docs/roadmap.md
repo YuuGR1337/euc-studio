@@ -37,6 +37,8 @@ M4 and M5 work can proceed in separate branches against the fixed baseline.
 Changes to the physical model require renewed scenario evidence.
 A limited comparison window does not establish full-run firmware equivalence.
 The current SOC50 comparison differences remain documented in [full-effort acceptance](models/full-effort-acceptance.md).
+The [SOC50 investigation](models/soc50-investigation.md) identifies all six first cutoff detectors and the launch sample's PWM timing difference.
+Earlier divergence causes and full-run equivalence remain open.
 
 ## Model limits
 

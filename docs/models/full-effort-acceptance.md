@@ -96,10 +96,10 @@ At clean quantum 2000, the fall occurs at 24.00 s and cutoff follows at 24.03 s.
 The cutoff does not initiate that particular fall.
 
 The standard reports expose `balance_disabled`, but do not identify the first disabling instruction or detector.
-Instruction timing and current tracking near voltage saturation remain possible causes of the stock/compat difference.
-These reports do not establish either cause.
-A further investigation needs aligned current, voltage, detector-counter, and first-store traces.
-No speculative compat behavior change follows from this matrix.
+The later [SOC50 investigation](soc50-investigation.md) identifies the error detector as the first cause in all six stock/compat runs.
+Its instruction observer preserves the accepted sample streams and outcomes.
+The stock/compat trajectory difference before those cutoffs remains open.
+No compat behavior change follows from this matrix.
 
 ## Comparison limits
 
@@ -114,7 +114,9 @@ The 50% SOC launch comparison passes at quanta 4000 and 2000.
 It fails at quantum 3000.
 Battery voltage differs by 0.53842 V at 7.08 s against the unchanged 0.5 V limit.
 The largest speed difference in that window is 0.08744 km/h.
-This sampled voltage difference remains unresolved.
+The later [SOC50 trace](soc50-investigation.md#the-sample-falls-between-two-similar-pwm-transients) places this sample between similar PWM transients, approximately 80 µs apart.
+The comparison still fails its unchanged limit.
+The earlier cause of the transient timing difference remains open.
 
 ## Identity and reproduction
 

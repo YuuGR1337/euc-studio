@@ -75,6 +75,13 @@ No tolerance, window, same_checks rule, or C firmware behavior changed to hide t
 See [full-effort acceptance](models/full-effort-acceptance.md) and [clean cutoff validation](models/clean-cutoff-next.md).
 The current comparison windows do not prove complete stock/compat equivalence.
 
+The later [SOC50 investigation](models/soc50-investigation.md) runs on `soc50-investigation`, from integration commit `70a827e`.
+All six first cutoffs come from the balance-error detector.
+The launch failure samples similar PWM transients approximately 80 µs apart.
+Observation traces preserve the accepted results.
+The earlier timing and high-speed trajectory causes remain open.
+No production code, firmware image, physical input, or acceptance limit changes in this investigation.
+
 ## Open limits
 
 Suspension geometry, tire behavior, motor values, and rider parameters still include estimates.
