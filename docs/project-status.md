@@ -81,6 +81,9 @@ The launch failure samples similar PWM transients approximately 80 µs apart.
 Observation traces preserve the accepted results.
 The earlier timing and high-speed trajectory causes remain open.
 No production code, firmware image, physical input, or acceptance limit changes in this investigation.
+The [follow-up](models/soc50-high-speed-investigation.md) confirms the launch Hall transition and rules out the actuator cap in two stock counterfactuals.
+Sixteen additional quantum studies expose timing sensitivity down to one instruction per quantum.
+Both one-instruction cases cut before 70 km/h; full-run equivalence remains open.
 
 ## Open limits
 

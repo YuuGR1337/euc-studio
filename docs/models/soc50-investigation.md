@@ -5,6 +5,7 @@ Date: 2026-10-21. Source base: `70a827e`. Investigation branch: `soc50-investiga
 All six stock/compat cutoffs start with the balance-error detector.
 The launch comparison samples opposite sides of similar PWM transients, approximately 80 µs apart.
 Full-run equivalence remains open; this study changes no production behavior.
+The [follow-up investigation](soc50-high-speed-investigation.md) identifies the Hall transition and tests high-speed command and timing hypotheses.
 
 This study separates the launch voltage comparison from the later cutoff difference.
 It uses the accepted [full-effort baseline](full-effort-acceptance.md).
@@ -122,7 +123,8 @@ These are firmware Q15 values, not physical ampere or volt measurements.
 
 The failing q3000 sample therefore falls between similar current-loop transients.
 It does not establish a persistent 0.538 V battery-model offset.
-The earlier cause of the current-coordinate change and timing difference remains open.
+The [follow-up Hall trace](soc50-high-speed-investigation.md#launch-cause-confirmed) identifies a shared new-sector angle reset as the current-coordinate trigger.
+The earlier trajectory phase difference remains open.
 These traces do not prove identical trajectories separated by a constant time shift.
 The original comparison still fails its unchanged limit.
 
@@ -191,7 +193,7 @@ Extending the error deadline would change safety behavior without resolving that
 ## Open questions
 
 1. Which startup instruction or peripheral event first separates stock q3000 from q4000?
-2. What causes the similar current-coordinate transients to reach PWM at different times near 7.08 s?
+2. What establishes the trajectory phase difference before the shared Hall transition near 7.08 s?
 3. Where does sustained current-tracking error first separate the high-speed stock and compat trajectories?
 4. How can snapshots report a consistent electrical timestamp without changing scenario or peripheral scheduling?
 

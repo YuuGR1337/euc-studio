@@ -116,8 +116,9 @@ covers the motor gates):
 
 - **Actuator boundary, both profiles.** The motor command the current loop reads (`motor_command`) is always
   finite and within the soft-start limit; a NaN or infinity is published as 0. This is a deliberate difference
-  from the stock firmware, also in compat. Finite commands pass unchanged, so normal-path lock-step stays
-  bit-exact; the lock-step harness reports NaN events separately instead of comparing them.
+  from the stock firmware, also in compat. Finite commands within the current soft-start limit pass this
+  balance boundary unchanged. The separate motor boundary below can still clamp them. The lock-step
+  harness reports NaN events separately instead of comparing them.
 - **Clean profile (quirk `NAN_FAIL_OPEN` off).** A NaN or infinity in the attitude filter, the law, the
   ramp-down or the output stage sets the command to 0 at once, resets the attitude filter, keeps the motor off
   until power-off (no automatic recovery) and latches `numeric_fault` for the alarm task and telemetry. The
@@ -129,6 +130,10 @@ covers the motor gates):
 - **Motor boundary, both profiles.** The drive checks the command again where it enters
   (`euc_motor_set_command()`: finite, within ±1050). A hall fault, the start-up current-sensor check or a
   system hard cut turns the bridge off until reset, as in the stock firmware.
+  Stock's soft-start limit alternates between 1050 and 1051. Its setter can forward that overshoot;
+  our motor boundary deliberately clamps it. Thus, finite commands are not universally bit-exact with
+  stock. The [SOC50 investigation](../docs/models/soc50-high-speed-investigation.md) tests this difference
+  separately and retains the boundary.
 - **Settings storage.** Clean records carry a CRC-16 in bits the stock firmware never uses, so a torn write
   is skipped, and either firmware can still read the other's journal. A field that no command can produce
   (a record from stock, the backup registers or a damaged slot) loads as its default

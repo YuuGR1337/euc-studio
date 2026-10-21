@@ -39,6 +39,7 @@ A limited comparison window does not establish full-run firmware equivalence.
 The current SOC50 comparison differences remain documented in [full-effort acceptance](models/full-effort-acceptance.md).
 The [SOC50 investigation](models/soc50-investigation.md) identifies all six first cutoff detectors and the launch sample's PWM timing difference.
 Earlier divergence causes and full-run equivalence remain open.
+The [high-speed follow-up](models/soc50-high-speed-investigation.md) separates the confirmed Hall trigger, actuator-cap experiment, and numerical timing sensitivity.
 
 ## Model limits
 
