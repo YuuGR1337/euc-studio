@@ -15,20 +15,37 @@
 Other brands, boards and processors (Cortex-M4F, RISC-V, other EUC protocols) follow the same path: a wheel profile,
 peripheral models for its MCU, a protocol plugin, and the onboarding guide in `docs/adding-a-wheel.md` (available now).
 
-## Completion status
+## Current checkpoint
 
-M3 and M4 remain incomplete as full product milestones.
-The [request ledger](project-status.md) tracks implementation, checks, active work, and remaining phases.
-The current integration does not complete M6, M7, or M8.
+The 2026-10-21 integration combines the rider, desktop, recording, Python, and engine work.
+The [request ledger](project-status.md) records the checks and remaining limits.
+The articulated rider works in Free Ride. Scripted comparisons retain the rigid baseline by default.
+The local integration does not complete every M3, M4, or M5 acceptance criterion.
+M6, M7, and M8 remain separate milestones.
 
-A working engine does not complete every desktop workflow in the same milestone.
-README.md lists implemented capabilities and remaining work separately.
-The desktop completion plan is [here](superpowers/plans/2026-10-16-project-completion.md).
-Tune and Compare now use real backend data. Integrated runtime checks remain pending.
-The [human and free ride plan](models/human-and-free-ride.md) defines the rider and map increments.
-The completion branch now implements manual controls and generated maps with the rigid rider.
-Articulated human motion remains incomplete. Runtime and hardware evidence remain separate requirements.
-The [UI review](../plans/reports/code-review-2026-10-16-desktop-ux.md) records interface corrections and review limits.
-Physical validation needs measurements, including battery behavior near empty charge.
-A simulator result establishes behavior for its specified model, timing, and scenario duration.
-It does not establish a real wheel's operating limits.
+## Next sequence
+
+1. Review the integrated checkpoint, run hosted CI on all three operating systems, and merge the tested baseline.
+2. Close M3–M5 evidence gaps with fixed model inputs. Resolve full-run stock/compat differences, including the SOC50 case.
+3. Complete rider and physics validation. Add independent foot contact, reduce external aids, and calibrate suspension and motor inputs.
+4. Complete the SIL host and developer controls: runtime quirks, bounded parameter edits, presets, and scenario sweeps.
+5. Complete M6 transport and recovery. Run at least 100 simulated flashes with injected faults.
+6. Complete M7 distribution: signed bundles, documentation site, browser demo, and a second working wheel.
+7. Start M8 under its separate bench procedure. Obtain the full SWD backup before hardware firmware tests.
+
+M4 and M5 work can proceed in separate branches against the fixed baseline.
+Changes to the physical model require renewed scenario evidence.
+A limited comparison window does not establish full-run firmware equivalence.
+The current SOC50 comparison differences remain documented in [full-effort acceptance](models/full-effort-acceptance.md).
+
+## Model limits
+
+The [human and Free Ride plan](models/human-and-free-ride.md) defines the remaining rider and map increments.
+Current bodies and joints are estimates. Feet remain welded to the pedals.
+External yaw and roll aids remain visible in the model configuration.
+Suspension geometry, motor values, and tire behavior still need measurements.
+Simulation results apply to their stated model, timing, firmware, and duration.
+They do not establish a real wheel's operating limits.
+
+See [recording acceptance](models/recording-acceptance.md) for capture, replay, and import limits.
+See [coverage](models/coverage-matrix.md) for the broader physical validation requirements.
