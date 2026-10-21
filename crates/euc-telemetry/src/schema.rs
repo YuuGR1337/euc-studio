@@ -25,7 +25,8 @@ pub enum Channel {
     /// Wheel angular velocity relative to the shell.
     WheelRadS = 1,
     /// The firmware's own PWM figure, as its app frame reports it (Begode frame 07): the
-    /// commanded q voltage in whole percent of full modulation, magnitude, 0..100 %.
+    /// commanded q voltage magnitude in whole percent on the firmware's 31500-Q15 scale.
+    /// Values can exceed 100% near saturation; this channel does not clamp them.
     PwmPct = 2,
     /// Phase A current.
     PhaseAA = 3,

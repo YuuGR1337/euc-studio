@@ -1,6 +1,8 @@
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
-import { defineConfig } from "vite";
+import { defineConfig, searchForWorkspaceRoot } from "vite";
+import { realpathSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import pkg from "./package.json" with { type: "json" };
 
 const host = process.env.TAURI_DEV_HOST;
@@ -18,6 +20,15 @@ export default defineConfig({
     host: host || false,
     hmr: host ? { protocol: "ws", host, port: 1421 } : undefined,
     watch: { ignored: ["**/src-tauri/**"] },
+    // Worktrees can share dependencies. Allow the bundled font directory through its real path.
+    fs: {
+      allow: [
+        searchForWorkspaceRoot(fileURLToPath(new URL(".", import.meta.url))),
+        realpathSync(
+          fileURLToPath(new URL("./node_modules/@fontsource/jetbrains-mono", import.meta.url)),
+        ),
+      ],
+    },
   },
   preview: {
     port: 4173,

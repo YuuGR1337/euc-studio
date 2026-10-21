@@ -13,6 +13,13 @@
 @custom-variant force-press (&[data-force="press"]);
 @custom-variant force-focus (&[data-force="focus"]);
 
+/* The main instrument responds to available scene height as well as width. */
+@custom-variant compact-outputs {
+  @container viewport (max-width: 900px) or (max-height: 560px) {
+    @slot;
+  }
+}
+
 @layer base {
   html,
   body,

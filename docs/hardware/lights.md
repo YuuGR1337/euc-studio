@@ -96,7 +96,7 @@ Priority from the top: a row overrides the ones below it.
 | Mode 1, moving | speed 2 km/h or more | rainbow: each ring shows 12 consecutive steps of a 72-step colour wheel (red, yellow, green, cyan, blue, magenta; one channel ramps in steps of 21) at brightness 100, the same colours on both rings in position order; the window slides one step per animation step, so a full rainbow passes every 72 steps (about 5.8 s at 20 km/h) | OBSERVED (LED mode 1 rides) |
 | Mode 1, standing | speed below 2 km/h | the same 12-colour window, frozen, at the breathing brightness | OBSERVED |
 | Mode 1, lean | as mode 0 | the amber is rewritten by the rainbow on the next pass, so it shows only as a flicker of about one tick every 0.30 s, and on the opposite ring to mode 0 (+roll: ring B) | OBSERVED |
-| Power-on | the tick starts (about 1.7 s after power-on in the simulator) | dark, then the standing pattern once the standstill timer has run (0.83 s): first light about 2.5 s after power-on; no animation | OBSERVED |
+| Power-on | the tick starts late in `main` | Dark, then the standing pattern after the standstill timer. Earlier measurements gave a 1.7 s tick start and 2.5 s first light. Those measurements used the previous RTC model. | OBSERVED (previous RTC model) |
 | Calibration mode, power-off | — | dark | OBSERVED (calibration), INFERRED (power-off) |
 
 Details:
@@ -106,8 +106,9 @@ Details:
 - **Breathing speed depends on the CPU and the LED mode.** The breathing changes the brightness by
   one step per main-loop pass during every 10th tick, so its period depends on how many main-loop
   passes fit in a tick, and a mode-1 pass costs about 1.8 times a mode-0 pass. On the owner's wheel,
-  in LED mode 1, it is about 2.1 s (video). The current simulator uses CPI 2.0 and exception overhead.
-  Mode 1 gives a mean period of 2.235 s over nine measured cycles.
+  in LED mode 1, it is about 2.1 s (video). The simulator uses CPI 2.0 and exception overhead.
+  Before the RTC divider reload correction, mode 1 gave a mean period of 2.235 s over nine measured cycles.
+  That measurement describes the previous RTC model. The corrected model needs a new cadence measurement.
   The earlier CPI 1.25 model gave 0.49 s in mode 0 and 0.92 s in mode 1.
   A separate flash-model prototype gave about 2.3 s in mode 1 and 1.1 s in mode 0.
   The first 0.49 s comparison used mode 0 with blank settings. See

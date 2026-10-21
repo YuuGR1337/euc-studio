@@ -1,0 +1,535 @@
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { RIDER_MODELS, type GeneratedMapSpec, type HeightMap } from "../../engine/freeRide.ts";
+import type { EngineClient } from "../../engine/types.ts";
+import { Button, IconButton } from "../../ui/Button.tsx";
+import { ChevronRight, Info, Keyboard, Pause, Play } from "../../ui/icons.tsx";
+import { Panel } from "../../ui/Panel.tsx";
+import { Pill } from "../../ui/Pill.tsx";
+import { Select } from "../../ui/Select.tsx";
+import { Slider } from "../../ui/Slider.tsx";
+import { Tabs, TabPanel } from "../../ui/Tabs.tsx";
+import { Toggle } from "../../ui/Toggle.tsx";
+import { MapEditor } from "./MapEditor.tsx";
+import { FreeRideController } from "./controller.ts";
+
+export interface FreeRidePanelProps {
+  engine: EngineClient;
+  /** Must become false on drawer close, route change, or engine source change. */
+  active: boolean;
+  /** Authoritative native map only. Parent owns the viewport and map rendering. */
+  onMap?: (map: HeightMap | null, epoch: number | null) => void;
+  /** Optional parent action. It must select a scenario through engine.setScenario. */
+  onExit?: () => void;
+}
+const number = (value: number | null | undefined, unit: string) =>
+  value == null ? "Unavailable" : `${value.toFixed(1)} ${unit}`;
+
+/** Mount in the Ride drawer. Never mount a second controller for the same native run. */
+export function FreeRidePanel(props: FreeRidePanelProps) {
+  return <FreeRideSession key={props.engine.kind} {...props} />;
+}
+function FreeRideSession({ engine, active, onMap, onExit }: FreeRidePanelProps) {
+  const controller = useMemo(() => new FreeRideController(engine), [engine]);
+  const state = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
+  const [tab, setTab] = useState<"controls" | "map">("controls");
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const root = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (active && engine.kind === "live" && root.current) return controller.connect(root.current);
+  }, [active, controller, engine]);
+  useEffect(() => {
+    onMap?.(
+      active ? state.map : null,
+      active && state.status?.mode === "free_ride" ? state.status.epoch : null,
+    );
+  }, [active, onMap, state.map, state.status?.epoch, state.status?.mode]);
+  const backendError =
+    state.error ??
+    (engine.status.state === "error" || engine.status.state === "halted"
+      ? engine.status.message
+      : null);
+  const locked =
+    engine.kind !== "live"
+      ? "Open the desktop app to use Free ride."
+      : !active
+        ? "Open free ride controls first."
+        : undefined;
+  const editorLocked =
+    locked ??
+    (!state.status
+      ? "Wait for native status."
+      : state.starting
+        ? "Starting free ride."
+        : state.armed || state.arming || state.playing
+          ? "Pause before editing the map."
+          : undefined);
+  const hasRide = state.status?.mode === "free_ride";
+  const booting = hasRide && !state.status?.ready;
+  const armReason =
+    locked ??
+    (engine.status.state === "error" || engine.status.state === "halted"
+      ? "Resolve the native engine error first."
+      : undefined) ??
+    (!state.status?.ready || !hasRide
+      ? "Wait for the firmware boot and stand release."
+      : state.starting
+        ? "Wait for the new run."
+        : state.arming
+          ? "Waiting for Arm."
+          : state.source === "gamepad" && state.padIndex === null
+            ? "Select a standard gamepad."
+            : state.neutralMs < 250
+              ? "Keep both controls neutral for 250 ms."
+              : state.status.source !== state.source
+                ? "Wait for the native input source."
+                : undefined);
+  const stateLabel =
+    engine.kind !== "live"
+      ? "Desktop only"
+      : state.starting
+        ? "Starting"
+        : state.arming
+          ? "Arming"
+          : state.armed
+            ? "Armed"
+            : booting
+              ? "Starting"
+              : "Disarmed";
+  const settingsLocked =
+    locked ??
+    (state.armed || state.arming || state.playing
+      ? "Pause before changing input settings."
+      : undefined);
+  const standardPads = state.pads.filter((pad) => pad.standard);
+  const modelLocked =
+    locked ??
+    (!state.status
+      ? "Wait for native status."
+      : state.starting
+        ? "Wait for the new run."
+        : state.armed || state.arming || state.playing
+          ? "Pause before changing the rider model."
+          : undefined);
+  const modelChanged = hasRide && state.riderModel !== state.status?.rider_model;
+  const actualModel = hasRide
+    ? (RIDER_MODELS.find((model) => model.value === state.status?.rider_model)?.label ??
+      "Unavailable")
+    : "No free ride";
+  const motionLocked = locked ?? (!state.armed ? "Arm controls first." : undefined);
+  function pauseForEdit() {
+    if (!active || engine.kind !== "live") return;
+    engine.setPlaying(false);
+    controller.pause("Controls paused for editing.");
+  }
+  function changeTab(value: "controls" | "map") {
+    if (active) {
+      controller.pause("Controls paused. Select Arm to continue.");
+      if (value === "map" && engine.kind === "live") engine.setPlaying(false);
+    }
+    setTab(value);
+  }
+  function apply(map: GeneratedMapSpec) {
+    setTab("controls");
+    void controller.start(map);
+  }
+  const statusLine =
+    locked ??
+    (state.starting
+      ? "Starting firmware on the stand."
+      : state.arming
+        ? "Waiting for native Arm."
+        : !hasRide
+          ? "Choose a map to create a ride."
+          : booting
+            ? state.status?.reason
+            : state.armed
+              ? "Manual controls active."
+              : state.reason);
+  return (
+    <Panel
+      title="Free ride"
+      actions={
+        <>
+          <Pill tone={state.armed ? "accent" : "neutral"} dot={state.armed}>
+            {stateLabel}
+          </Pill>
+          {onExit && (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => {
+                controller.pause("Scenario mode selected.");
+                onExit();
+              }}
+            >
+              Scenario
+            </Button>
+          )}
+        </>
+      }
+    >
+      <div
+        ref={root}
+        tabIndex={0}
+        aria-label="Free ride control surface"
+        className="text-fg outline-offset-2"
+      >
+        <Tabs
+          aria-label="Free ride"
+          value={tab}
+          onValueChange={changeTab}
+          className="flex flex-col px-16"
+          tabs={[
+            { value: "controls", label: "Controls" },
+            { value: "map", label: "Map" },
+          ]}
+        >
+          <div className="border-b border-hairline py-8">
+            <p role="status" className="text-12 text-fg-2">
+              {statusLine}
+            </p>
+          </div>
+          {backendError && (
+            <p role="alert" className="pt-16 text-13 text-danger-text">
+              {backendError}
+            </p>
+          )}
+          <fieldset
+            data-free-ride-choice
+            className="flex min-w-0 flex-col gap-8 border-b border-hairline py-16"
+          >
+            <div className="flex items-center justify-between gap-8">
+              <span className="text-12 text-fg-2">Rider model · next run</span>
+              {!locked && !state.starting && (state.armed || state.arming || state.playing) && (
+                <Button size="sm" variant="ghost" onClick={pauseForEdit}>
+                  Pause to edit
+                </Button>
+              )}
+              <IconButton
+                size="sm"
+                icon={<Info />}
+                label="Both models are estimates. Feet stay welded to the pedals. External yaw and roll aids remain. Articulated joints respond to motor forces and impacts. Crouch input is unavailable."
+              />
+            </div>
+            <fieldset
+              disabled={!!modelLocked}
+              className="min-w-0 disabled:opacity-40"
+              title={modelLocked}
+            >
+              <Select
+                aria-label="Rider model for next run"
+                value={state.riderModel}
+                options={[...RIDER_MODELS]}
+                className="w-full"
+                onValueChange={(value) => {
+                  if (!modelLocked) controller.setRiderModel(value);
+                }}
+              />
+            </fieldset>
+            {hasRide && <p className="text-12 text-fg-2">Current: {actualModel}</p>}
+            {modelChanged && (
+              <Button
+                disabledReason={modelLocked}
+                onClick={() => (state.applied ? apply(state.applied) : changeTab("map"))}
+              >
+                {state.applied ? "Start new run" : "Choose map for new run"}
+              </Button>
+            )}
+          </fieldset>
+          <TabPanel
+            value="controls"
+            forceMount
+            hidden={tab !== "controls"}
+            className="py-16 data-[state=inactive]:hidden"
+          >
+            <div className="flex flex-col gap-24">
+              <fieldset
+                data-free-ride-choice
+                disabled={!!locked}
+                className="min-w-0 disabled:opacity-40"
+                title={locked}
+              >
+                <span className="mb-8 block text-12 text-fg-2">Input</span>
+                <Select
+                  aria-label="Input source"
+                  value={state.source}
+                  onValueChange={(value) => {
+                    if (!locked) controller.setSource(value);
+                  }}
+                  className="w-full"
+                  options={[
+                    { value: "keyboard_slider", label: "Keyboard and sliders" },
+                    { value: "gamepad", label: "Gamepad" },
+                  ]}
+                />
+              </fieldset>
+              {state.source === "gamepad" && (
+                <div className="flex flex-col gap-16">
+                  <fieldset
+                    data-free-ride-choice
+                    disabled={!!locked || !state.gamepadSupported}
+                    className="min-w-0 disabled:opacity-40"
+                  >
+                    <span className="mb-8 block text-12 text-fg-2">Device</span>
+                    <Select
+                      aria-label="Gamepad"
+                      value={state.padIndex === null ? "none" : String(state.padIndex)}
+                      className="w-full"
+                      options={[
+                        { value: "none", label: "Select a gamepad" },
+                        ...standardPads.map((pad) => ({ value: String(pad.index), label: pad.id })),
+                      ]}
+                      onValueChange={(value) => {
+                        if (!locked) controller.selectPad(value === "none" ? null : Number(value));
+                      }}
+                    />
+                  </fieldset>
+                  {(!state.gamepadSupported || standardPads.length === 0) && (
+                    <p className="text-12 text-fg-2" role="status">
+                      {!state.gamepadSupported
+                        ? "Gamepad input is unavailable in this window."
+                        : "Connect a gamepad with standard mapping."}
+                    </p>
+                  )}
+                </div>
+              )}
+              <div className="flex items-center gap-8">
+                {!hasRide && !state.starting ? (
+                  <Button
+                    variant="primary"
+                    className="flex-1"
+                    disabledReason={
+                      locked ?? (!state.status ? "Wait for native status." : undefined)
+                    }
+                    onClick={() => changeTab("map")}
+                  >
+                    Create ride
+                  </Button>
+                ) : booting && !state.playing && !state.starting ? (
+                  <Button
+                    variant="primary"
+                    className="flex-1"
+                    icon={<Play />}
+                    disabledReason={
+                      locked ??
+                      (backendError ? "Resolve the native engine error first." : undefined)
+                    }
+                    onClick={controller.continueBoot}
+                  >
+                    Continue startup
+                  </Button>
+                ) : state.armed ? (
+                  <Button
+                    variant="primary"
+                    className="flex-1"
+                    icon={<Pause />}
+                    onClick={() => controller.pause()}
+                  >
+                    Pause ride
+                  </Button>
+                ) : (
+                  <Button
+                    variant="primary"
+                    className="flex-1"
+                    icon={<Play />}
+                    disabledReason={armReason}
+                    onClick={() => {
+                      void controller.arm();
+                    }}
+                  >
+                    Arm and ride
+                  </Button>
+                )}
+                {!state.armed && (
+                  <IconButton
+                    label="Disarm and pause"
+                    icon={<Pause />}
+                    disabledReason={locked}
+                    onClick={() => controller.pause()}
+                  />
+                )}
+              </div>
+              {hasRide && state.source === "keyboard_slider" && (
+                <div className="flex flex-col gap-16">
+                  {(["lean", "turn"] as const).map((axis) => (
+                    <div
+                      key={axis}
+                      data-free-ride-slider={axis}
+                      onPointerDownCapture={controller.sliderStart}
+                      onPointerUpCapture={controller.sliderRelease}
+                      onPointerCancel={controller.sliderRelease}
+                      onLostPointerCapture={controller.sliderRelease}
+                      onKeyDownCapture={controller.sliderKeyDown}
+                      onKeyUpCapture={controller.sliderKeyUp}
+                      onBlur={controller.sliderRelease}
+                    >
+                      <Slider
+                        label={axis === "lean" ? "Desired lean" : "Heading rate"}
+                        value={state[axis]}
+                        min={axis === "lean" ? -10 : -30}
+                        max={axis === "lean" ? 10 : 30}
+                        step={axis === "lean" ? 0.25 : 1}
+                        decimals={axis === "lean" ? 1 : 0}
+                        unit={axis === "lean" ? "°" : "°/s"}
+                        disabledReason={motionLocked}
+                        onValueChange={(value) => controller.sliderValue(axis, value)}
+                      />
+                    </div>
+                  ))}
+                  <div className="flex items-center justify-between gap-8">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabledReason={locked}
+                      onClick={() =>
+                        controller.pause("Neutral input selected. Controls are paused.")
+                      }
+                    >
+                      Neutral input
+                    </Button>
+                    <IconButton
+                      size="sm"
+                      label="W/S controls lean. A/D controls turns. Space or Escape pauses. Sliders return to zero on release."
+                      icon={<Keyboard />}
+                    />
+                  </div>
+                </div>
+              )}
+              {hasRide && (
+                <dl className="flex flex-col gap-8 text-12">
+                  {(
+                    [
+                      ["Actual lean", state.status?.actual_lean_deg, "°"],
+                      ["Heading", state.status?.heading_deg, "°"],
+                      ["Path length", state.status?.path_length_m, "m"],
+                    ] as const
+                  ).map(([label, value, unit]) => (
+                    <div key={label} className="flex items-baseline justify-between gap-16">
+                      <dt className="text-fg-2">{label}</dt>
+                      <dd className="num">{number(value, unit)}</dd>
+                    </div>
+                  ))}
+                </dl>
+              )}
+              <div className="flex flex-col gap-8 border-t border-hairline pt-16">
+                <div className="flex items-center justify-between gap-8">
+                  <p className="text-12 text-fg-2">Rider estimates. Yaw and roll aids active.</p>
+                  <IconButton
+                    size="sm"
+                    label="Manual lean has no speed controller. Neutral input does not ensure braking."
+                    icon={<Info />}
+                  />
+                </div>
+                {state.source === "gamepad" && (
+                  <>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="justify-start"
+                      aria-expanded={settingsOpen}
+                      icon={<ChevronRight className={settingsOpen ? "rotate-90" : undefined} />}
+                      onClick={() => {
+                        if (!settingsOpen) pauseForEdit();
+                        setSettingsOpen(!settingsOpen);
+                      }}
+                    >
+                      Input settings
+                    </Button>
+                    {settingsOpen && (
+                      <div className="flex flex-col gap-16 py-8">
+                        <Slider
+                          label="Dead zone"
+                          value={state.deadzone * 100}
+                          min={5}
+                          max={30}
+                          step={1}
+                          unit="%"
+                          disabledReason={settingsLocked}
+                          onValueChange={(value) => controller.configure({ deadzone: value / 100 })}
+                        />
+                        <Toggle
+                          label="Invert lean"
+                          checked={state.invertLean}
+                          disabledReason={settingsLocked}
+                          onCheckedChange={(invertLean) => controller.configure({ invertLean })}
+                        />
+                        <Toggle
+                          label="Invert turn"
+                          checked={state.invertTurn}
+                          disabledReason={settingsLocked}
+                          onCheckedChange={(invertTurn) => controller.configure({ invertTurn })}
+                        />
+                      </div>
+                    )}
+                  </>
+                )}
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="justify-start"
+                  aria-expanded={detailsOpen}
+                  icon={<ChevronRight className={detailsOpen ? "rotate-90" : undefined} />}
+                  onClick={() => setDetailsOpen(!detailsOpen)}
+                >
+                  Ride details
+                </Button>
+                {detailsOpen && (
+                  <dl className="flex flex-col gap-8 py-8 text-12">
+                    {(
+                      [
+                        ["Desired lean", number(state.status?.desired_lean_deg, "°")],
+                        ["Commanded lean", number(state.status?.commanded_lean_deg, "°")],
+                        ["Yaw aid work", number(state.status?.yaw_aid_work_j, "J")],
+                        ["Roll aid work", number(state.status?.roll_aid_work_j, "J")],
+                        ["Neutral input", `${Math.min(250, Math.floor(state.neutralMs))}/250 ms`],
+                        [
+                          "Last control reply",
+                          state.inputAgeMs === null
+                            ? "Unavailable"
+                            : `${Math.round(state.inputAgeMs)} ms ago`,
+                        ],
+                        ["Input rate / timeout", "20 Hz / 250 ms"],
+                        ["Wheel", "Begode Extreme"],
+                        ["Settings", "Blank"],
+                        ["Rider model", state.status?.rider_model ?? "Unavailable"],
+                      ] as const
+                    ).map(([label, value]) => (
+                      <div key={label} className="flex justify-between gap-16">
+                        <dt className="text-fg-2">{label}</dt>
+                        <dd className="num text-right">{value}</dd>
+                      </div>
+                    ))}
+                    <div className="text-fg-2">
+                      <dt className="sr-only">Native status</dt>
+                      <dd>{state.status?.reason ?? "Native status is unavailable."}</dd>
+                    </div>
+                  </dl>
+                )}
+              </div>
+            </div>
+          </TabPanel>
+          <TabPanel
+            value="map"
+            forceMount
+            hidden={tab !== "map"}
+            className="py-16 data-[state=inactive]:hidden"
+          >
+            <MapEditor
+              key={`${state.status?.epoch ?? "none"}:${state.applied ? "applied" : "unknown"}`}
+              applied={state.applied}
+              map={state.map}
+              disabledReason={editorLocked}
+              onApply={apply}
+              onPause={
+                active && engine.kind === "live" && (state.armed || state.arming || state.playing)
+                  ? pauseForEdit
+                  : undefined
+              }
+            />
+          </TabPanel>
+        </Tabs>
+      </div>
+    </Panel>
+  );
+}

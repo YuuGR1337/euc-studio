@@ -10,7 +10,8 @@
  *                           wheel: at most EUC_BALANCE_LIMP_SPEED_KMH, growing at most 2.5 deg/s, at most
  *                           12 deg
  *   PWM                     PWM alarm active and PWM tiltback on ('e'), clamped at +-12 deg; clean also
- *                           whenever the voltage vector |Vd, Vq| passes 75 % (quirk PWM_TILTBACK_VQ_ONLY)
+ *                           whenever the voltage vector |Vd, Vq| passes 75 % or the driving Vd, averaged over
+ *                           0.3 s, passes 35 % (quirk PWM_TILTBACK_VQ_ONLY)
  *   pedal trim              setting 'W' 'U': slews toward (d - 4) x 1.2 deg
  *   restart offset          set at recovery, fades to zero
  *
@@ -38,6 +39,16 @@
 
 /* Clean headroom tiltback: the voltage vector above 75 % of full modulation (23625 of 31500), squared. */
 #define HEADROOM_START_SQ 558140625U
+
+/*
+ * Clean headroom tiltback, second trigger: the driving part of Vd, low-passed over 0.3 s, above 35 % of full
+ * modulation (11025 of 31500). Vd is about w x L x Iq, the voltage the winding's inductance takes at this
+ * speed and load. With twice the estimated inductance the balance and current loops start to oscillate near
+ * 41 km/h while the vector is still near 60 %, so the vector alone warns 0.3 s before saturation; this
+ * trigger warns about 2.5 s before. With the estimated motor it stays below 25 % outside a top-speed run.
+ */
+#define HEADROOM_VD_START_Q     11025.0F
+#define HEADROOM_VD_FILTER_GAIN 0.00672F /* 2.016 ms / 0.3 s */
 
 /* Speed limit (limp mode; clean low battery or hot board): the speed tiltback grows at most 2.5 deg/s
  * (0.00504 deg per tick), however fast the wheel goes when the limit starts, and stops at 12 deg. */
@@ -197,8 +208,15 @@ void euc_balance_step_tiltbacks(struct euc_balance_state *state, const struct eu
     state->error_deg = euc_f32_add(state->error_deg, state->tiltback_speed_deg);
 
     bool pwm_active = in->settings.pwm_tiltback_enabled && in->pwm_alarm_active;
-    if (!EUC_QUIRK(PWM_TILTBACK_VQ_ONLY) && (in->motor_voltage_sq > HEADROOM_START_SQ)) {
-        pwm_active = true; /* clean: the voltage headroom is low, whatever the settings say */
+    if (!EUC_QUIRK(PWM_TILTBACK_VQ_ONLY)) {
+        /* clean: the voltage headroom is low, whatever the settings say */
+        const float vd_driving = (in->motor_voltage_d > 0) ? (float)in->motor_voltage_d : 0.0F;
+        state->headroom_vd_q =
+            euc_f32_add(state->headroom_vd_q,
+                        euc_f32_mul(euc_f32_sub(vd_driving, state->headroom_vd_q), HEADROOM_VD_FILTER_GAIN));
+        if ((in->motor_voltage_sq > HEADROOM_START_SQ) || (state->headroom_vd_q > HEADROOM_VD_START_Q)) {
+            pwm_active = true;
+        }
     }
     state->tiltback_pwm_deg = pwm_tiltback(state->tiltback_pwm_deg, pwm_active, state->speed_cm_per_s);
     state->error_deg = euc_f32_add(state->error_deg, state->tiltback_pwm_deg);

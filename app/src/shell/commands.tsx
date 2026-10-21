@@ -2,13 +2,21 @@ import { useEffect, useMemo } from "react";
 import { comboFromEvent } from "../lib/keys.ts";
 import { BUDGET_MS, formatStats, measureFrames } from "../lib/perf.ts";
 import { accents, type AccentName } from "../design/tokens.ts";
-import { engine, useEngineVersion } from "../engine/index.ts";
+import {
+  closeRecording,
+  engine,
+  liveEngine,
+  useEngineVersion,
+  useReplay,
+} from "../engine/index.ts";
+import { prepareBuzzerAudio } from "../engine/buzzerAudio.ts";
 import { WORKSPACE_IDS, useUi } from "../state/ui.ts";
 import type { PaletteCommand } from "../ui/CommandPalette.tsx";
 import {
   Bell,
   Camera,
   Cpu,
+  FolderOpen,
   Keyboard,
   LayoutGrid,
   Palette,
@@ -20,12 +28,39 @@ import {
   StepForward,
   Timer,
   Waves,
+  X,
 } from "../ui/icons.tsx";
 import { IS_MAC } from "../lib/platform.ts";
 import { toast } from "../ui/toast-store.ts";
 import { WORKSPACES } from "./workspaces.tsx";
+import { toggleManual, useManual } from "../workspaces/ride/manual.ts";
 
 export const RTF_STEPS = [0.25, 0.5, 1, 2, 4];
+
+/** Opens the shared recording workspace; capture and import use the same .eucrec format. */
+function recordingCommands(replaying: boolean): PaletteCommand[] {
+  if (!liveEngine) return [];
+  const commands: PaletteCommand[] = [
+    {
+      id: "recording.open",
+      title: "Recordings…",
+      group: "Simulation",
+      icon: <FolderOpen />,
+      keywords: ["recording", "replay", "playback", "eucrec", "file", "open", "capture", "save"],
+      run: () => useUi.getState().setRecordingsOpen(true),
+    },
+  ];
+  if (replaying)
+    commands.push({
+      id: "recording.close",
+      title: "Close recording",
+      group: "Simulation",
+      icon: <X />,
+      keywords: ["recording", "replay", "live", "back"],
+      run: closeRecording,
+    });
+  return commands;
+}
 
 function stepRtf(dir: 1 | -1) {
   const i = RTF_STEPS.findIndex((r) => r >= engine.targetRtf - 1e-9);
@@ -33,10 +68,15 @@ function stepRtf(dir: 1 | -1) {
   engine.setTargetRtf(next);
 }
 
+/** Commands that drive the ride (play, step, speed, firmware, scenario, recordings). */
+const RIDE_CONTROLS = /^(sim|firmware|scenario|recording)\./;
+
 /** Every action in the app. The palette, the shortcut sheet and the hotkeys all read this list. */
 export function useCommands(): PaletteCommand[] {
   useEngineVersion();
   const ui = useUi();
+  const manual = useManual((m) => m.active);
+  const replaying = useReplay() !== null;
 
   return useMemo<PaletteCommand[]>(() => {
     const docks = ui.docks[ui.workspace];
@@ -90,6 +130,27 @@ export function useCommands(): PaletteCommand[] {
         },
       },
       {
+        id: "ride.manual",
+        title: manual ? "Give control back to the scenario" : "Manual control",
+        group: "Simulation",
+        icon: <Keyboard />,
+        shortcut: "m",
+        keywords: [
+          "ride by hand",
+          "keyboard",
+          "gamepad",
+          "wasd",
+          "lean",
+          "steer",
+          "rider",
+          "drive",
+        ],
+        run: () => {
+          ui.navigate("ride");
+          toggleManual();
+        },
+      },
+      {
         id: "sim.slower",
         title: "Slower (halve the real-time factor)",
         group: "Simulation",
@@ -107,6 +168,7 @@ export function useCommands(): PaletteCommand[] {
         keywords: ["speed", "rtf", "fast forward"],
         run: () => stepRtf(1),
       },
+      ...recordingCommands(replaying),
       ...engine
         .firmwares()
         .filter((f) => !f.disabledReason)
@@ -178,6 +240,7 @@ export function useCommands(): PaletteCommand[] {
         keywords: ["buzzer", "sound", "audio", "beep", "horn", "mute"],
         hint: ui.buzzerSound ? "On" : "Off",
         run: () => {
+          if (!ui.buzzerSound) prepareBuzzerAudio();
           ui.setBuzzerSound(!ui.buzzerSound);
           toast({
             tone: "info",
@@ -233,8 +296,10 @@ export function useCommands(): PaletteCommand[] {
         run: () => ui.setShortcutsOpen(true),
       },
     ];
-    return list;
-  }, [ui]);
+    // In Compare the ride's controls step aside: the comparison has its own, and the ride waits
+    // while a comparison runs (engine/compareGate.ts).
+    return ui.route === "compare" ? list.filter((c) => !RIDE_CONTROLS.test(c.id)) : list;
+  }, [ui, manual, replaying]);
 }
 
 const INTERACTIVE = "input, textarea, select, [contenteditable=''], [contenteditable='true']";
@@ -250,6 +315,13 @@ export function useHotkeys(commands: PaletteCommand[]) {
       if (e.defaultPrevented || e.isComposing) return;
       const combo = comboFromEvent(e, IS_MAC);
       const ui = useUi.getState();
+      // A modal owns its keyboard. Do not restart or switch the simulation behind a file sheet.
+      if (
+        !ui.paletteOpen &&
+        !ui.shortcutsOpen &&
+        document.querySelector('[role="dialog"][data-state="open"]')
+      )
+        return;
       if (combo === "mod+k") {
         e.preventDefault();
         ui.setShortcutsOpen(false);

@@ -3,8 +3,12 @@
 //! One pack = `series` cell groups in series, each group an open-circuit voltage OCV(SOC), an
 //! ohmic resistance R0 and one RC pair (R1, τ) for polarisation. Packs sit in parallel on the DC
 //! bus and share the load by their impedance. Positive current discharges.
+//!
+//! Charge bounds delimit model validity, not a measured BMS cutoff. A step that would cross
+//! either bound is rejected without changing state. Regeneration can recharge an empty pack.
+//! See `docs/models/battery-validity.md` for the engine stop contract and model limitations.
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 /// Battery parameters (`[battery]` in `plant.toml`).
@@ -42,9 +46,33 @@ pub enum BatteryError {
     /// No pack or no cell.
     #[error("a battery needs at least one pack of at least one cell")]
     Empty,
-    /// The OCV table is too short or not sorted by state of charge.
-    #[error("the OCV table needs two or more points with rising state of charge")]
+    /// The OCV table lacks finite, positive voltages or rising SOC points covering 0 through 1.
+    #[error("the OCV table needs finite positive voltages and rising SOC points from 0 through 1")]
     OcvTable,
+    /// A circuit or thermal parameter is nonfinite or outside its mathematical domain.
+    #[error("{0} is outside the battery model's finite parameter domain")]
+    InvalidParameter(&'static str),
+}
+
+/// A boundary of the equivalent-circuit model, not a physical BMS trip.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error, Serialize)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+pub enum BatteryLimit {
+    /// A pack is empty or the requested step needs more charge than the pack contains.
+    #[error("battery model exhausted at pack {pack}; no further discharge step is valid")]
+    Exhausted {
+        /// Zero-based pack index.
+        pack: usize,
+    },
+    /// A charging step exceeds the pack's modeled capacity.
+    #[error("battery model charge capacity exceeded at pack {pack}")]
+    ChargeSaturated {
+        /// Zero-based pack index.
+        pack: usize,
+    },
+    /// Nonfinite inputs/results or a nonpositive loaded voltage invalidate the circuit solve.
+    #[error("battery step is outside the finite, positive-voltage circuit domain")]
+    InvalidStep,
 }
 
 impl BatteryParams {
@@ -53,8 +81,29 @@ impl BatteryParams {
         if self.packs == 0 || self.series == 0 {
             return Err(BatteryError::Empty);
         }
-        if self.ocv.len() < 2 || self.ocv.windows(2).any(|w| w[1][0] <= w[0][0]) {
+        if self.ocv.len() < 2
+            || self.ocv.iter().any(|&[soc, volts]| !(0.0..=1.0).contains(&soc) || !volts.is_finite() || volts <= 0.0)
+            || self.ocv.first().is_none_or(|point| point[0] > 0.0)
+            || self.ocv.last().is_none_or(|point| point[0] < 1.0)
+            || self.ocv.windows(2).any(|w| w[1][0] <= w[0][0])
+        {
             return Err(BatteryError::OcvTable);
+        }
+        for (name, value) in [
+            ("capacity_ah", self.capacity_ah),
+            ("capacity_as", self.capacity_ah * 3600.0),
+            ("r0_ohm", self.r0_ohm),
+            ("r1_ohm", self.r1_ohm),
+            ("tau_s", self.tau_s),
+            ("heat_capacity_j_per_k", self.heat_capacity_j_per_k),
+            ("cooling_w_per_k", self.cooling_w_per_k),
+        ] {
+            if !value.is_finite() || value <= 0.0 {
+                return Err(BatteryError::InvalidParameter(name));
+            }
+        }
+        if !(0.0..=1.0).contains(&self.soc) {
+            return Err(BatteryError::InvalidParameter("soc"));
         }
         Ok(())
     }
@@ -123,7 +172,10 @@ impl Battery {
     /// A rested battery at the parameters' state of charge and `ambient_c`.
     pub fn new(params: BatteryParams, ambient_c: f64) -> Result<Self, BatteryError> {
         params.validate()?;
-        let pack = Pack { soc: params.soc.clamp(0.0, 1.0), polarisation_v: 0.0, current_a: 0.0, temp_c: ambient_c };
+        if !ambient_c.is_finite() {
+            return Err(BatteryError::InvalidParameter("ambient_c"));
+        }
+        let pack = Pack { soc: params.soc, polarisation_v: 0.0, current_a: 0.0, temp_c: ambient_c };
         let packs = vec![pack; usize::from(params.packs)];
         let conditions = vec![PackCondition::healthy(params.series); usize::from(params.packs)];
         let mut battery = Self { params, packs, conditions, terminal_v: 0.0 };
@@ -144,6 +196,17 @@ impl Battery {
     /// The parameters.
     pub const fn params(&self) -> &BatteryParams {
         &self.params
+    }
+
+    /// Whether every pack contains charge for positive discharge.
+    ///
+    /// This conservative validity boundary assumes no unmodeled pack isolation or switching.
+    /// It does not prohibit a separate regenerative [`step`](Self::step) from restoring charge.
+    pub fn discharge_validity(&self) -> Result<(), BatteryLimit> {
+        match self.packs.iter().position(|pack| pack.soc <= 0.0) {
+            Some(pack) => Err(BatteryLimit::Exhausted { pack }),
+            None => Ok(()),
+        }
     }
 
     /// Changes pack `index`'s state of charge by `delta` (clamped to 0..=1).
@@ -182,30 +245,65 @@ impl Battery {
             .map(|k| (0..series).map(|c| self.cell_emf(k, c)).sum::<f64>() - self.packs[k].polarisation_v)
             .collect();
         let conductance: f64 = (0..emf.len()).map(|k| 1.0 / self.r0(k)).sum();
-        let v = (emf.iter().enumerate().map(|(k, e)| e / self.r0(k)).sum::<f64>() - load_a) / conductance;
+        // Subtract a reference before summation so identical rested packs give exactly zero
+        // circulation at zero load, including at the charge boundaries.
+        let reference = emf[0];
+        let v = reference
+            + (emf.iter().enumerate().map(|(k, e)| (e - reference) / self.r0(k)).sum::<f64>() - load_a) / conductance;
         let currents = emf.iter().enumerate().map(|(k, e)| (e - v) / self.r0(k)).collect();
         (v, currents)
     }
 
     /// Advances `h` seconds with the bus drawing `load_a` (negative = regeneration).
-    pub fn step(&mut self, load_a: f64, ambient_c: f64, h: f64) {
+    ///
+    /// Rejects the whole step before mutation if any pack's charge crosses `0..=1` or the
+    /// solve leaves its finite, positive-voltage domain. Empty packs cannot supply positive
+    /// discharge, but they can accept charging current. A zero-duration step changes nothing.
+    /// The caller must stop or explicitly handle errors; voltage alone cannot prove validity.
+    pub fn step(&mut self, load_a: f64, ambient_c: f64, h: f64) -> Result<(), BatteryLimit> {
+        if !load_a.is_finite() || !ambient_c.is_finite() || !h.is_finite() || h < 0.0 {
+            return Err(BatteryLimit::InvalidStep);
+        }
+        if h == 0.0 {
+            return Ok(());
+        }
+        if load_a > 0.0 {
+            self.discharge_validity()?;
+        }
         let (v, currents) = self.solve(load_a);
+        if !v.is_finite() || v <= 0.0 || currents.iter().any(|current| !current.is_finite()) {
+            return Err(BatteryLimit::InvalidStep);
+        }
         let series = f64::from(self.params.series);
-        let decay = (-h / self.params.tau_s).exp();
+        let relaxation = -(-h / self.params.tau_s).exp_m1();
         let capacity_as = self.params.capacity_ah * 3600.0;
-        let heat_decay = (-h * self.params.cooling_w_per_k / self.params.heat_capacity_j_per_k).exp();
+        let heat_relaxation = -(-h * self.params.cooling_w_per_k / self.params.heat_capacity_j_per_k).exp_m1();
+        // Prepare all packs before committing any of them. Never discard charge with an SOC clamp.
+        let mut next = Vec::with_capacity(self.packs.len());
         for (k, current) in currents.into_iter().enumerate() {
+            let mut pack = self.packs[k];
+            let charge_delta = current / capacity_as * h;
+            if current > 0.0 && (pack.soc <= 0.0 || charge_delta > pack.soc) {
+                return Err(BatteryLimit::Exhausted { pack: k });
+            }
+            if current < 0.0 && (pack.soc >= 1.0 || -charge_delta > 1.0 - pack.soc) {
+                return Err(BatteryLimit::ChargeSaturated { pack: k });
+            }
             let factor = self.conditions[k].resistance_factor;
             let (r0, r1) = (series * self.params.r0_ohm * factor, series * self.params.r1_ohm * factor);
-            let pack = &mut self.packs[k];
             pack.current_a = current;
-            pack.polarisation_v = pack.polarisation_v * decay + r1 * current * (1.0 - decay);
-            pack.soc = (pack.soc - current * h / capacity_as).clamp(0.0, 1.0);
+            pack.polarisation_v += relaxation * (r1 * current - pack.polarisation_v);
+            pack.soc -= charge_delta;
             let heat = current * current * r0 + pack.polarisation_v * pack.polarisation_v / r1;
-            let settle = ambient_c + heat / self.params.cooling_w_per_k;
-            pack.temp_c = settle + (pack.temp_c - settle) * heat_decay;
+            pack.temp_c += heat_relaxation * (ambient_c - pack.temp_c + heat / self.params.cooling_w_per_k);
+            if !pack.soc.is_finite() || !pack.polarisation_v.is_finite() || !pack.temp_c.is_finite() {
+                return Err(BatteryLimit::InvalidStep);
+            }
+            next.push(pack);
         }
+        self.packs = next;
         self.terminal_v = v;
+        Ok(())
     }
 
     /// What each pack's BMS reads now. Each cell group shows its open-circuit voltage less its
@@ -273,17 +371,17 @@ pub(crate) mod tests {
     #[test]
     fn sag_and_recovery() {
         let mut b = Battery::new(extreme(), 25.0).unwrap();
-        b.step(100.0, 25.0, 1e-3);
+        b.step(100.0, 25.0, 1e-3).unwrap();
         let sag = 130.24 - b.voltage();
         // Two packs of 32 × 7 mΩ in parallel: 0.112 Ω, 11.2 V at 100 A.
         assert!((sag - 11.2).abs() < 0.01, "sag {sag}");
         assert!(b.packs().iter().all(|p| (p.current_a - 50.0).abs() < 1e-9), "shared equally");
         for _ in 0..10_000 {
-            b.step(100.0, 25.0, 1e-2);
+            b.step(100.0, 25.0, 1e-2).unwrap();
         }
         let polarised = b.voltage();
         assert!(polarised < 130.24 - 11.2 - 3.0, "polarisation adds sag: {polarised}");
-        b.step(0.0, 25.0, 1e-3);
+        b.step(0.0, 25.0, 1e-3).unwrap();
         assert!(b.voltage() > polarised + 11.0, "ohmic part recovers at once");
     }
 
@@ -292,11 +390,11 @@ pub(crate) mod tests {
         let mut b = Battery::new(extreme(), 25.0).unwrap();
         // 20 A for 180 s draws 1 Ah: 5 % of each 10 Ah pack.
         for _ in 0..18_000 {
-            b.step(20.0, 25.0, 1e-2);
+            b.step(20.0, 25.0, 1e-2).unwrap();
         }
         assert!(b.packs().iter().all(|p| (p.soc - 0.85).abs() < 1e-9));
         let before = b.voltage();
-        b.step(-40.0, 25.0, 1e-3);
+        b.step(-40.0, 25.0, 1e-3).unwrap();
         assert!(b.voltage() > before + 4.0, "regeneration lifts the bus");
         assert!(b.packs()[0].current_a < 0.0);
     }
@@ -305,7 +403,7 @@ pub(crate) mod tests {
     fn unequal_packs_share_unequally() {
         let mut b = Battery::new(extreme(), 25.0).unwrap();
         b.packs[1].soc = 0.5;
-        b.step(30.0, 25.0, 1e-3);
+        b.step(30.0, 25.0, 1e-3).unwrap();
         let [a, low] = [b.packs()[0].current_a, b.packs()[1].current_a];
         assert!(a > low && (a + low - 30.0).abs() < 1e-9, "{a} {low}");
     }
@@ -317,7 +415,7 @@ pub(crate) mod tests {
         weak.cell_drop_v[5] = 0.4;
         let resistive = PackCondition { resistance_factor: 3.0, ..PackCondition::healthy(32) };
         b.set_conditions(&[weak, resistive]);
-        b.step(60.0, 25.0, 1e-3);
+        b.step(60.0, 25.0, 1e-3).unwrap();
         let r = b.readings();
         // The weak pack's cell 5 reads about 0.4 V low; its other cells carry the rest of the bus.
         assert!(f64::from(r[0].cells_mv[4]) - f64::from(r[0].cells_mv[5]) > 390.0, "{:?}", &r[0].cells_mv[..6]);
@@ -335,8 +433,9 @@ pub(crate) mod tests {
     #[test]
     fn heating_and_readings() {
         let mut b = Battery::new(extreme(), 25.0).unwrap();
-        for _ in 0..60_000 {
-            b.step(150.0, 25.0, 1e-2);
+        // 300 s stays below the 432 s discharge boundary at 75 A per pack.
+        for _ in 0..30_000 {
+            b.step(150.0, 25.0, 1e-2).unwrap();
         }
         let readings = b.readings();
         assert_eq!((readings.len(), readings[0].cells_mv.len(), readings[0].temps_c.len()), (2, 32, 6));
@@ -346,5 +445,188 @@ pub(crate) mod tests {
             Battery::new(BatteryParams { ocv: vec![[0.0, 3.0]], ..extreme() }, 25.0).err(),
             Some(BatteryError::OcvTable)
         );
+    }
+
+    fn assert_unchanged(battery: &Battery, before: &Battery) {
+        assert_eq!(battery.packs(), before.packs());
+        assert_eq!(battery.voltage(), before.voltage());
+        assert_eq!(battery.conditions(), before.conditions());
+        assert_eq!(battery.readings(), before.readings());
+    }
+
+    #[test]
+    fn empty_battery_rejects_discharge_without_supplying_charge() {
+        let mut battery = Battery::new(BatteryParams { soc: 0.0, ..extreme() }, 25.0).unwrap();
+        let before = battery.clone();
+        assert!(battery.voltage() > 0.0, "OCV alone cannot prove validity");
+        assert_eq!(battery.discharge_validity(), Err(BatteryLimit::Exhausted { pack: 0 }));
+        for load in [f64::EPSILON, 1.0, 100.0] {
+            for h in [5e-6, 1.0, 1e6] {
+                assert_eq!(battery.step(load, 25.0, h), Err(BatteryLimit::Exhausted { pack: 0 }));
+                assert_unchanged(&battery, &before);
+            }
+        }
+        let removed_charge: f64 = before
+            .packs()
+            .iter()
+            .zip(battery.packs())
+            .map(|(old, new)| (old.soc - new.soc) * battery.params().capacity_ah * 3600.0)
+            .sum();
+        assert_eq!(removed_charge, 0.0);
+    }
+
+    #[test]
+    fn rested_charge_endpoints_have_no_false_circulation() {
+        for soc in [0.0, 1.0] {
+            let mut battery = Battery::new(BatteryParams { soc, ..extreme() }, 25.0).unwrap();
+            let before = battery.clone();
+            for h in [5e-6, 1.0, 1000.0] {
+                battery.step(0.0, 25.0, h).unwrap();
+                assert_unchanged(&battery, &before);
+            }
+            battery.step(f64::MAX, -20.0, 0.0).unwrap();
+            assert_unchanged(&battery, &before);
+        }
+    }
+
+    #[test]
+    fn regeneration_restores_empty_battery_discharge_validity() {
+        let mut battery = Battery::new(BatteryParams { soc: 0.0, ..extreme() }, 25.0).unwrap();
+        battery.step(-20.0, 25.0, 1.0).unwrap();
+        assert_eq!(battery.discharge_validity(), Ok(()));
+        for pack in battery.packs() {
+            assert!(pack.current_a < 0.0);
+            assert!((pack.soc - 10.0 / 36_000.0).abs() < 1e-12);
+        }
+        let recovered = battery.clone();
+        battery.step(1.0, 25.0, 1e-3).unwrap();
+        for (old, pack) in recovered.packs().iter().zip(battery.packs()) {
+            assert!(pack.current_a > 0.0);
+            assert!(pack.soc > 0.0 && pack.soc < old.soc);
+            assert!((old.soc - pack.soc - pack.current_a * 1e-3 / 36_000.0).abs() < 1e-15);
+        }
+    }
+
+    #[test]
+    fn full_battery_rejects_regeneration_but_accepts_discharge() {
+        let mut battery = Battery::new(BatteryParams { soc: 1.0, ..extreme() }, 25.0).unwrap();
+        let before = battery.clone();
+        for h in [5e-6, 1.0, 1000.0] {
+            assert_eq!(battery.step(-20.0, 25.0, h), Err(BatteryLimit::ChargeSaturated { pack: 0 }));
+            assert_unchanged(&battery, &before);
+        }
+        assert_eq!(battery.discharge_validity(), Ok(()));
+        battery.step(20.0, 25.0, 1.0).unwrap();
+        assert!(battery.packs().iter().all(|pack| pack.soc < 1.0 && pack.current_a > 0.0));
+    }
+
+    #[test]
+    fn steps_can_land_exactly_on_charge_endpoints() {
+        for (soc, load, endpoint) in [(0.25, 2.0, 0.0), (0.75, -2.0, 1.0)] {
+            // Synthetic constant OCV: each pack carries exactly +/-1 A for 900 s.
+            let params = BatteryParams {
+                series: 1,
+                capacity_ah: 1.0,
+                r0_ohm: 1.0,
+                ocv: vec![[0.0, 4.0], [1.0, 4.0]],
+                soc,
+                ..extreme()
+            };
+            let mut battery = Battery::new(params, 25.0).unwrap();
+            battery.step(load, 25.0, 900.0).unwrap();
+            for pack in battery.packs() {
+                assert_eq!(pack.soc, endpoint, "the step lands exactly on the boundary");
+            }
+            let before = battery.clone();
+            let limit = if endpoint == 0.0 {
+                BatteryLimit::Exhausted { pack: 0 }
+            } else {
+                BatteryLimit::ChargeSaturated { pack: 0 }
+            };
+            assert_eq!(battery.step(load, 25.0, 5e-6), Err(limit));
+            assert_unchanged(&battery, &before);
+        }
+    }
+
+    #[test]
+    fn unequal_pack_oversteps_reject_every_pack_atomically() {
+        for (soc, load, limit) in [
+            (1e-5, 200.0, BatteryLimit::Exhausted { pack: 1 }),
+            (1.0 - 1e-5, -200.0, BatteryLimit::ChargeSaturated { pack: 1 }),
+        ] {
+            let mut battery = Battery::new(extreme(), 25.0).unwrap();
+            battery.step(20.0, 25.0, 0.1).unwrap();
+            battery.packs[0].soc = 0.5;
+            battery.packs[1].soc = soc;
+            battery.conditions[1].resistance_factor = 2.0;
+            let h = 0.1;
+            let (_, currents) = battery.solve(load);
+            assert!((currents.iter().sum::<f64>() - load).abs() < 1e-9);
+            assert!((currents[0] - currents[1]).abs() > 1.0);
+            let candidate_soc: Vec<f64> =
+                battery.packs().iter().zip(currents).map(|(pack, current)| pack.soc - current * h / 36_000.0).collect();
+            assert!((0.0..=1.0).contains(&candidate_soc[0]));
+            assert!(!((0.0..=1.0).contains(&candidate_soc[1])));
+            let before = battery.clone();
+            assert_eq!(battery.step(load, 30.0, h), Err(limit));
+            assert_unchanged(&battery, &before);
+            assert!(battery.packs().iter().all(|pack| pack.soc > 0.0 && pack.soc < 1.0));
+        }
+    }
+
+    #[test]
+    fn one_empty_pack_invalidates_discharge_despite_positive_mean_soc() {
+        for empty in 0..2 {
+            let mut battery = Battery::new(extreme(), 25.0).unwrap();
+            battery.shift_soc(empty, -1.0);
+            let mean = battery.packs().iter().map(|pack| pack.soc).sum::<f64>() / 2.0;
+            assert!(mean > 0.4);
+            assert_eq!(battery.discharge_validity(), Err(BatteryLimit::Exhausted { pack: empty }));
+            let before = battery.clone();
+            assert_eq!(battery.step(1.0, 25.0, 5e-6), Err(BatteryLimit::Exhausted { pack: empty }));
+            assert_unchanged(&battery, &before);
+        }
+    }
+
+    #[test]
+    fn circulating_current_checks_pack_bounds_even_with_zero_bus_load() {
+        for (soc, limit) in [
+            ([1.0, 1.0 - 1e-5], BatteryLimit::ChargeSaturated { pack: 1 }),
+            ([1e-5, 0.0], BatteryLimit::Exhausted { pack: 0 }),
+        ] {
+            let mut battery = Battery::new(extreme(), 25.0).unwrap();
+            for (pack, soc) in battery.packs.iter_mut().zip(soc) {
+                pack.soc = soc;
+            }
+            let (_, currents) = battery.solve(0.0);
+            assert!(currents[0] > 0.0 && currents[1] < 0.0);
+            assert!(currents.iter().sum::<f64>().abs() < 1e-9);
+            let before = battery.clone();
+            assert_eq!(battery.step(0.0, 25.0, 1000.0), Err(limit));
+            assert_unchanged(&battery, &before);
+        }
+    }
+
+    #[test]
+    fn invalid_step_inputs_and_loaded_voltage_are_atomic() {
+        let mut battery = Battery::new(extreme(), 25.0).unwrap();
+        battery.step(20.0, 25.0, 0.1).unwrap();
+        let before = battery.clone();
+        for (load, ambient, h) in [
+            (f64::NAN, 25.0, 1.0),
+            (f64::INFINITY, 25.0, 1.0),
+            (f64::NEG_INFINITY, 25.0, 1.0),
+            (1.0, f64::NAN, 1.0),
+            (1.0, f64::INFINITY, 1.0),
+            (1.0, 25.0, f64::NAN),
+            (1.0, 25.0, f64::INFINITY),
+            (1.0, 25.0, -1.0),
+            (10_000.0, 25.0, 5e-6),
+        ] {
+            assert_eq!(battery.step(load, ambient, h), Err(BatteryLimit::InvalidStep));
+            assert_unchanged(&battery, &before);
+        }
+        battery.step(100.0, -20.0, 0.0).unwrap();
+        assert_unchanged(&battery, &before);
     }
 }

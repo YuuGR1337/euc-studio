@@ -127,6 +127,8 @@ pub struct Machine {
     pub resets: u32,
     /// Cycles the core spent asleep in `WFI` or `WFE`.
     pub slept_cycles: u64,
+    /// Exclusive occupied cycles per exception number, including context switches.
+    handler_cycles: Vec<u64>,
 }
 
 impl Machine {
@@ -241,7 +243,25 @@ impl Machine {
             early_quanta: 0,
             resets: 0,
             slept_cycles: 0,
+            handler_cycles: vec![0; 256],
         })
+    }
+
+    /// Occupied interrupt cycles by exception number. Nested handlers exclude their parent.
+    /// Entry cost belongs to the entered handler. Return and tail-chain cost belong to the leaving handler.
+    /// These are simulator cycle estimates, not measurements of the physical controller.
+    pub fn handler_cycles(&self) -> &[u64] {
+        if self.isr_metrics_available() { &self.handler_cycles } else { &[] }
+    }
+
+    /// Whether exception returns yield often enough for exclusive handler attribution.
+    pub fn isr_metrics_available(&self) -> bool {
+        self.sys.exception_timing.exit > 0 && self.sys.exception_timing.tail_chain > 0
+    }
+
+    /// Total occupied interrupt cycles since simulation start, across resets.
+    pub fn isr_cycles(&self) -> u64 {
+        self.handler_cycles().iter().sum()
     }
 
     /// Core clock in Hz.
@@ -258,8 +278,19 @@ impl Machine {
             self.sys.chunk_start = now;
             self.sys.skip = 0;
             self.sys.fire_due(now);
+            self.sync_supply();
+            if let Some(limit) = self.plant().live_part().and_then(|live| live.electrical().battery_validity().err()) {
+                self.sys.blocker("model-validity", format!("{limit}; no physical outcome can be judged"), true);
+                break;
+            }
             if let Some((kind, why)) = self.sys.reset_pending.take() {
                 self.system_reset(kind, &why);
+                self.sync_supply();
+            }
+            if !self.powered() {
+                // Plant and physical-board events stay on the existing simulation clock.
+                self.cycles = self.sys.next_event().map_or(end, |at| at.min(end)).max(self.cycles + 1);
+                continue;
             }
             if self.watching && now >= self.marker_deadline {
                 self.cpu.watch(&[]);
@@ -282,6 +313,9 @@ impl Machine {
 
     /// Executes and accounts for a quantum, including exception returns and early skips.
     fn run_quantum(&mut self, budget: u32, end: u64) {
+        let cycle_start = self.cycles;
+        let slept_start = self.slept_cycles;
+        let handler = self.sys.exc.active().last().copied();
         self.sys.begin_quantum(self.cycles);
         let before = self.cpu.retired();
         let exit = self.cpu.run(&mut self.sys, budget);
@@ -300,6 +334,10 @@ impl Machine {
             if matches!(exit, Exit::WaitForInterrupt | Exit::WaitForEvent) {
                 self.sleep(end);
             }
+        }
+        if let Some(handler) = handler {
+            let occupied = self.cycles.saturating_sub(cycle_start).saturating_sub(self.slept_cycles - slept_start);
+            self.handler_cycles[usize::from(handler)] += occupied;
         }
     }
 
@@ -364,6 +402,7 @@ impl Machine {
         }
         let cost = self.sys.exception_timing.entry;
         self.cycles += cost;
+        self.handler_cycles[usize::from(exception)] += cost;
         cost != 0
     }
 
@@ -375,6 +414,48 @@ impl Machine {
         self.sys.reset_components(kind);
         self.cpu.reset(self.reset_sp, self.reset_vector);
         self.cpu.set_ccr(self.sys.exc.ccr());
+    }
+
+    /// Whether the modeled controller logic/gate-driver rail has power. The battery and world
+    /// remain live while this is false. This is distinct from the firmware's latch GPIO.
+    pub const fn powered(&self) -> bool {
+        self.sys.controller_powered
+    }
+
+    /// Whether an interactive Power contact can be pressed or renewed, including while off.
+    /// Handle and normal controls still use [`BoardLogic::buttons_ready`].
+    pub fn power_button_ready(&self) -> bool {
+        self.halted().is_none() && self.board().power_button_ready()
+    }
+
+    pub(crate) fn sync_supply(&mut self) {
+        let wanted = self.board().supply_powered();
+        if wanted == self.powered() {
+            return;
+        }
+        let now = self.sys.now();
+        if wanted {
+            self.sys.switch_supply(true);
+            self.sys.call(self.board, |device, ctx| {
+                if let Some(board) = (device as &mut dyn std::any::Any).downcast_mut::<BoardLogic>() {
+                    board.begin_supply_boot(ctx);
+                }
+            });
+            self.sys.drain();
+            self.cpu.reset(self.reset_sp, self.reset_vector);
+            self.cpu.set_ccr(self.sys.exc.ccr());
+            self.resets += 1;
+            self.sys
+                .diag
+                .events
+                .push((now, "CONTROLLER POWER ON: physical Power contact; controller reset, world preserved".into()));
+        } else {
+            self.sys.switch_supply(false);
+            self.sys
+                .diag
+                .events
+                .push((now, "CONTROLLER POWER OFF: latch and Power contact released; world continues".into()));
+        }
     }
 
     /// `HardFault`, `SysTick`, `TIM8_UP`, `IRQ61`...
@@ -840,6 +921,66 @@ release_after_latch_s = 0.1
             halted.as_deref(),
             Some("cpu-exception: division by zero at PC 0x08003110 (HardFault/UsageFault on HW)")
         );
+    }
+
+    #[test]
+    fn supply_loss_stops_before_the_next_instruction_and_early_wake_release_powers_off() {
+        // Own test firmware: assert PB14, wait for initial Power release, drop PB14, then UDF.
+        // A running controller after rail loss reaches UDF and fails this test.
+        let program = [
+            0x4807, 0x4908, 0x6041, 0x4908, 0x6101, 0x6881, 0x0bc9, 0x2900, 0xd0fb, 0x4906, 0x6101, 0xde00, 0xbf00,
+            0xbf00, 0xbf00, 0xbf00, 0x0c00, 0x4001, 0x4444, 0x4344, 0x4000, 0x0000, 0x0000, 0x4000,
+        ];
+        let image = image(0, &program, &[]);
+        let board: BoardFile = toml::from_str(&format!(
+            r#"{BOARD}
+[[instance]]
+name = "GPIOB"
+kind = "stm32f1.gpio"
+base = 0x4001_0c00
+[[wire]]
+from = "GPIOB.14"
+to = "board.latch"
+[[wire]]
+from = "board.button"
+to = "GPIOB.15"
+"#
+        ))
+        .unwrap();
+        let config = MachineConfig {
+            board: &board,
+            stockmap: None,
+            image: &image,
+            load_addr: 0x0800_3000,
+            hclk: 72_000_000,
+            plant: PlantState::default(),
+            injections: vec![],
+            power_cycles: vec![],
+            cpi: 2.0,
+            exception_timing: ExceptionTiming::default(),
+            max_quantum: 4000,
+            marker_window_s: 0.0,
+        };
+        let mut machine =
+            Machine::new(&config, &crate::registry(), crate::cpu::Backend::Own.factory().unwrap()).unwrap();
+        assert!(machine.run(14_400_000).is_none(), "the instruction after latch loss must not execute");
+        assert!(!machine.powered());
+        let retired = machine.cpu().retired();
+        machine.run(7_200_000);
+        assert_eq!(machine.cpu().retired(), retired);
+        assert_eq!(machine.cycles, 21_600_000);
+        assert!(machine.power_button_ready());
+        assert!(machine.set_button("handle", true).is_err());
+        let clock = machine.cycles;
+        machine.set_button("power", true).unwrap();
+        assert!(machine.powered());
+        assert_eq!(machine.cycles, clock);
+        assert_eq!(machine.board().power_latched(), None);
+        // The real contact releases before any firmware instruction can latch power.
+        machine.set_button("power", false).unwrap();
+        assert!(!machine.powered());
+        assert_eq!(machine.cycles, clock);
+        assert!(machine.halted().is_none());
     }
 
     #[test]

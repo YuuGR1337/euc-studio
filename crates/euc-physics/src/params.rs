@@ -292,10 +292,53 @@ fn bisect(mut low: f64, mut high: f64, f: impl Fn(f64) -> f64) -> f64 {
     f64::midpoint(low, high)
 }
 
+/// Physical rider topology. The existing rigid model remains the default.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RiderModel {
+    #[default]
+    /// Existing rigid rider and ankle hinge.
+    RigidAnkleV1,
+    /// Experimental sagittal legs with internal joint motors and releasable pedal welds.
+    ArticulatedSagittalV1,
+}
+
+impl RiderModel {
+    /// Stable model name for status and recording context.
+    pub const fn id(self) -> &'static str {
+        match self {
+            Self::RigidAnkleV1 => "rigid_ankle_v1",
+            Self::ArticulatedSagittalV1 => "articulated_sagittal_v1",
+        }
+    }
+}
+
+/// Estimated joint control for the opt-in articulated prototype, not measured human limits.
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct Articulation {
+    /// Posture stiffness, N·m/rad, per joint.
+    pub joint_kp: f64,
+    /// Posture damping, N·m·s/rad, per joint.
+    pub joint_kd: f64,
+    /// Hip/knee motor torque cap, N·m, per joint. Ankles retain the existing combined cap.
+    pub joint_max_nm: f64,
+}
+
+impl Default for Articulation {
+    fn default() -> Self {
+        Self { joint_kp: 1000.0, joint_kd: 60.0, joint_max_nm: 180.0 }
+    }
+}
+
 /// The rider: a rigid body standing on the pedals, hinged at the ankles.
 #[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct Rider {
+    /// Physical topology. Omission preserves the rigid model.
+    pub model: RiderModel,
+    /// Estimated posture parameters used only by the articulated model.
+    pub articulation: Articulation,
     /// Mass, kilograms.
     pub mass_kg: f64,
     /// Height of the centre of mass above the pedals, metres.
@@ -339,6 +382,8 @@ impl Default for LetGo {
 impl Default for Rider {
     fn default() -> Self {
         Self {
+            model: RiderModel::default(),
+            articulation: Articulation::default(),
             mass_kg: 80.0,
             com_above_pedals_m: 1.0,
             ankle_above_pedals_m: 0.08,
@@ -383,12 +428,32 @@ pub struct RiderControl {
     /// Strongest braking while easing off for tiltback, m/s²: the rider stops pushing and lets
     /// the wheel slow, without braking hard.
     pub tiltback_ease_brake: f64,
-    /// Steering: twist about the vertical per radian of heading away from the line, N·m.
+    /// Turn rate the rider asks for per radian of heading error, 1/s: how eagerly the rider
+    /// comes back onto the line.
+    pub heading_kp: f64,
+    /// Fastest turn the rider asks for, rad/s.
+    pub turn_rate_max_rad_s: f64,
+    /// Largest lean into a turn, degrees of roll: the rider leans the wheel over and the cambered
+    /// tire carves the curve (`tan(lean) = v·turn_rate / g` in a steady turn).
+    pub turn_lean_max_deg: f64,
+    /// Fastest change of the lean into a turn, degrees per second.
+    pub turn_lean_rate_deg_s: f64,
+    /// Walking speed scale, m/s. Manual turn requests fade linearly to zero below it.
+    /// The heading twist spring fades with squared speed over it; yaw damping does not fade.
+    pub twist_fade_mps: f64,
+    /// Twist aid stiffness per radian of heading error, N·m (an external yaw torque on the shell;
+    /// the legs have no twist joint).
     pub steer_kp: f64,
-    /// Steering damping per rad/s of turn, N·m·s.
+    /// External yaw damping per rad/s of turn rate error, N·m·s, active at every speed.
     pub steer_kd: f64,
-    /// Strongest twist feet and legs give the wheel, N·m.
+    /// Largest twist aid torque on the shell, N·m.
     pub steer_max_nm: f64,
+    /// Experimental delay of intent and heading requests, simulated seconds, 0 through 0.30.
+    /// Rounded up to physics ticks; zero preserves the existing controller timing.
+    pub command_delay_s: f64,
+    /// Experimental delay of rider observations, simulated seconds, 0 through 0.30.
+    /// This does not delay the firmware IMU, release guards, or collision solver.
+    pub feedback_delay_s: f64,
 }
 
 impl Default for RiderControl {
@@ -406,10 +471,70 @@ impl Default for RiderControl {
             tiltback_feel_deg: 2.0,
             tiltback_ease_kmh_per_deg: 1.5,
             tiltback_ease_brake: 1.0,
+            heading_kp: 1.0,
+            turn_rate_max_rad_s: 1.0,
+            turn_lean_max_deg: 20.0,
+            turn_lean_rate_deg_s: 30.0,
+            twist_fade_mps: 1.5,
             steer_kp: 2000.0,
             steer_kd: 200.0,
             steer_max_nm: 60.0,
+            command_delay_s: 0.0,
+            feedback_delay_s: 0.0,
         }
+    }
+}
+
+impl RiderControl {
+    /// Largest experimental command or feedback delay, simulated seconds.
+    pub const MAX_DELAY_S: f64 = 0.30;
+
+    /// Checks every control parameter before model construction.
+    pub fn validate(&self) -> Result<(), ParamError> {
+        let nonnegative = [
+            ("lean_kp", self.lean_kp),
+            ("lean_kd", self.lean_kd),
+            ("ankle_max_nm", self.ankle_max_nm),
+            ("speed_kp", self.speed_kp),
+            ("speed_ki", self.speed_ki),
+            ("accel_max", self.accel_max),
+            ("brake_max", self.brake_max),
+            ("lean_rate_deg_s", self.lean_rate_deg_s),
+            ("tiltback_ease_kmh_per_deg", self.tiltback_ease_kmh_per_deg),
+            ("tiltback_ease_brake", self.tiltback_ease_brake),
+            ("heading_kp", self.heading_kp),
+            ("turn_rate_max_rad_s", self.turn_rate_max_rad_s),
+            ("turn_lean_rate_deg_s", self.turn_lean_rate_deg_s),
+            ("steer_kp", self.steer_kp),
+            ("steer_kd", self.steer_kd),
+            ("steer_max_nm", self.steer_max_nm),
+        ];
+        for (name, value) in nonnegative {
+            if !value.is_finite() || value < 0.0 {
+                return Err(ParamError(format!("rider.control.{name} must be finite and nonnegative")));
+            }
+        }
+        if !self.turn_lean_max_deg.is_finite() || !(0.0..90.0).contains(&self.turn_lean_max_deg) {
+            return Err(ParamError("rider.control.turn_lean_max_deg must be finite and in [0, 90)".into()));
+        }
+        if !self.twist_fade_mps.is_finite() || self.twist_fade_mps <= 0.0 {
+            return Err(ParamError("rider.control.twist_fade_mps must be finite and positive".into()));
+        }
+        if !self.lean_max_deg.is_finite() || !(0.0..90.0).contains(&self.lean_max_deg) {
+            return Err(ParamError("rider.control.lean_max_deg must be finite and in [0, 90)".into()));
+        }
+        if !self.tiltback_feel_deg.is_finite() || !(0.0..=90.0).contains(&self.tiltback_feel_deg) {
+            return Err(ParamError("rider.control.tiltback_feel_deg must be finite and in [0, 90]".into()));
+        }
+        for (name, value) in [("command_delay_s", self.command_delay_s), ("feedback_delay_s", self.feedback_delay_s)] {
+            if !value.is_finite() || !(0.0..=Self::MAX_DELAY_S).contains(&value) {
+                return Err(ParamError(format!(
+                    "rider.control.{name} must be finite and in [0, {}]",
+                    Self::MAX_DELAY_S
+                )));
+            }
+        }
+        Ok(())
     }
 }
 
@@ -443,8 +568,10 @@ pub struct Setup {
     pub air_density: f64,
     /// Gravity, m/s².
     pub gravity: f64,
-    /// The ground.
+    /// Existing scenario terrain, used when `height_map` is `None`.
     pub terrain: crate::Terrain,
+    /// Optional finite free ride surface. Model generation selects it before scenario terrain.
+    pub height_map: Option<crate::map::HeightMap>,
 }
 
 impl Setup {
@@ -457,6 +584,7 @@ impl Setup {
             air_density: 1.2,
             gravity: 9.81,
             terrain: crate::Terrain::flat(),
+            height_map: None,
         }
     }
 
@@ -485,6 +613,7 @@ impl Setup {
         let not_negative = [
             ("body.tire.crr", w.tire.crr),
             ("rider.cda_m2", r.cda_m2),
+            ("rider.ankle_above_pedals_m", r.ankle_above_pedals_m),
             ("rider.let_go.reaction_s", r.let_go.reaction_s),
             ("assist.roll_stiffness", self.assist.roll_stiffness),
             ("assist.roll_damping", self.assist.roll_damping),
@@ -508,10 +637,33 @@ impl Setup {
         if r.ankle_above_pedals_m >= r.com_above_pedals_m {
             return Err(ParamError("rider.ankle_above_pedals_m must be below the centre of mass".into()));
         }
+        if r.model == RiderModel::RigidAnkleV1 && r.mass_kg <= 2.0 {
+            return Err(ParamError("rider.mass_kg must exceed the fixed 2 kg feet allocation".into()));
+        }
+        if r.com_above_pedals_m >= r.height_m {
+            return Err(ParamError("rider.com_above_pedals_m must be below rider.height_m".into()));
+        }
+        if r.let_go.after_cut_deg > r.let_go.fall_deg || r.let_go.fall_deg > 90.0 {
+            return Err(ParamError("rider.let_go thresholds must satisfy 0 < after_cut_deg <= fall_deg <= 90".into()));
+        }
+        for (name, value) in [
+            ("joint_kp", r.articulation.joint_kp),
+            ("joint_kd", r.articulation.joint_kd),
+            ("joint_max_nm", r.articulation.joint_max_nm),
+        ] {
+            if !value.is_finite() || value <= 0.0 {
+                return Err(ParamError(format!("rider.articulation.{name} must be finite and positive")));
+            }
+        }
+        r.control.validate()?;
         if let Some(s) = &w.suspension {
             s.validate()?;
         }
-        self.terrain.validate().map_err(ParamError)
+        self.terrain.validate().map_err(ParamError)?;
+        if let Some(map) = &self.height_map {
+            map.validate().map_err(ParamError)?;
+        }
+        Ok(())
     }
 }
 

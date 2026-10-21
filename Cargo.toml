@@ -8,6 +8,7 @@ default-members = [
     "crates/euc-cli",
     "crates/euc-core",
     "crates/euc-devices",
+    "crates/euc-flash-sim",
     "crates/euc-fwsource",
     "crates/euc-image",
     "crates/euc-physics",
@@ -17,8 +18,9 @@ default-members = [
     "crates/euc-sim",
     "crates/euc-stm32f1",
 ]
-# The Tauri app has its own workspace until the engine crates it embeds settle.
-exclude = ["app/src-tauri"]
+# The Tauri app has its own workspace until the engine crates it embeds settle. The Python bindings
+# have their own too: PyO3 builds against a Python, which the engine's CI does not need (python/ builds them).
+exclude = ["app/src-tauri", "crates/euc-python"]
 resolver = "3"
 
 [workspace.package]
@@ -98,6 +100,8 @@ toml = "1.1"
 unicorn-engine = { version = "=2.1.5", default-features = false, features = ["arch_arm"] }
 # rustls with the bundled Mozilla roots: the same trust store on every OS, no OpenSSL.
 ureq = { version = "3.4", default-features = false, features = ["rustls"] }
+# Recordings (euc-telemetry): zstd chunks. The bundled C library, no legacy formats.
+zstd = { version = "0.13", default-features = false }
 
 [workspace.lints.rust]
 missing_docs = "warn"

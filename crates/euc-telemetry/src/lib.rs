@@ -7,6 +7,7 @@
 //! - [`Event`]: sparse things that happen (alarms, cutoffs, tiltback, commands, firmware
 //!   milestones).
 //! - [`batch`]: snapshots packed into one compact, columnar binary message for IPC.
+//! - [`recording`]: a run in one seekable `.eucrec` file (samples, poses, events, BLE frames).
 //! - [`typescript`]: the same schema as TypeScript for the studio front end.
 //!
 //! This crate has no engine dependencies, so producers (`euc-sim`) and consumers (the studio
@@ -14,6 +15,7 @@
 
 pub mod batch;
 mod model;
+pub mod recording;
 mod schema;
 mod ts;
 

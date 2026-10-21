@@ -170,18 +170,19 @@ export function TailLight({
         height={2 * r + 1}
         fill={roller.band}
       />
-      {layout.indicators.map((i) => (
-        <g key={i.id}>
-          <circle
-            cx={sx(i.position_m[1])}
-            cy={sy(i.position_m[2])}
-            r={3}
-            fill={i.colour}
-            filter="url(#tail-spot)"
-          />
-          <circle cx={sx(i.position_m[1])} cy={sy(i.position_m[2])} r={1.4} fill={i.colour} />
-        </g>
-      ))}
+      {outputs.controller_powered !== false &&
+        layout.indicators.map((i) => (
+          <g key={i.id}>
+            <circle
+              cx={sx(i.position_m[1])}
+              cy={sy(i.position_m[2])}
+              r={3}
+              fill={i.colour}
+              filter="url(#tail-spot)"
+            />
+            <circle cx={sx(i.position_m[1])} cy={sy(i.position_m[2])} r={1.4} fill={i.colour} />
+          </g>
+        ))}
     </svg>
   );
 }

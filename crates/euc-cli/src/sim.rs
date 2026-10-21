@@ -7,10 +7,10 @@ use std::time::Instant;
 
 use anyhow::{Context as _, bail};
 use euc_fwsource::{FetchOptions, UreqClient};
-use euc_profile::{Channel, FirmwareSource, Sha256, WheelProfile};
+use euc_profile::{Channel, FirmwareSource, ProfileSource, Sha256, WheelProfile};
 use euc_sim::config::StockMap;
 use euc_sim::cpu::Backend;
-use euc_sim::recording::{Header, Recorder};
+use euc_sim::recording::{self, Recorder};
 use euc_sim::scenario::{self, Outcome, Scenario};
 use euc_sim::{CpuFactory, Machine, MachineConfig, PlantState, Report, Session, WheelFiles};
 use euc_telemetry::{Event, EventKind};
@@ -39,7 +39,8 @@ pub(crate) struct Args {
     /// and check its expectations.
     #[arg(long, value_name = "FILE")]
     scenario: Option<PathBuf>,
-    /// With --scenario: write a recording (header, telemetry batches, events) for the studio.
+    /// With --scenario: write the run to an .eucrec recording (samples, poses, events, BLE
+    /// frames; docs/recordings.md) for `euc rec`, the studio and Python.
     #[arg(long, value_name = "FILE", requires = "scenario")]
     record: Option<PathBuf>,
     /// With --scenario: samples per simulated second in the recording and the checks.
@@ -73,6 +74,10 @@ pub(crate) struct Args {
     /// Most instructions per quantum.
     #[arg(long, default_value_t = 4000)]
     max_quantum: u32,
+    /// With --scenario: ride with this rider model instead of the scenario's (`rigid_ankle_v1` or
+    /// `articulated_sagittal_v1`).
+    #[arg(long, value_name = "MODEL", requires = "scenario", value_parser = rider_model)]
+    rider_model: Option<euc_physics::RiderModel>,
     /// CPU backend: `own` (our Cortex-M3 core, in every build) or `unicorn` (development builds
     /// with the `unicorn` feature only).
     #[arg(long, default_value = "own", value_name = "own|unicorn")]
@@ -134,7 +139,10 @@ pub(crate) fn run(ctx: &Context, command: Command) -> anyhow::Result<Verdict> {
         Backend::Unicorn { .. } => Backend::Unicorn { exact: args.exact_quanta },
         own @ Backend::Own => own,
     };
-    let scenario = args.scenario.as_deref().map(load_scenario).transpose()?;
+    let mut scenario = args.scenario.as_deref().map(load_scenario).transpose()?;
+    if let (Some(scenario), Some(model)) = (&mut scenario, args.rider_model) {
+        scenario.rider.model = model;
+    }
     let wheel_id = match (&args.wheel, &scenario) {
         (Some(wheel), Some(scenario)) if *wheel != scenario.wheel => {
             bail!("the scenario is for {}, not {wheel}", scenario.wheel)
@@ -187,7 +195,7 @@ pub(crate) fn run(ctx: &Context, command: Command) -> anyhow::Result<Verdict> {
         let live = files.live_on(scenario.rider, scenario.assist, scenario.terrain.clone())?;
         let machine = Machine::new_live(&config, &euc_sim::registry(), cpu_factory(cpu)?, live)?;
         let session = Session::new(machine, fw.map.as_ref(), args.sample_hz);
-        return ride(ctx, &args, &files, &scenario, session, firmware_out, cpu);
+        return ride(ctx, &args, &source, &files, &scenario, session, firmware_out, cpu);
     }
     let mut machine = Machine::new(&config, &euc_sim::registry(), cpu_factory(cpu)?)?;
 
@@ -243,15 +251,29 @@ struct RideOutput<'a> {
     halted: Option<String>,
 }
 
+/// Parses a `--rider-model` value.
+pub(crate) fn rider_model(text: &str) -> Result<euc_physics::RiderModel, String> {
+    match text {
+        "rigid_ankle_v1" => Ok(euc_physics::RiderModel::RigidAnkleV1),
+        "articulated_sagittal_v1" => Ok(euc_physics::RiderModel::ArticulatedSagittalV1),
+        other => Err(format!("unknown rider model {other}: rigid_ankle_v1 or articulated_sagittal_v1")),
+    }
+}
+
 pub(crate) fn load_scenario(path: &Path) -> anyhow::Result<Scenario> {
     let text = fs::read_to_string(path).with_context(|| format!("cannot read {}", ui::path(path)))?;
     Scenario::from_toml(&text).with_context(|| format!("scenario {}", ui::path(path)))
 }
 
+/// What wrote a recording.
+const PRODUCER: &str = concat!("euc ", env!("CARGO_PKG_VERSION"));
+
 /// Rides `scenario` and reports its checks.
+#[allow(clippy::too_many_arguments)] // One call site; a struct would only rename the list.
 fn ride(
     ctx: &Context,
     args: &Args,
+    source: &ProfileSource,
     files: &WheelFiles,
     scenario: &Scenario,
     mut session: Session,
@@ -261,14 +283,17 @@ fn ride(
     let wheel = &files.profile;
     let mut recorder = match &args.record {
         Some(path) => {
-            let header = Header {
-                wheel: &wheel.id,
-                firmware: &firmware.label,
-                scenario: Some(&scenario.name),
-                sample_hz: args.sample_hz,
-                bodies: session.bodies(),
-                channels: &[],
-            };
+            let mut header = recording::header(PRODUCER, source, files, &session, &firmware.label, &firmware.sha256);
+            header.cpu = Some(cpu.name().to_owned());
+            header.cpi = Some(args.cpi);
+            header.scenario = Some(scenario.name.clone());
+            header.scenario_toml = args.scenario.as_deref().and_then(|p| fs::read_to_string(p).ok());
+            header.settings = args
+                .settings
+                .as_deref()
+                .or(scenario.settings.as_deref())
+                .filter(|preset| *preset != BLANK)
+                .map(str::to_owned);
             Some(Recorder::create(path, &header).with_context(|| format!("cannot write {}", ui::path(path)))?)
         }
         None => None,
@@ -277,22 +302,26 @@ fn ride(
     let mut write_error = None;
     let started = Instant::now();
     let outcome = scenario::run(scenario, &mut session, |snapshot, session| {
-        events.extend(session.take_events());
+        let new = session.take_events();
         if let Some(recorder) = recorder.as_mut()
-            && let Err(error) = recorder.push(snapshot)
+            && let Err(error) = recorder.sample(snapshot, &new, session.machine())
         {
             write_error.get_or_insert(error);
         }
+        events.extend(new);
     })
     .with_context(|| format!("scenario {}", scenario.name))?;
     let wall = started.elapsed().as_secs_f64();
-    events.extend(session.take_events());
+    let last = session.take_events();
     if let Some(error) = write_error {
         bail!("recording: {error}");
     }
-    if let (Some(recorder), Some(path)) = (recorder, &args.record) {
-        recorder.finish(&events).with_context(|| format!("cannot write {}", ui::path(path)))?;
+    if let (Some(mut recorder), Some(path)) = (recorder, &args.record) {
+        recorder.events(&last);
+        recorder.events(&recording::verdict_events(&scenario.name, &outcome, session.time_s()));
+        recorder.finish().with_context(|| format!("cannot write {}", ui::path(path)))?;
     }
+    events.extend(last);
     let sim_seconds = session.time_s();
     let halted = session.machine().halted().map(str::to_owned);
     let passed = outcome.passed() && halted.is_none();

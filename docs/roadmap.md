@@ -13,4 +13,22 @@
 | **M8 Bench** | Our firmware on a real controller on the bench | Matches the simulator traces; nobody rides before this |
 
 Other brands, boards and processors (Cortex-M4F, RISC-V, other EUC protocols) follow the same path: a wheel profile,
-peripheral models for its MCU, a protocol plugin, and the onboarding guide in `docs/adding-a-wheel.md` (coming with M7).
+peripheral models for its MCU, a protocol plugin, and the onboarding guide in `docs/adding-a-wheel.md` (available now).
+
+## Completion status
+
+M3 and M4 remain incomplete as full product milestones.
+The [request ledger](project-status.md) tracks implementation, checks, active work, and remaining phases.
+The current integration does not complete M6, M7, or M8.
+
+A working engine does not complete every desktop workflow in the same milestone.
+README.md lists implemented capabilities and remaining work separately.
+The desktop completion plan is [here](superpowers/plans/2026-10-16-project-completion.md).
+Tune and Compare now use real backend data. Integrated runtime checks remain pending.
+The [human and free ride plan](models/human-and-free-ride.md) defines the rider and map increments.
+The completion branch now implements manual controls and generated maps with the rigid rider.
+Articulated human motion remains incomplete. Runtime and hardware evidence remain separate requirements.
+The [UI review](../plans/reports/code-review-2026-10-16-desktop-ux.md) records interface corrections and review limits.
+Physical validation needs measurements, including battery behavior near empty charge.
+A simulator result establishes behavior for its specified model, timing, and scenario duration.
+It does not establish a real wheel's operating limits.

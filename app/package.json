@@ -21,13 +21,17 @@
     "contrast": "tsx scripts/check-contrast.ts",
     "test": "vitest run",
     "e2e": "playwright test",
-    "tauri": "node scripts/tauri.mjs"
+    "tauri": "node scripts/tauri.mjs",
+    "macos:package": "node scripts/macos-package.mjs build",
+    "macos:check": "node scripts/macos-package.mjs check",
+    "macos:install": "node scripts/macos-package.mjs install"
   },
   "dependencies": {
     "@fontsource/jetbrains-mono": "^5.3.0",
     "@react-three/drei": "^10.7.9",
     "@react-three/fiber": "^9.8.2",
     "@tauri-apps/api": "^2.12.4",
+    "@tauri-apps/plugin-dialog": "^2.8.3",
     "cmdk": "^1.1.1",
     "lucide-react": "^1.57.0",
     "motion": "^14.3.0",

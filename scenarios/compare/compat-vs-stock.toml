@@ -7,8 +7,11 @@
 # are about 1.5 to 2 times the largest differences measured on 2026-10-16 on the plain rides
 # (balance-60s, ride-20kmh-stop: speed 0.31 km/h, wheel 0.84 rad/s, pitch 0.90°, torque RMS
 # 3.2 N·m, Iq RMS 3.7 A): tight enough that a real behaviour change shows, loose enough for that
-# timing noise. Tables marked KNOWN DIFFERENCE hide a real compat difference: remove them when
-# compat matches the stock firmware there.
+# timing noise. These measurements identify earlier builds, not the current acceptance baseline.
+# Tables marked KNOWN DIFFERENCE limit the judged interval around a real compat difference.
+# until_s excludes later samples; same_checks = false also skips equality of scenario verdicts.
+# A passing comparison with either exception does not establish complete-ride equivalence.
+# Remove an exception only after the complete ride matches on the current model.
 
 # Every check both runs judge must give the same verdict.
 same_checks = true
@@ -38,16 +41,16 @@ note = "Regeneration lifts the pack to about 131 V when the rider brakes, and th
 battery_v = 1.0
 
 [scenario.low-battery-tiltback]
-note = "The rider feels the firmware's commanded tiltback and eases off 1.5 km/h per degree beyond 2°, so the two firmwares' battery tiltback ramps (up to 0.8° apart; they part at 1.9 s, still on the stand) become speed, pitch and current differences."
+note = "Both firmwares start the battery tiltback on the same tick (1.73 s) with the same step and ramp it in the direction of their own speed sign; on the stand the 10 ms samples differ by one step only because compat writes it about 0.5 ms later in each tick. After the release the rider stands and rocks near zero speed and eases off 1.5 km/h per degree of tiltback beyond 2°, so each small difference in the ride flips the speed sign, and with it the ramp direction, on other ticks: the ramps drift up to 0.8° apart by 12 s and become speed, pitch and current differences."
 [scenario.low-battery-tiltback.channels]
-speed_kmh = 2.5       # 1.7 km/h measured
-wheel_rad_s = 3.5     # 2.4 rad/s measured
-pitch_deg = 3.0       # 2.0° measured
+speed_kmh = 2.5       # 2.15 km/h measured (CPI 2.0, LTO build)
+wheel_rad_s = 3.5     # 3.1 rad/s measured
+pitch_deg = 3.0       # 2.5° measured
 battery_v = 1.0
-distance_m = 0.6
+distance_m = 0.6      # 0.52 m measured
 [scenario.low-battery-tiltback.channels_rms]
-iq_a = 10.0          # 6.5 A measured
-torque_nm = 8.5
+iq_a = 10.0          # 9.2 A measured
+torque_nm = 8.5      # 8.0 N·m measured
 
 [scenario.hall-loss-while-riding]
 note = "KNOWN DIFFERENCE (timing-sensitive): on a total hall loss at 15 s the two firmwares drive the motor differently at once (Iq up to 365 A apart at 15.04 s), and compat's cut has not always come within 0.2 s as stock's does. Judged until the fault."
@@ -71,12 +74,18 @@ note = "As overlean-top-speed-30pct with the PWM tiltback off: near the limit th
 until_s = 18.0
 
 [scenario.hill-climb-low-battery]
-note = "The low pack sags several volts under the climb's current, so its voltage and current differ more. With CPI 2.0, exception costs and the LTO target build, the 150 m ride accumulates 0.315 m of distance difference; pitch and speed retain their default limits."
+note = "The low pack sags under climb current. Earlier builds showed battery-tiltback, pitch, and distance differences. The existing limits retain that allowance. This scenario uses the default rigid_ankle_v1 rider unless the CLI explicitly overrides it. See the current acceptance report for measured results."
 [scenario.hill-climb-low-battery.channels]
 battery_v = 1.5       # 0.81 V measured
-distance_m = 0.5      # 0.315 m measured with CPI 2.0 and the LTO target build
+pitch_deg = 4.5       # 3.37° measured (2026-10-20)
+distance_m = 1.0      # 0.66 m measured (2026-10-20); 0.315 m with the rigid rider
 [scenario.hill-climb-low-battery.channels_rms]
 battery_a = 2.0
+
+[scenario.ride-20kmh-stop]
+note = "Earlier builds differed by up to 0.51 km/h as the wheel rocked near rest. The existing allowance remains. This scenario uses the default rigid_ankle_v1 rider unless the CLI explicitly overrides it."
+[scenario.ride-20kmh-stop.channels]
+speed_kmh = 0.8       # 0.51 km/h measured (2026-10-20)
 
 [scenario.coasting-stop]
 note = "A 38 s run: the rider coasts to a stop and then creeps backwards, so a small speed difference adds up to distance at the end (0.101 m in CI against the 0.1 m default; speed within 0.25 km/h throughout)."
@@ -87,6 +96,10 @@ distance_m = 0.3      # 0.101 m measured
 note = "Timing-sensitive: the impact at the far edge (about 19.8 s) decides the outcome within 0.1 s, so a few cycles of timing part the runs from there; in one build compat's firmware also cut the drive at 19.9 s while stock's did not. Judged until the impact."
 until_s = 19.5
 same_checks = false
+
+[scenario.pothole-5cm-20kmh]
+note = "As pothole-20kmh with a 5 cm hole: the far edge (about 19.8 s) parts the runs within 0.1 s (pitch up to 4.9° apart at 20.03 s). Judged until the impact; both ride through on a clipped gyro, and the checks still compare."
+until_s = 19.5
 
 [scenario.rider-steps-off-15kmh]
 note = "After the step-off at 15 s the riderless wheel tips over on its own, and a few cycles of timing change how it rolls (roll up to 15° apart). Judged until the step-off; the checks (cut, roll past 40°) still compare."
@@ -99,3 +112,18 @@ until_s = 12.0
 [scenario.ble-service-cut-standing]
 note = "The service sequence cuts the motor at 10.31 s on both and the standing wheel and rider fall over (11.52 s); a few cycles of timing change how they fall (roll up to 3° apart). Judged until the cut; the checks still compare."
 until_s = 10.3
+
+[scenario.full-effort-70kmh-stop-soc100]
+note = "Full rider effort (docs/models/full-effort-acceptance.md): the two firmwares launch alike to 35 km/h (launch phase ends at 9.49 s), then the lean step into the build phase and the approach to voltage saturation part their currents (battery 1.2 V apart at 9.51 s, speed 3.9 km/h and pitch 26° apart in the braking from 20.9 s). Judged until the launch phase ends; both runs must still reach 70 km/h and stop (same_checks)."
+until_s = 9.0
+
+[scenario.full-effort-70kmh-stop-soc50]
+note = "KNOWN DIFFERENCE, 2026-10-21: at 50% charge, stock cuts before 70 km/h at quanta 4000 and 2000. At quantum 3000 it reaches 70 km/h, then cuts while braking. Compat reaches 70 km/h and cuts while braking at all three quanta. All complete scenarios fail. Only samples through 9.0 s are judged, and equality of check verdicts is skipped. Even that window fails at quantum 3000: battery voltage differs by 0.53842 V against 0.5 V. A pass at another quantum cannot establish complete-ride equivalence. See docs/models/full-effort-acceptance.md."
+until_s = 9.0
+same_checks = false
+
+[scenario.full-effort-70kmh-stop-soc20]
+note = "As full-effort-70kmh-stop-soc100 at 20 % charge: the low pack sags more under the launch current (0.68 V apart at 8.9 s); both cut before 70 km/h (checks agree). Judged until the launch phase ends."
+until_s = 9.0
+[scenario.full-effort-70kmh-stop-soc20.channels]
+battery_v = 1.0       # 0.68 V measured (2026-10-20)

@@ -6,6 +6,7 @@ mod fetch;
 mod firmware;
 mod image;
 mod paths;
+mod rec;
 mod replay;
 mod serve;
 mod sim;
@@ -52,6 +53,9 @@ enum Command {
     /// Run firmware in the simulator.
     #[command(subcommand)]
     Sim(sim::Command),
+    /// Inspect and export .eucrec recordings (`euc sim run --record`, the studio, Python).
+    #[command(subcommand)]
+    Rec(rec::Command),
     /// Play a BLE capture back as a wheel, on this Mac's Bluetooth or a TCP bridge (docs/ble-radio.md).
     Replay(replay::Args),
 }
@@ -80,6 +84,7 @@ fn main() -> ExitCode {
         Command::Firmware(command) => firmware::run(&ctx, command),
         Command::Image(command) => image::run(&ctx, command),
         Command::Sim(command) => sim::run(&ctx, command),
+        Command::Rec(command) => rec::run(&ctx, command),
         Command::Replay(args) => replay::run(&ctx, &args),
     };
     match result {

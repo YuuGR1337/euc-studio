@@ -94,6 +94,8 @@ pub struct Diagnostics {
 
 /// Everything except the CPU.
 pub struct System {
+    pub(crate) controller_powered: bool,
+    logic: Option<DeviceId>,
     pub(crate) hclk: u64,
     /// Cycle the current quantum started at.
     pub(crate) chunk_start: u64,
@@ -144,7 +146,10 @@ impl System {
         let mut pages = PageTable::new(&[map.periph, map.ppb, map.flash]);
         pages.set(SCS, Target::Scs);
         let irqs = usize::from(exc.irqs());
+        let logic = slots.iter().position(|slot| slot.name == crate::machine::BOARD).map(|i| i as DeviceId);
         let mut sys = Self {
+            controller_powered: true,
+            logic,
             hclk,
             chunk_start: 0,
             skip: 0,
@@ -204,17 +209,28 @@ impl System {
 
     /// The earliest pending event: SysTick or any component's.
     pub(crate) fn next_event(&self) -> Option<u64> {
-        let timers = self.slots.iter().flat_map(|slot| slot.timers.iter().map(|&(_, at)| at));
-        timers.chain(self.exc.systick.next_event()).min()
+        let timers = self
+            .slots
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| self.powered_slot(*i as DeviceId))
+            .flat_map(|(_, slot)| slot.timers.iter().map(|&(_, at)| at));
+        timers.chain(self.controller_powered.then(|| self.exc.systick.next_event()).flatten()).min()
     }
 
     /// Fires everything due at `now`: SysTick first, then each component in board order, each
     /// once, as the reference harness does.
     pub(crate) fn fire_due(&mut self, now: u64) {
-        if self.exc.systick.next_event().is_some_and(|at| at <= now) && self.exc.systick.on_event(now) {
+        if self.controller_powered
+            && self.exc.systick.next_event().is_some_and(|at| at <= now)
+            && self.exc.systick.on_event(now)
+        {
             self.exc.pend(SYSTICK);
         }
         for index in 0..self.slots.len() {
+            if !self.powered_slot(index as DeviceId) {
+                continue;
+            }
             let mut due: Vec<u32> = Vec::new();
             self.slots[index].timers.retain(|&(tag, at)| {
                 let fire = at <= now;
@@ -246,26 +262,105 @@ impl System {
 
     /// Delivers queued signals and DMA requests until none are left.
     pub(crate) fn drain(&mut self) {
+        let mut check_supply = false;
         while let Some(pending) = self.queue.pop_front() {
             match pending {
                 Pending::Signal { from, port, signal } => {
+                    if !self.powered_slot(from) {
+                        continue;
+                    }
                     let count = self.wires.get(&(from, port)).map_or(0, Vec::len);
                     for i in 0..count {
                         let (to, input) = self.wires[&(from, port)][i];
+                        if !self.powered_slot(to) {
+                            continue;
+                        }
                         self.call(to, |device, ctx| device.input(input, signal, ctx));
+                        check_supply |= Some(to) == self.logic;
                     }
                 }
                 Pending::Dma { from, line } => {
+                    if !self.controller_powered {
+                        continue;
+                    }
                     if let Some(&(dma, channel)) = self.dma_routes.get(&(from, line)) {
                         self.call(dma, |device, ctx| device.dma_request(channel, ctx));
                     }
                 }
             }
         }
+        if check_supply
+            && let Some(logic) = self.logic
+            && let Some(device) = self.slots[usize::from(logic)].device.as_deref()
+            && let Some(board) = (device as &dyn std::any::Any).downcast_ref::<crate::board::BoardLogic>()
+            && board.supply_powered() != self.controller_powered
+        {
+            // A latch write can remove power. Stop before the next CPU instruction.
+            self.early = true;
+            self.yield_pending = true;
+        }
+    }
+
+    fn powered_slot(&self, id: DeviceId) -> bool {
+        self.controller_powered || Some(id) == self.plant || Some(id) == self.logic
+    }
+
+    /// Switches the inferred controller rail without resetting the world or physical contacts.
+    pub(crate) fn switch_supply(&mut self, powered: bool) {
+        self.queue.clear();
+        self.exc.reset();
+        self.irq_sources.fill(0);
+        self.mem.clear_sram();
+        if powered {
+            self.controller_powered = true;
+        }
+        for id in 0..self.slots.len() {
+            let id = id as DeviceId;
+            if Some(id) == self.plant || Some(id) == self.logic {
+                continue;
+            }
+            self.slots[usize::from(id)].timers.clear();
+            self.call(id, |device, ctx| device.reset(ResetKind::Power, ctx));
+        }
+        // Reset outputs (especially PWM gate release and buzzer off) reach the live plant
+        // before the domain stops forwarding powered-device signals.
+        self.drain();
+        if powered && let Some(plant) = self.plant {
+            self.call(plant, |device, ctx| {
+                if let Some(plant) = (device as &mut dyn std::any::Any).downcast_mut::<Plant>() {
+                    plant.controller_supply_restored(ctx);
+                }
+            });
+            self.drain();
+        }
+        if !powered {
+            if let Some(plant) = self.plant {
+                self.call(plant, |device, ctx| {
+                    if let Some(plant) = (device as &mut dyn std::any::Any).downcast_mut::<Plant>() {
+                        plant.controller_supply_lost(ctx);
+                    }
+                });
+                self.drain();
+            }
+            for id in 0..self.slots.len() {
+                if Some(id as DeviceId) != self.plant && Some(id as DeviceId) != self.logic {
+                    self.slots[id].timers.clear();
+                }
+            }
+        }
+        self.controller_powered = powered;
+        self.reset_pending = None;
+        self.ccr_pending = None;
+        self.poll.reset();
+        self.stuck = None;
+        self.stuck_skip = 0;
+        self.early = false;
+        self.yield_pending = false;
     }
 
     /// Resets every component and the exception unit (the CPU is the machine's job).
     pub(crate) fn reset_components(&mut self, kind: ResetKind) {
+        self.controller_powered = true;
         for slot in &mut self.slots {
             slot.timers.clear();
         }
@@ -634,6 +729,9 @@ impl Host for System {
     }
 
     fn schedule(&mut self, dev: DeviceId, at: u64, tag: u32) {
+        if !self.powered_slot(dev) {
+            return;
+        }
         let timers = &mut self.slots[usize::from(dev)].timers;
         match timers.iter_mut().find(|(t, _)| *t == tag) {
             Some(timer) => timer.1 = at,
@@ -646,6 +744,9 @@ impl Host for System {
     }
 
     fn set_irq(&mut self, dev: DeviceId, irq: u16, level: bool) {
+        if !self.controller_powered {
+            return;
+        }
         let Some(sources) = self.irq_sources.get_mut(usize::from(irq)) else { return };
         let bit = 1_u128 << (dev % 128);
         if level {
@@ -658,6 +759,9 @@ impl Host for System {
     }
 
     fn pulse_irq(&mut self, irq: u16) {
+        if !self.controller_powered {
+            return;
+        }
         self.exc.pend_irq(irq);
     }
 

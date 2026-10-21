@@ -8,7 +8,7 @@ use euc_sim::{Machine, MachineConfig, PlantState, Session, WheelFiles};
 
 use super::cpu;
 use super::display::DisplayLayout;
-use super::host::{RideHost, StillHost};
+use super::host::RideHost;
 use super::lights::LightsLayout;
 use super::runner::{Built, SuspensionInfo};
 use super::scenarios;
@@ -16,8 +16,91 @@ use super::scenarios;
 /// Snapshots per simulated second; the runner steps in 1/120 s.
 const SAMPLE_HZ: f64 = 120.0;
 
+/// Builds an interactive Session on one authoritative finite map. No scenario driver controls its rider.
+pub(super) fn build_free_host(
+    spec: &super::free_ride::FreeRideSpec,
+    firmware: &str,
+    epoch: u64,
+    controls: super::free_ride::FreeRideState,
+    progress: &mut dyn FnMut(&str),
+) -> Result<Built, String> {
+    spec.validate()?;
+    progress("Generating the physical map");
+    let revision = u32::try_from(epoch).map_err(|_| "Restart the app before the run epoch exceeds its map limit")?;
+    let map = std::sync::Arc::new(spec.map.generate(revision)?);
+    let rider = spec.rider()?;
+    controls.begin(epoch, Some(std::sync::Arc::clone(&map)), rider);
+    let source = ProfileSource::Builtin;
+    let files = WheelFiles::load(&source, &spec.wheel).map_err(|error| error.to_string())?;
+    let wheel = &files.profile;
+    let board = if spec.settings == "blank" {
+        files.board.clone()
+    } else {
+        files.board_with_settings(&spec.settings).map_err(|error| error.to_string())?
+    };
+    let display = source.read(&wheel.id, "display.toml").ok().and_then(|text| DisplayLayout::parse(&text).ok());
+    let lights = source.read(&wheel.id, "lights.toml").ok().and_then(|text| LightsLayout::parse(&text).ok());
+    let suspension = files.body.suspension.as_ref().and_then(|s| {
+        let geometry = source.read(&wheel.id, "geometry.toml").ok()?;
+        shock_eyes(&geometry).map(|(eye_top_m, eye_bottom_m)| SuspensionInfo {
+            linkage_ratio: s.linkage_ratio,
+            eye_top_m,
+            eye_bottom_m,
+        })
+    });
+    let loaded = super::images::load(&files, firmware, progress)?;
+    let live = files
+        .live_on_map(rider, Default::default(), map.as_ref().clone())
+        .map_err(|error| format!("Invalid free ride physical model: {error}"))?;
+    let config = MachineConfig {
+        board: &board,
+        stockmap: loaded.map.as_ref(),
+        image: &loaded.image,
+        load_addr: wheel.board.app.base,
+        hclk: files.hclk(),
+        plant: PlantState::default(),
+        injections: Vec::new(),
+        power_cycles: Vec::new(),
+        cpi: euc_sim::DEFAULT_CPI,
+        exception_timing: euc_sim::ExceptionTiming::default(),
+        max_quantum: 4000,
+        marker_window_s: 4.0,
+    };
+    progress("Starting firmware with the rider on the stand");
+    let machine =
+        Machine::new_live(&config, &euc_sim::registry(), cpu::factory()?, live).map_err(|error| error.to_string())?;
+    let session = Session::new(machine, loaded.map.as_ref(), SAMPLE_HZ);
+    let mut header = euc_sim::recording::header(
+        concat!("EUC Studio ", env!("CARGO_PKG_VERSION")),
+        &source,
+        &files,
+        &session,
+        &loaded.label,
+        &Sha256::digest(&loaded.image),
+    );
+    header.cpu = Some(cpu::backend().name().into());
+    header.cpi = Some(euc_sim::DEFAULT_CPI);
+    header.settings = Some(spec.settings.clone());
+    header.context = controls.recording_context(epoch)?;
+    Ok(Built {
+        wheel: wheel.id.clone(),
+        header: Some(header),
+        host: Box::new(super::free_ride::FreeRideHost::new(session, controls, epoch, map)),
+        label: format!("{firmware} firmware · free ride"),
+        build: loaded.label,
+        note: Some(format!(
+            "Experimental {} rider. Pedal welds and external yaw/roll aids remain active. Map resolution is 0.25 m",
+            rider.model.id()
+        )),
+        display,
+        lights,
+        terrain: None,
+        suspension,
+    })
+}
+
 /// Builds the host for scenario `id`. Runs on the sim thread; `progress` names each step.
-pub fn build_host(id: &str, progress: &mut dyn FnMut(&str)) -> Result<Built, String> {
+pub fn build_host(id: &str, firmware: &str, progress: &mut dyn FnMut(&str)) -> Result<Built, String> {
     let scenario = scenarios::load(id)?;
     progress("Loading the wheel profile");
     let source = ProfileSource::Builtin;
@@ -44,10 +127,8 @@ pub fn build_host(id: &str, progress: &mut dyn FnMut(&str)) -> Result<Built, Str
             eye_bottom_m,
         })
     });
-    let (image, label) = stock_image(wheel, progress)?;
-    let sha256 = Sha256::digest(&image);
-    // Stock-map addresses only mean something in the build they were taken from.
-    let stock = wheel.find_pin(&sha256).is_some_and(|pin| pin.label == files.stockmap.build);
+    let loaded = super::images::load(&files, firmware, progress)?;
+    let (image, label, map) = (loaded.image, loaded.label, loaded.map);
 
     // The settings journal the wheel boots with ("blank" or none: an empty journal).
     let board = match scenario.settings.as_deref() {
@@ -58,10 +139,9 @@ pub fn build_host(id: &str, progress: &mut dyn FnMut(&str)) -> Result<Built, Str
     progress("Building the simulated controller");
     let factory = cpu::factory()?;
     let plant = PlantState::default();
-    let battery_v = plant.battery_v;
     let config = MachineConfig {
         board: &board,
-        stockmap: stock.then_some(&files.stockmap),
+        stockmap: map.as_ref(),
         image: &image,
         load_addr: wheel.board.app.base,
         hclk: files.hclk(),
@@ -74,45 +154,63 @@ pub fn build_host(id: &str, progress: &mut dyn FnMut(&str)) -> Result<Built, Str
         marker_window_s: 4.0,
     };
     let terrain = terrain_profile(&scenario);
-    match files.live_on(scenario.rider, scenario.assist, scenario.terrain.clone()) {
-        Ok(live) => {
-            let machine = Machine::new_live(&config, &euc_sim::registry(), factory, live).map_err(|e| e.to_string())?;
-            let session = Session::new(machine, stock.then_some(&files.stockmap), SAMPLE_HZ);
-            Ok(Built {
-                host: Box::new(RideHost::new(session, scenario)?),
-                label: "stock firmware".into(),
-                build: label,
-                note,
-                display,
-                lights,
-                terrain,
-                suspension,
-            })
+    let live = files
+        .live_on(scenario.rider, scenario.assist, scenario.terrain.clone())
+        .map_err(|e| format!("Invalid physical model: {e}"))?;
+    let machine = Machine::new_live(&config, &euc_sim::registry(), factory, live).map_err(|e| e.to_string())?;
+    let session = Session::new(machine, map.as_ref(), SAMPLE_HZ);
+    let sha256 = Sha256::digest(&image);
+    let toml = scenarios::text(id);
+    let mut header = euc_sim::recording::header(
+        concat!("EUC Studio ", env!("CARGO_PKG_VERSION")),
+        &source,
+        &files,
+        &session,
+        &label,
+        &sha256,
+    );
+    header.cpu = Some(cpu::backend().name().into());
+    header.cpi = Some(euc_sim::DEFAULT_CPI);
+    header.scenario = Some(scenario.name.clone());
+    header.scenario_toml = toml;
+    header.settings = scenario.settings.clone().filter(|p| p != "blank");
+    header.context = Some(
+        euc_sim::recording::RecordingContext {
+            schema: euc_sim::recording::CONTEXT_SCHEMA,
+            run_mode: euc_sim::recording::RunMode::Scenario,
+            rider_model: match scenario.rider.model {
+                euc_physics::RiderModel::RigidAnkleV1 => euc_sim::recording::RiderModel::RigidAnkleV1,
+                euc_physics::RiderModel::ArticulatedSagittalV1 => euc_sim::recording::RiderModel::ArticulatedSagittalV1,
+            },
+            height_map: None,
+            model_aids: euc_sim::recording::ModelAids {
+                roll_stiffness: scenario.assist.roll_stiffness,
+                roll_damping: scenario.assist.roll_damping,
+                steer_kp: scenario.rider.control.steer_kp,
+                steer_kd: scenario.rider.control.steer_kd,
+                steer_max_nm: scenario.rider.control.steer_max_nm,
+            },
         }
-        // Without a body model the firmware still runs, on a wheel that stands still.
-        Err(e) => {
-            let machine = Machine::new(&config, &euc_sim::registry(), factory).map_err(|e| e.to_string())?;
-            Ok(Built {
-                host: Box::new(StillHost::new(machine, battery_v)),
-                label: "stock firmware (no physics)".into(),
-                build: label,
-                note: Some(format!("The wheel stands still: {e}")).map(|n| match &note {
-                    Some(more) => format!("{n}; {more}"),
-                    None => n,
-                }),
-                display,
-                lights,
-                terrain: None,
-                suspension: None,
-            })
-        }
-    }
+        .to_json(),
+    );
+    Ok(Built {
+        wheel: wheel.id.clone(),
+        header: Some(header),
+        host: Box::new(RideHost::new(session, scenario)?),
+        label: format!("{firmware} firmware"),
+        build: label,
+        note,
+        display,
+        lights,
+        terrain,
+        suspension,
+    })
 }
 
 /// The ground the scenario rides on, as points for the web view to draw (none when flat): every
 /// 5 cm from 5 m behind the start, `[x, z, slope z]` in metres, where `slope z` is the slope alone
 /// (no bumps or potholes), so the view can lay its shadows on the slope and mark the potholes.
-fn terrain_profile(scenario: &Scenario) -> Option<Vec<[f32; 3]>> {
+pub(super) fn terrain_profile(scenario: &Scenario) -> Option<Vec<[f32; 3]>> {
     let terrain = &scenario.terrain;
     if terrain.is_flat() {
         return None;
@@ -132,7 +230,7 @@ fn terrain_profile(scenario: &Scenario) -> Option<Vec<[f32; 3]>> {
 }
 
 /// The shock's eyes from `geometry.toml` `[shock]` (`eye_top_m`, `eye_bottom_m`), if it has them.
-fn shock_eyes(geometry: &str) -> Option<([f64; 3], [f64; 3])> {
+pub(super) fn shock_eyes(geometry: &str) -> Option<([f64; 3], [f64; 3])> {
     let table: toml::Table = toml::from_str(geometry).ok()?;
     let shock = table.get("shock")?;
     let eye = |key: &str| -> Option<[f64; 3]> {
@@ -143,7 +241,7 @@ fn shock_eyes(geometry: &str) -> Option<([f64; 3], [f64; 3])> {
 }
 
 /// The current pinned stock build, from the cache or fetched into it.
-fn stock_image(wheel: &WheelProfile, progress: &mut dyn FnMut(&str)) -> Result<(Vec<u8>, String), String> {
+pub(super) fn stock_image(wheel: &WheelProfile, progress: &mut dyn FnMut(&str)) -> Result<(Vec<u8>, String), String> {
     let current = wheel
         .firmware
         .iter()
@@ -179,6 +277,49 @@ mod tests {
     use super::super::host::Host;
     use super::super::phone::{PhoneDecoder, PhoneFrame};
     use super::*;
+
+    #[test]
+    #[ignore = "requires verified cached stock firmware; creates a physical model without running it"]
+    fn scenario_capture_records_the_actual_rider_model_and_external_aids() {
+        let files = WheelFiles::load(&ProfileSource::Builtin, "begode-extreme").unwrap();
+        let pinned = files
+            .profile
+            .firmware
+            .iter()
+            .find_map(|source| match source {
+                FirmwareSource::BegodeApi(build) if build.channel == Channel::Current => Some(build),
+                _ => None,
+            })
+            .unwrap();
+        let root = std::env::var_os("EUC_CACHE_DIR").map(Into::into).or_else(FirmwareCache::default_root).unwrap();
+        assert!(FirmwareCache::new(root).verified(&pinned.sha256).is_some(), "verified cache required; no download");
+        let imported = scenarios::import(
+            r#"
+schema = 1
+name = "recording-context-regression"
+description = "Verify recorded model metadata"
+wheel = "begode-extreme"
+seconds = 1.0
+release_s = 0.8
+speed_kmh = [[0.0, 0.0]]
+[rider]
+model = "articulated_sagittal_v1"
+[assist]
+roll_stiffness = 123.0
+roll_damping = 45.0
+"#
+            .into(),
+        )
+        .unwrap();
+        let built = build_host(&imported.id, "stock", &mut |_| {}).unwrap();
+        let header = built.header.unwrap();
+        let context = euc_sim::recording::RecordingContext::of(&header).unwrap().expect("scenario context");
+        assert_eq!(context.rider_model.id(), "articulated_sagittal_v1");
+        assert_eq!(context.run_mode, euc_sim::recording::RunMode::Scenario);
+        assert_eq!(context.model_aids.roll_stiffness, 123.0);
+        assert_eq!(context.model_aids.roll_damping, 45.0);
+        assert!(context.height_map.is_none());
+    }
 
     #[test]
     fn the_terrain_profile_keeps_the_ground_below_zero() {
@@ -231,7 +372,7 @@ mod tests {
     #[test]
     #[ignore = "needs the stock image in the local firmware cache"]
     fn stock_firmware_boots_and_streams() {
-        let mut built = build_host("balance-60s", &mut |_| {}).expect("host");
+        let mut built = build_host("balance-60s", "stock", &mut |_| {}).expect("host");
         let roles: Vec<_> = built.host.bodies().iter().map(|b| b.role).collect();
         assert!(roles.contains(&BodyRole::Rider), "the physics carries the rider: {roles:?}");
         let mut rig = Rig::new(built.host.as_mut());
@@ -273,34 +414,263 @@ mod tests {
         assert_eq!(outputs.leds.len(), 32, "the light strip has 32 LEDs");
     }
 
+    /// Bounded, read-only trace of the stock startup request and its TIM4/GPIOB writes.
+    /// Keeps firmware and device behavior unchanged; run explicitly with --ignored --nocapture.
+    #[test]
+    #[ignore = "needs the cached stock image and traces four simulated seconds"]
+    fn stock_startup_buzzer_register_trace() {
+        use euc_core::{Bus, BusFault, CoreRegs, Cpu, Exit, Size};
+        use std::cell::RefCell;
+        use std::rc::Rc;
+
+        #[derive(Debug)]
+        struct Access {
+            cycle: u32,
+            pc: u32,
+            address: u32,
+            value: u32,
+            ticks: u32,
+            volume_compare: u32,
+        }
+        struct TraceBus<'a> {
+            bus: &'a mut dyn Bus,
+            accesses: &'a RefCell<Vec<Access>>,
+            pc: u32,
+        }
+        impl TraceBus<'_> {
+            fn capture(&mut self, address: u32, value: u32) {
+                if self.accesses.borrow().len() >= 512 {
+                    return;
+                }
+                let ticks = self.bus.read(0x2000_0292, Size::Half).unwrap();
+                let volume_compare = self.bus.read(0x2000_0296, Size::Half).unwrap();
+                let cycle = self.bus.read(0xe000_1004, Size::Word).unwrap();
+                self.accesses.borrow_mut().push(Access { cycle, pc: self.pc, address, value, ticks, volume_compare });
+            }
+        }
+        impl Bus for TraceBus<'_> {
+            fn read(&mut self, addr: u32, size: Size) -> Result<u32, BusFault> {
+                self.bus.read(addr, size)
+            }
+            fn write(&mut self, addr: u32, size: Size, value: u32) -> Result<(), BusFault> {
+                if (0x4000_0800..0x4000_0850).contains(&addr)
+                    || (0x4000_2800..0x4000_2828).contains(&addr)
+                    || addr == 0x4002_1020
+                    || addr == 0x4001_0c04
+                    || ((0x4001_0c0c..=0x4001_0c14).contains(&addr) && value & 0x0200_0200 != 0)
+                {
+                    self.capture(addr, value);
+                }
+                self.bus.write(addr, size, value)
+            }
+            fn fetch(&mut self, addr: u32) -> Result<u16, BusFault> {
+                self.bus.fetch(addr)
+            }
+            fn take_yield(&mut self) -> bool {
+                self.bus.take_yield()
+            }
+            fn exception_return(&mut self, regs: &mut CoreRegs, value: u32) {
+                self.bus.exception_return(regs, value);
+            }
+            fn note_pc(&mut self, pc: u32) {
+                self.pc = pc;
+                self.bus.note_pc(pc);
+            }
+            fn reached(&mut self, addr: u32) {
+                if [0x0800_ae68, 0x0800_ae70, 0x0800_73ac].contains(&addr) {
+                    self.pc = addr;
+                    self.capture(addr, 0);
+                }
+                self.bus.reached(addr);
+            }
+        }
+        struct TraceCpu {
+            cpu: Box<dyn Cpu>,
+            accesses: Rc<RefCell<Vec<Access>>>,
+        }
+        impl Cpu for TraceCpu {
+            fn reset(&mut self, sp: u32, vector: u32) {
+                self.cpu.reset(sp, vector);
+            }
+            fn run(&mut self, bus: &mut dyn Bus, budget: u32) -> Exit {
+                self.cpu.run(&mut TraceBus { bus, accesses: &self.accesses, pc: 0 }, budget)
+            }
+            fn regs(&self) -> &CoreRegs {
+                self.cpu.regs()
+            }
+            fn regs_mut(&mut self) -> &mut CoreRegs {
+                self.cpu.regs_mut()
+            }
+            fn retired(&self) -> u64 {
+                self.cpu.retired()
+            }
+            fn watch(&mut self, addresses: &[u32]) {
+                let mut all = addresses.to_vec();
+                if !all.is_empty() {
+                    all.extend([0x0800_ae68, 0x0800_ae70, 0x0800_73ac]);
+                }
+                self.cpu.watch(&all);
+            }
+            fn invalidate(&mut self, addr: u32, len: u32) {
+                self.cpu.invalidate(addr, len);
+            }
+            fn set_ccr(&mut self, ccr: u32) {
+                self.cpu.set_ccr(ccr);
+            }
+        }
+
+        let files = WheelFiles::load(&ProfileSource::Builtin, "begode-extreme").unwrap();
+        let loaded = super::super::images::load(&files, "stock", &mut |_| {}).unwrap();
+        let board = files.board_with_settings("neutral").unwrap();
+        let accesses = Rc::new(RefCell::new(Vec::new()));
+        let captured = Rc::clone(&accesses);
+        let factory = cpu::factory().unwrap();
+        let config = MachineConfig {
+            board: &board,
+            stockmap: Some(&files.stockmap),
+            image: &loaded.image,
+            load_addr: files.profile.board.app.base,
+            hclk: files.hclk(),
+            plant: PlantState::default(),
+            injections: Vec::new(),
+            power_cycles: Vec::new(),
+            cpi: euc_sim::DEFAULT_CPI,
+            exception_timing: euc_sim::ExceptionTiming::default(),
+            max_quantum: 4000,
+            marker_window_s: 4.0,
+        };
+        let live = files.live_on(Default::default(), Default::default(), Default::default()).unwrap();
+        let mut machine = Machine::new_live(
+            &config,
+            &euc_sim::registry(),
+            Box::new(move |regions| {
+                Ok(Box::new(TraceCpu { cpu: factory(regions)?, accesses: captured }) as Box<dyn Cpu>)
+            }),
+            live,
+        )
+        .unwrap();
+        let mut previous = None;
+        for _ in 0..4000 {
+            assert!(machine.run(files.hclk() / 1000).is_none());
+            let half = |addr| u16::from_le_bytes(machine.memory(addr, 2).unwrap().try_into().unwrap());
+            let state = (half(0x2000_0292), half(0x2000_0296));
+            if previous != Some(state) {
+                println!(
+                    "t={:.6} ticks={} volume_compare={}",
+                    machine.cycles as f64 / files.hclk() as f64,
+                    state.0,
+                    state.1
+                );
+                previous = Some(state);
+            }
+        }
+        for access in accesses.borrow().iter() {
+            println!(
+                "t={:.6} pc={:#010x} address={:#010x} value={} ticks={} volume_compare={}",
+                f64::from(access.cycle) / files.hclk() as f64,
+                access.pc,
+                access.address,
+                access.value,
+                access.ticks,
+                access.volume_compare
+            );
+        }
+        let buzzer = machine.component::<euc_devices::Buzzer>("buzzer").unwrap();
+        println!("stock {}: {} buzzer changes, {} onsets", loaded.label, buzzer.changes(), buzzer.beeps());
+        assert!(
+            accesses.borrow().iter().any(|access| access.pc == 0x0800_ae70
+                && access.address == 0x4000_0840
+                && access.value == 151
+                && access.ticks == 100
+                && access.volume_compare == 151),
+            "RTC initializes volume before the actual stock startup CCR4 store"
+        );
+        assert_eq!(buzzer.beeps(), 1, "stock emits one real startup pulse without input");
+    }
+
+    #[test]
+    #[ignore = "needs cached stock firmware and local compat and clean builds"]
+    fn firmware_startup_emits_actual_pwm() {
+        let mut observed = Vec::new();
+        for firmware in ["stock", "ours-compat", "ours-clean"] {
+            let mut built = build_host("balance-60s", firmware, &mut |_| {}).expect("firmware host");
+            let mut rig = Rig::new(built.host.as_mut());
+            rig.run(3.0);
+            let mut tones = Vec::new();
+            rig.host.drain_tones(&mut tones);
+            println!("{firmware} startup tones {tones:?}");
+            assert!(rig.host.halted().is_none());
+            observed.push((firmware, tones));
+        }
+        for (firmware, tones) in &observed {
+            assert_eq!(tones.len(), 2, "{firmware}: one startup pulse, without input");
+            let (on, off) = (tones[0], tones[1]);
+            assert!((on.hz - 72_000_000.0 / 40.0 / 667.0).abs() < 1e-6, "{firmware}: timer carrier");
+            assert!((on.duty - 151.0 / 667.0).abs() < 1e-9, "{firmware}: neutral volume 6");
+            assert_eq!(off.hz, 0.0, "{firmware}: startup PWM stops");
+            assert!((0.19..0.22).contains(&(off.t_s - on.t_s)), "{firmware}: 100 control ticks");
+        }
+        let stock = &observed[0].1;
+        let compat = &observed[1].1;
+        for (stock_edge, compat_edge) in stock.iter().zip(compat) {
+            assert!(
+                (stock_edge.t_s - compat_edge.t_s).abs() < 0.002016,
+                "compat startup edge within one control tick of stock"
+            );
+        }
+    }
+
     /// The poses the 3D view draws (a guard for the drawing: a changed body tree shows here
-    /// first): wheel, shell and rider in that order; the wheel's centre one rolling radius above
-    /// the ground, the shell's origin (the axle at full extension) the sag below it, the rider's
-    /// origin (the ankle) above it.
+    /// first): wheel, shell, then the rider's 12 segments from the torso (its root) down to the
+    /// feet; the wheel's centre one rolling radius above the ground, the shell's origin (the axle at
+    /// full extension) the sag below it, the torso's origin (between the hips) and the head above
+    /// it, every segment drawn from its own geoms.
     #[test]
     #[ignore = "needs the stock image in the local firmware cache"]
     fn live_poses_stand_on_the_ground() {
-        let mut built = build_host("balance-60s", &mut |_| {}).expect("host");
+        let mut built = build_host("balance-60s", "stock", &mut |_| {}).expect("host");
         let host = built.host.as_mut();
-        let roles: Vec<_> = host.bodies().iter().map(|b| b.role).collect();
-        assert_eq!(roles, [BodyRole::Wheel, BodyRole::Shell, BodyRole::Rider]);
+        let bodies = host.bodies();
+        let roles: Vec<_> = bodies.iter().map(|b| b.role).collect();
+        assert_eq!(roles[..2], [BodyRole::Wheel, BodyRole::Shell]);
+        assert_eq!(roles[2..], [BodyRole::Rider; 12]);
+        let names: Vec<&str> = bodies[2..].iter().map(|b| b.name.as_str()).collect();
+        assert_eq!(
+            names,
+            [
+                "torso",
+                "head",
+                "upper_arm_left",
+                "forearm_left",
+                "upper_arm_right",
+                "forearm_right",
+                "thigh_left",
+                "shank_left",
+                "foot_left",
+                "thigh_right",
+                "shank_right",
+                "foot_right"
+            ]
+        );
+        assert!(bodies[2..].iter().all(|b| !b.geoms.is_empty()), "every segment has a shape to draw");
         while host.time_s() < 1.0 {
             host.step(1.0 / 120.0);
         }
         let mut snap = Snapshot::default();
         host.snapshot(&mut snap);
-        let [wheel, shell, rider] = [0, 1, 2].map(|i| snap.bodies[i].pos[2]);
-        println!("at 1 s: wheel z {wheel:.4} m, shell z {shell:.4} m, rider z {rider:.4} m");
+        assert_eq!(snap.bodies.len(), 14, "a pose per body");
+        let [wheel, shell, torso, head] = [0, 1, 2, 3].map(|i| snap.bodies[i].pos[2]);
+        println!("at 1 s: wheel z {wheel:.4} m, shell z {shell:.4} m, torso z {torso:.4} m, head z {head:.4} m");
         assert!((wheel - 0.225).abs() < 0.005, "the wheel centre rides one rolling radius up: {wheel}");
         assert!((0.0..0.02).contains(&(wheel - shell)), "the shell sits the sag below the axle: {shell}");
-        assert!(rider > wheel, "the rider stands above the axle: {rider}");
+        assert!(torso > wheel + 0.5 && head > torso, "the rider stands above the axle: {torso}, {head}");
     }
 
     /// The whole ride, as the studio steps it: the scenario's checks pass.
     #[test]
     #[ignore = "needs the stock image in the local firmware cache"]
     fn stock_firmware_rides_to_20_kmh_and_stops() {
-        let mut built = build_host("ride-20kmh-stop", &mut |_| {}).expect("host");
+        let mut built = build_host("ride-20kmh-stop", "stock", &mut |_| {}).expect("host");
         let mut rig = Rig::new(built.host.as_mut());
         let started = Instant::now();
         let mut top = 0.0_f32;
@@ -321,5 +691,88 @@ mod tests {
         assert!(host.halted().is_none());
         assert!(top > 19.0, "top speed {top}");
         assert!(events.iter().any(|e| e.text.starts_with("Scenario ride-20kmh-stop passed")), "the checks pass");
+    }
+
+    /// The real firmware counts Hall edges, transmits metres over BLE, and writes only tenths
+    /// of a kilometre to the TM1640. Check both sides of the first visible display increment.
+    #[test]
+    #[ignore = "needs the stock image in the local firmware cache"]
+    fn stock_odometer_counts_distance_and_updates_the_display() {
+        let files = WheelFiles::load(&ProfileSource::Builtin, "begode-extreme").unwrap();
+        let loaded = super::super::images::load(&files, "stock", &mut |_| {}).unwrap();
+        let board = files.board_with_settings("neutral").unwrap();
+        let scenario = Scenario::from_toml(
+            r#"schema = 1
+name = "odometer-check"
+description = "Ride beyond the first 100 m odometer display step."
+wheel = "begode-extreme"
+seconds = 50.0
+release_s = 2.5
+speed_kmh = [[0, 0], [6, 0], [11, 20]]
+[[expect]]
+check = "upright"
+[[expect]]
+check = "no_cutoff"
+"#,
+        )
+        .unwrap();
+        let config = MachineConfig {
+            board: &board,
+            stockmap: loaded.map.as_ref(),
+            image: &loaded.image,
+            load_addr: files.profile.board.app.base,
+            hclk: files.hclk(),
+            plant: PlantState::default(),
+            injections: Vec::new(),
+            power_cycles: Vec::new(),
+            cpi: euc_sim::DEFAULT_CPI,
+            exception_timing: euc_sim::ExceptionTiming::default(),
+            max_quantum: 4000,
+            marker_window_s: 4.0,
+        };
+        let live = files.live_on(scenario.rider, scenario.assist, scenario.terrain.clone()).unwrap();
+        let machine = Machine::new_live(&config, &euc_sim::registry(), cpu::factory().unwrap(), live).unwrap();
+        let session = Session::new(machine, loaded.map.as_ref(), SAMPLE_HZ);
+        let mut host = RideHost::new(session, scenario).unwrap();
+        let mut rig = Rig::new(&mut host);
+        let spec = euc_display::Display::parse(&ProfileSource::Builtin.read("begode-extreme", "display.toml").unwrap())
+            .unwrap();
+        let mut snap = Snapshot::default();
+        let mut readings = Vec::new();
+        for _ in 0..50 {
+            rig.run(1.0);
+            rig.host.snapshot(&mut snap);
+            let Some(frame) = rig.frames.iter().rev().find(|f| f.kind == "status") else { continue };
+            let metres: u32 = frame
+                .fields
+                .iter()
+                .find(|(key, _)| key == "Odometer")
+                .unwrap()
+                .1
+                .trim_end_matches(" m")
+                .parse()
+                .unwrap();
+            let outputs = rig.host.outputs().unwrap();
+            let grid: [u8; 16] = outputs.display_grid.try_into().unwrap();
+            readings.push((snap.t_s, snap.signals.distance_m, metres, spec.text(&grid, "odometer")));
+        }
+        for reading in readings.iter().step_by(5).chain(readings.last()) {
+            println!(
+                "time {:.1} s, physical {:.1} m, BLE {} m, display {}",
+                reading.0, reading.1, reading.2, reading.3
+            );
+        }
+        assert!(rig.host.halted().is_none());
+        assert!(readings.windows(2).all(|pair| pair[1].2 >= pair[0].2), "the lifetime counter never falls");
+        assert!(
+            readings
+                .iter()
+                .any(|(_, distance, metres, text)| *distance > 20.0 && (20..90).contains(metres) && text == "00000.0")
+        );
+        let (_, distance, metres, text) = readings.last().unwrap();
+        assert!(*distance > 150.0, "the test must ride beyond one display step: {distance}");
+        assert!(*metres >= 150, "the firmware must count the ride: {metres}");
+        assert_eq!(text, &format!("{:05}.{}", metres / 1000, (metres / 100) % 10));
+        assert_ne!(text, "00000.0", "the display must advance after 100 m");
     }
 }

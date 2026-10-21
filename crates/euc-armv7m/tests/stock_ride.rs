@@ -5,6 +5,7 @@
 //! ```text
 //! cargo test -p euc-armv7m --release --test stock_ride -- --nocapture
 //! ```
+//! Add `--features euc-sim/unicorn` to run the same checks on the development oracle.
 
 use euc_profile::ProfileSource;
 use euc_sim::cpu::Backend;
@@ -24,6 +25,20 @@ const DEAD_TIME_SHARE: f32 = 0.92;
 
 #[test]
 fn reports_the_firmware_pwm_and_the_true_modulation() {
+    ride(Backend::Own);
+}
+
+#[test]
+fn unicorn_reports_the_firmware_pwm_and_the_true_modulation() {
+    let backend = Backend::Unicorn { exact: false };
+    if !backend.available() {
+        eprintln!("skipped: enable euc-sim/unicorn for the development oracle");
+        return;
+    }
+    ride(backend);
+}
+
+fn ride(backend: Backend) {
     if cfg!(debug_assertions) {
         eprintln!("skipped: 40 simulated seconds need a release build (--release)");
         return;
@@ -48,7 +63,7 @@ fn reports_the_firmware_pwm_and_the_true_modulation() {
         marker_window_s: 4.0,
     };
     let live = files.live_on(scenario.rider, scenario.assist, scenario.terrain.clone()).unwrap();
-    let cpu = Backend::Own.factory().unwrap();
+    let cpu = backend.factory().unwrap();
     let machine = Machine::new_live(&config, &euc_sim::registry(), cpu, live).unwrap();
     let mut session = Session::new(machine, Some(&files.stockmap), 100.0);
 
@@ -74,7 +89,7 @@ fn reports_the_firmware_pwm_and_the_true_modulation() {
     .unwrap();
     let ratio = modulation_sum / pwm_sum;
     eprintln!(
-        "{at_speed} samples at speed: PWM {:.2} %, modulation {:.2} % on average (ratio {ratio:.3})",
+        "{backend}: {at_speed} samples at speed: PWM {:.2} %, modulation {:.2} % on average (ratio {ratio:.3})",
         pwm_sum / at_speed as f32,
         modulation_sum / at_speed as f32
     );

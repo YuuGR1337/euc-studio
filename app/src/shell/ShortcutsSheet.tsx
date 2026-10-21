@@ -6,6 +6,11 @@ import { Sheet } from "../ui/Sheet.tsx";
 const EXTRA: { group: string; title: string; shortcut: string }[] = [
   { group: "Help", title: "Command palette", shortcut: "mod+k" },
   { group: "Help", title: "Close a sheet or menu", shortcut: "esc" },
+  // Ride workspace: the first riding key takes the rider from the scenario (see ride/manual.ts).
+  { group: "Riding by hand", title: "Lean forward and back (or ↑ ↓)", shortcut: "w+s" },
+  { group: "Riding by hand", title: "Turn left and right (or ← →)", shortcut: "a+d" },
+  { group: "Riding by hand", title: "Step off the pedals", shortcut: "space" },
+  { group: "Riding by hand", title: "Give control back to the scenario", shortcut: "esc" },
 ];
 
 /** `?`: every shortcut, grouped the same way as the command palette. */

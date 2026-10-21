@@ -19,6 +19,12 @@ scenario checks that read firmware variables work on our builds too.
 `--settings` overrides the scenario's preset for both runs. `--json` prints the report as JSON; `--out`
 writes the same JSON to a file and still prints the table.
 
+In the studio, the Compare workspace (⌘3) runs the same comparison: both runs on one thread at
+100 samples per simulated second, the same module (`euc_sim::compare`) and
+`scenarios/compare/compat-vs-stock.toml`, so it shows the numbers this command prints. It streams both
+runs while they go (run B as a ghost over run A, A solid and B dashed on the scopes) and recomputes the
+summary every half second; the last summary adds the BLE streams and the scenario's checks.
+
 ## What is compared
 
 - **Telemetry channels**: the 17 channels of `euc-telemetry` (speed, wheel speed, phase currents, q

@@ -1,6 +1,6 @@
 [package]
 name = "euc-physics"
-description = "The mechanical world of a wheel and its rider in MuJoCo: tire, shell, rigid rider, IMU"
+description = "The mechanical world of a wheel and its rider in MuJoCo: tire, shell, suspension, human rider, IMU"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

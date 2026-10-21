@@ -14,10 +14,11 @@
 //!
 //! Axes: x forward, y left, z up. Both hinges turn about +y, so a positive wheel angle rolls
 //! forward and a positive lean tips the rider forward. Only the tire, the shell and the pedals
-//! touch the ground; the rider has no collision shapes.
+//! touch the ground alongside rider shapes. The optional articulated model uses a free upper
+//! body and six internal hip/knee/ankle hinges; its feet weld to the pedals until release.
 
 use crate::TIMESTEP_S;
-use crate::params::{Setup, Solid};
+use crate::params::{RiderModel, Setup, Solid};
 
 /// Names the simulator looks up in the compiled model.
 pub(crate) mod names {
@@ -118,20 +119,31 @@ pub(crate) fn mjcf(setup: &Setup) -> String {
         r#"  <option timestep="{TIMESTEP_S}" gravity="0 0 {}" integrator="implicitfast" cone="pyramidal"/>"#,
         -setup.gravity
     ));
-    if let Some(asset) = setup.terrain.asset() {
+    if let Some(map) = &setup.height_map {
+        x.line(map.asset().expect("Setup validates the height map before MJCF generation"));
+    } else if let Some(asset) = setup.terrain.asset() {
         x.line(asset);
     }
     x.line("  <worldbody>");
-    x.line(setup.terrain.ground());
+    x.line(setup.height_map.as_ref().map_or_else(
+        || setup.terrain.ground(),
+        |map| map.ground().expect("Setup validates the height map before MJCF generation"),
+    ));
     // The shell starts where the rider's weight holds it: the axle on the tire, the suspension at
     // its sag.
     x.line(format!(r#"    <body name="{}" pos="0 0 {}">"#, names::SHELL, setup.wheel.tire.radius_m - sag_m(setup)));
     x.line(format!(r#"      <freejoint name="{}"/>"#, names::ROOT));
     shell(&mut x, setup, &layout);
     wheel(&mut x, setup);
-    feet(&mut x, setup);
+    if setup.rider.model == RiderModel::RigidAnkleV1 {
+        feet(&mut x, setup);
+    }
     x.line("    </body>");
-    rider(&mut x, setup, &layout);
+    if setup.rider.model == RiderModel::RigidAnkleV1 {
+        rider(&mut x, setup, &layout);
+    } else {
+        articulated(&mut x, setup, &layout);
+    }
     x.line("  </worldbody>");
     // The tire runs inside the shell (MuJoCo only skips parent-child pairs, and the carriage sits
     // between them with a suspension).
@@ -140,7 +152,17 @@ pub(crate) fn mjcf(setup: &Setup) -> String {
     x.line("  </contact>");
     x.line("  <actuator>");
     let max = setup.rider.control.ankle_max_nm;
-    x.line(format!(r#"    <motor name="{}" joint="{}" ctrlrange="-{max} {max}"/>"#, names::ANKLE, names::LEAN));
+    if setup.rider.model == RiderModel::RigidAnkleV1 {
+        x.line(format!(r#"    <motor name="{}" joint="{}" ctrlrange="-{max} {max}"/>"#, names::ANKLE, names::LEAN));
+    } else {
+        for side in ["left", "right"] {
+            for joint in ["hip", "knee", "ankle"] {
+                let limit = if joint == "ankle" { max / 2.0 } else { setup.rider.articulation.joint_max_nm };
+                let limited = limit > 0.0;
+                x.line(format!(r#"    <motor name="{side}_{joint}_motor" joint="{side}_{joint}" ctrlrange="-{limit} {limit}" ctrllimited="{limited}"/>"#));
+            }
+        }
+    }
     x.line("  </actuator>");
     x.line("  <sensor>");
     x.line(format!(r#"    <accelerometer name="{}" site="imu"/>"#, names::IMU_ACCEL));
@@ -148,12 +170,18 @@ pub(crate) fn mjcf(setup: &Setup) -> String {
     x.line("  </sensor>");
     x.line("  <equality>");
     x.line(format!(r#"    <weld name="{}" body1="{}" solref="0.004 1"/>"#, names::STAND, names::SHELL));
-    x.line(format!(
-        r#"    <weld name="{}" body1="{}" body2="{}" solref="0.002 1"/>"#,
-        names::ON_PEDALS,
-        names::RIDER,
-        names::FEET
-    ));
+    if setup.rider.model == RiderModel::RigidAnkleV1 {
+        x.line(format!(
+            r#"    <weld name="{}" body1="{}" body2="{}" solref="0.002 1"/>"#,
+            names::ON_PEDALS,
+            names::RIDER,
+            names::FEET
+        ));
+    } else {
+        for side in ["left", "right"] {
+            x.line(format!(r#"    <weld name="on_{side}_pedal" body1="{side}_foot" body2="shell" solref="0.002 1"/>"#));
+        }
+    }
     x.line("  </equality>");
     x.line("</mujoco>");
     x.0
@@ -295,8 +323,8 @@ fn feet(x: &mut Xml, setup: &Setup) {
     x.line("      </body>");
 }
 
-/// The rider's body (in the world, welded to the feet): mass, inertia and shapes. Only the torso
-/// touches the ground, and only once the rider has stepped off and falls.
+/// The legacy rider's single body, welded to the ankle proxy until release.
+/// Its complete shape set contacts ground, including while attached; it excludes the wheel.
 fn rider(x: &mut Xml, setup: &Setup, layout: &Layout) {
     let rider = setup.rider;
     let ankle = rider.ankle_above_pedals_m;
@@ -339,4 +367,84 @@ fn rider(x: &mut Xml, setup: &Setup, layout: &Layout) {
     ));
     x.line(format!(r#"        <geom name="head" type="sphere" size="0.1" pos="0 0 {head}" {ground_only}/>"#));
     x.line("    </body>");
+}
+
+/// Seven real rigid bodies. Feet remain constrained to pedals until release; no sole slip model.
+/// Fractions and dimensions are generic estimates. All rider mass travels with the released tree.
+fn articulated(x: &mut Xml, setup: &Setup, layout: &Layout) {
+    let r = setup.rider;
+    let length = r.height_m * 0.245;
+    let ankle_z = setup.wheel.tire.radius_m - sag_m(setup) + ankle_above_axle(setup);
+    let pelvis_z = ankle_z + 2.0 * length;
+    let upper_mass = r.mass_kg * 0.66;
+    // Each foot/shank/thigh uses 2/5/10 percent. Solve the upper COM to preserve total COM.
+    let leg_moment = 2.0
+        * r.mass_kg
+        * (0.02 * 0.03
+            + 0.05 * (r.ankle_above_pedals_m + length * 0.5)
+            + 0.10 * (r.ankle_above_pedals_m + length * 1.5));
+    let upper_com =
+        (r.mass_kg * r.com_above_pedals_m - leg_moment) / upper_mass - r.ankle_above_pedals_m - 2.0 * length;
+    let upper_x = -2.0 * r.mass_kg * 0.02 * 0.03 / upper_mass;
+    let inertia = upper_mass * r.gyration_m.powi(2);
+    let ground_only = r#"contype="2" conaffinity="0" solref="0.005 1""#;
+    x.line(format!(r#"    <body name="rider" pos="0 0 {pelvis_z}">"#));
+    x.line(r#"      <freejoint name="rider_free"/>"#);
+    x.line(format!(
+        r#"      <inertial mass="{upper_mass}" pos="{upper_x} 0 {upper_com}" diaginertia="{inertia} {inertia} {}"/>"#,
+        inertia * 0.5
+    ));
+    x.line(format!(
+        r#"      <geom name="trunk" type="capsule" fromto="0 0 0 0 0 {}" size="0.13" {ground_only}/>"#,
+        r.height_m * 0.32
+    ));
+    x.line(format!(
+        r#"      <geom name="head" type="sphere" pos="0 0 {}" size="0.10" {ground_only}/>"#,
+        r.height_m - r.ankle_above_pedals_m - 2.0 * length - 0.1
+    ));
+    for (side, y) in [("left", layout.pedal_y), ("right", -layout.pedal_y)] {
+        // Fixed arms retain the legacy silhouette. The explicit upper inertial already includes
+        // their mass; these shapes add no bodies, elbow joints, or inferred inertia.
+        let arm = 1.6 * y;
+        let hip = 0.53 * r.height_m - r.ankle_above_pedals_m - 2.0 * length;
+        let shoulder = 0.82 * r.height_m - r.ankle_above_pedals_m - 2.0 * length;
+        x.line(format!(
+            r#"      <geom name="arm_{side}" type="capsule" fromto="0 {arm} {shoulder} 0 {arm} {hip}" size="0.045" mass="0" {ground_only}/>"#
+        ));
+        x.line(format!(r#"      <body name="{side}_thigh" pos="0 {y} 0">"#));
+        x.line(format!(r#"        <joint name="{side}_hip" axis="0 1 0" range="-1.2 0.8" damping="0.5"/>"#));
+        limb(x, side, "thigh", r.mass_kg * 0.10, length, 0.06, ground_only);
+        x.line(format!(r#"        <body name="{side}_shank" pos="0 0 -{length}">"#));
+        x.line(format!(r#"          <joint name="{side}_knee" axis="0 1 0" range="-0.03 2.2" damping="0.5"/>"#));
+        limb(x, side, "shank", r.mass_kg * 0.05, length, 0.045, ground_only);
+        x.line(format!(r#"          <body name="{side}_foot" pos="0 0 -{length}">"#));
+        x.line(format!(r#"            <joint name="{side}_ankle" axis="0 1 0" range="-0.9 0.7" damping="0.5"/>"#));
+        let mass = r.mass_kg * 0.02;
+        let z = 0.03 - r.ankle_above_pedals_m;
+        let (ix, iy, iz) = (
+            mass * (0.045_f64.powi(2) + 0.03_f64.powi(2)) / 3.0,
+            mass * (0.12_f64.powi(2) + 0.03_f64.powi(2)) / 3.0,
+            mass * (0.12_f64.powi(2) + 0.045_f64.powi(2)) / 3.0,
+        );
+        x.line(format!(r#"            <inertial mass="{mass}" pos="0.03 0 {z}" diaginertia="{ix} {iy} {iz}"/>"#));
+        x.line(format!(
+            r#"            <geom name="{side}_sole" type="box" pos="0.03 0 {z}" size="0.12 0.045 0.03" {ground_only}/>"#
+        ));
+        x.line(
+            "          </body>
+        </body>
+      </body>",
+        );
+    }
+    x.line("    </body>");
+}
+
+fn limb(x: &mut Xml, side: &str, name: &str, mass: f64, length: f64, radius: f64, contact_attrs: &str) {
+    let transverse = mass * (length * length / 12.0 + radius * radius / 4.0);
+    let axial = mass * radius * radius / 2.0;
+    x.line(format!(
+        r#"          <inertial mass="{mass}" pos="0 0 {}" diaginertia="{transverse} {transverse} {axial}"/>"#,
+        -length / 2.0
+    ));
+    x.line(format!(r#"          <geom name="{side}_{name}_shape" type="capsule" fromto="0 0 0 0 0 -{length}" size="{radius}" {contact_attrs}/>"#));
 }

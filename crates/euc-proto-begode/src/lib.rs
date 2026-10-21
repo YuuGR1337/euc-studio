@@ -37,6 +37,7 @@ pub mod ble;
 
 mod assembler;
 mod command;
+pub mod describe;
 mod frame;
 mod settings;
 mod telemetry;

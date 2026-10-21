@@ -91,6 +91,8 @@ EUC_QUIRK_DEF(BATTERY_TILTBACK_UNBOUNDED, 1, 0, "0x0800678C balance task",
               "Below 99.2 V or above 80 degC the pedals tilt back 2.4 deg/s without a limit, at any speed.")
 EUC_QUIRK_DEF(RIDERLESS_UNDETECTED, 1, 0, "none: the balance task never checks for a rider",
               "With nobody on the pedals the wheel drives on at speed until it falls on its side (roll cut-off).")
+EUC_QUIRK_DEF(ERROR_CUTOFF_22MS, 1, 0, "0x0800678C balance task",
+              "The error angle cuts the drive after 22 ms past 40 deg, shorter than a deep dip that recovers.")
 
 /* Sensors */
 EUC_QUIRK_DEF(NTC_REFERENCE_298_5, 1, 0, "0x08005218 ntc_temperature_measure",

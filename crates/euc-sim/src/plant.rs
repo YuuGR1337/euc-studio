@@ -104,6 +104,9 @@ impl Live {
         while self.next_step <= now {
             let at = self.next_step;
             self.electrical.advance(at);
+            if self.electrical.battery_validity().is_err() {
+                return;
+            }
             let torque = self.electrical.mean_torque_nm();
             self.physics.step(torque);
             let (angle, speed) = self.physics.wheel();
@@ -135,6 +138,28 @@ pub struct Plant {
 }
 
 impl Plant {
+    /// Loss of the controller/gate-driver rail releases every inverter leg. The pack, motor
+    /// currents, body pose, velocity, thermal state, and physics time are not reset.
+    pub(crate) fn controller_supply_lost(&mut self, ctx: &mut Ctx<'_>) {
+        if let Some(live) = self.live.as_deref_mut() {
+            for phase in [Phase::A, Phase::B, Phase::C] {
+                live.electrical.set_leg(ctx.now(), phase, LegDrive::Off);
+            }
+            live.physics.set_drive_cut(true);
+        }
+        self.arm(ctx);
+    }
+
+    /// Hall transitions while the MCU is unpowered never reach its GPIO. Restore all three
+    /// current levels, not only edges since the plant's last sync, before the core restarts.
+    pub(crate) fn controller_supply_restored(&mut self, ctx: &mut Ctx<'_>) {
+        self.sync(ctx.now());
+        for (port, signal) in hall_lines(self.halls_out) {
+            ctx.emit(port, signal);
+        }
+        self.arm(ctx);
+    }
+
     /// A static plant whose ADC channels follow `analog` (from `board.toml`).
     pub fn new(state: PlantState, analog: Vec<Analog>) -> Self {
         let halls_out = state.hall;
@@ -311,6 +336,40 @@ mod tests {
             PlantState::default(),
             vec![wire(1, 0, "battery_v", Some([32768, 1377]), None), wire(1, 11, "board_temp_c", None, Some(ntc))],
         )
+    }
+
+    #[test]
+    fn supply_loss_preserves_inductor_state_then_current_decays_with_open_legs() {
+        let files = crate::WheelFiles::load(&euc_profile::ProfileSource::Builtin, "begode-extreme").unwrap();
+        let clock = files.hclk();
+        let ms = clock / 1000;
+        let mut live = files.live(euc_physics::Rider::default(), euc_physics::Assist::default()).unwrap();
+        // Component-level gate-driver stimulus, not a stock-firmware scenario result.
+        for (phase, duty) in [(Phase::A, 0.55), (Phase::B, 0.45), (Phase::C, 0.45)] {
+            live.electrical_mut().set_leg(0, phase, LegDrive::Pwm { duty, period_s: 1.0 / 20_000.0 });
+        }
+        live.step_to(ms);
+        let before = live.electrical().snapshot();
+        let current = |values: [f64; 3]| values.iter().map(|i| i * i).sum::<f64>().sqrt();
+        assert!(current(before.phase_current) > 1.0, "real modeled inductors must contain current");
+        let pose = live.physics().poses();
+        let time = live.physics().time_s();
+        let mut plant = Plant::live(PlantState::default(), vec![], live);
+        let mut host = euc_core::testing::TestHost::new(clock);
+        host.now = ms;
+        plant.controller_supply_lost(&mut host.ctx());
+        let live = plant.live_part().unwrap();
+        assert_eq!(live.electrical().snapshot(), before, "opening legs does not erase inductor or pack state");
+        assert_eq!(live.physics().poses(), pose);
+        assert_eq!(live.physics().time_s(), time);
+        host.now += 20 * ms;
+        plant.on_event(0, &mut host.ctx());
+        let live = plant.live_part().unwrap();
+        assert!(live.physics().time_s() > time + 0.019);
+        assert!(
+            current(live.electrical().snapshot().phase_current) < current(before.phase_current) * 0.01,
+            "off legs must allow physical current decay instead of retained PWM drive"
+        );
     }
 
     #[test]

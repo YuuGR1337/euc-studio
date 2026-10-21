@@ -6,10 +6,10 @@
 /target/
 
 # Native libraries downloaded by tools/fetch-mujoco
-/.cache/
+/.cache
 
 # Node
-node_modules/
+node_modules
 
 # Python
 __pycache__/
@@ -17,7 +17,7 @@ __pycache__/
 .venv/
 
 # Firmware build outputs
-/firmware/build/
+/firmware/build
 
 # OS and editors
 .DS_Store
@@ -26,3 +26,7 @@ __pycache__/
 
 # Playwright MCP browser logs and screenshots
 /.playwright-mcp/
+
+# Local merge scratch files
+/.port-scratch/
+/.rider-scratch/

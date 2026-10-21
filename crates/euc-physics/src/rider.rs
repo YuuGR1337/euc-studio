@@ -4,7 +4,12 @@
 //! back and it slows. The controller turns a target speed into a lean from vertical, ramped at
 //! a human rate, and the ankles hold that lean with a stiff spring and damper. The ankle torque
 //! pushes on the pedals with the opposite sign; that is what the firmware's balance loop feels.
-//! The rider also steers: feet and legs twist the wheel back onto the line.
+//! Steering uses a capped external yaw aid on the shell. The rigid rider has no twisting joints.
+
+use std::{
+    collections::VecDeque,
+    f64::consts::{PI, TAU},
+};
 
 use crate::params::RiderControl;
 
@@ -14,6 +19,53 @@ const INTEGRAL_BAND_MPS: f64 = 1.0;
 /// Time constant of the riding pitch, seconds: the pedal angle the rider is used to, against
 /// which a tiltback is felt when the firmware's own tiltback is not known.
 const RIDING_PITCH_S: f64 = 3.0;
+
+/// Wraps a finite angle to [-π, π], retaining small angles without rounding changes.
+/// Nonfinite values pass through; public heading setters reject them before wrapping.
+pub fn wrap_angle(rad: f64) -> f64 {
+    if !rad.is_finite() {
+        return rad;
+    }
+    let angle = rad % TAU;
+    if angle > PI {
+        angle - TAU
+    } else if angle < -PI {
+        angle + TAU
+    } else {
+        angle
+    }
+}
+
+/// A tick delay retains at most 600 previous samples (601 during insertion).
+#[derive(Debug, Clone, PartialEq)]
+struct TickDelay<T> {
+    samples: VecDeque<T>,
+}
+
+impl<T: Copy> TickDelay<T> {
+    const fn new() -> Self {
+        Self { samples: VecDeque::new() }
+    }
+
+    fn clear(&mut self) {
+        self.samples.clear();
+    }
+
+    fn sample(&mut self, seconds: f64, value: T, initial: T) -> T {
+        // Setup validation rejects out-of-range values. Clamp here as well because callers can
+        // construct a standalone RiderController without building a Physics model.
+        let ticks = (seconds / crate::TIMESTEP_S).ceil().clamp(0.0, 600.0) as usize;
+        if ticks == 0 {
+            return value;
+        }
+        if self.samples.is_empty() {
+            self.samples.reserve_exact(ticks + 1);
+            self.samples.resize(ticks, initial);
+        }
+        self.samples.push_back(value);
+        self.samples.pop_front().expect("delay contains an inserted sample")
+    }
+}
 
 /// What the rider wants.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -25,7 +77,7 @@ pub enum Intent {
 }
 
 /// Rolling resistance and air drag, as decelerations.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub(crate) struct Drag {
     /// Rolling resistance, m/s².
     pub rolling: f64,
@@ -57,7 +109,7 @@ fn eased(wanted: f64, felt: f64, s: &Sense, c: &RiderControl) -> f64 {
 }
 
 /// What the rider senses in one step.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct Sense {
     /// Step, seconds.
     pub dt: f64,
@@ -75,10 +127,23 @@ pub(crate) struct Sense {
     pub held: bool,
     /// The pedals' pitch, radians, nose up positive (tiltback lifts the nose).
     pub pitch_up: f64,
-    /// Heading away from the line (world +x), radians, left positive.
+    /// Heading from world +x, radians, left positive.
     pub heading: f64,
     /// Its rate about the vertical, rad/s, left positive.
     pub yaw_rate: f64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Command {
+    intent: Intent,
+    heading: f64,
+    turn_rate: f64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Observation {
+    sense: Sense,
+    tiltback: Option<f64>,
 }
 
 /// The rider's controller.
@@ -86,12 +151,37 @@ pub(crate) struct Sense {
 pub struct RiderController {
     control: RiderControl,
     intent: Intent,
+    applied_intent: Intent,
+    desired_lean: f64,
     lean_command: f64,
+    heading_target: f64,
+    applied_heading_target: f64,
     integral: f64,
     /// The pedal pitch the rider is used to, radians nose up.
     riding_pitch: f64,
     /// The firmware's tiltback, radians nose up, when the simulator can read it.
     commanded_tiltback: Option<f64>,
+    commands: TickDelay<Command>,
+    observations: TickDelay<Observation>,
+    feedback: Option<Sense>,
+    mode_changed: bool,
+    /// How fast the rider turns the line they keep, rad/s, left positive (manual riding).
+    turn_rate: f64,
+    /// Manual turn rate after the same delay as the heading and lean requests.
+    applied_turn_rate: f64,
+    /// The lean into the turn the rider holds now, radians of roll, right side down positive.
+    turn_lean: f64,
+}
+
+/// How the rider steers in one step.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub(crate) struct Steer {
+    /// The roll the rider holds the wheel at, radians, right side down positive: leaning the
+    /// wheel over makes the cambered tire carve the turn.
+    pub roll: f64,
+    /// External yaw aid on the shell, N·m, left positive. Heading twist fades with speed;
+    /// yaw-rate damping remains active to suppress wobble.
+    pub yaw_nm: f64,
 }
 
 impl RiderController {
@@ -100,11 +190,53 @@ impl RiderController {
         Self {
             control,
             intent: Intent::Speed(0.0),
+            applied_intent: Intent::Speed(0.0),
+            desired_lean: 0.0,
             lean_command: 0.0,
+            heading_target: 0.0,
+            applied_heading_target: 0.0,
             integral: 0.0,
             riding_pitch: 0.0,
             commanded_tiltback: None,
+            commands: TickDelay::new(),
+            observations: TickDelay::new(),
+            feedback: None,
+            mode_changed: false,
+            turn_rate: 0.0,
+            applied_turn_rate: 0.0,
+            turn_lean: 0.0,
         }
+    }
+
+    /// Turns the line the rider keeps (the heading target) at `rad_s` (left positive) from the
+    /// next command on; back to 0, the rider keeps the heading reached. Nonfinite rates are ignored.
+    /// The request fades to zero below walking pace and cannot spin a stationary wheel.
+    pub const fn set_turn_rate(&mut self, rad_s: f64) {
+        if rad_s.is_finite() {
+            self.turn_rate = rad_s;
+        }
+    }
+
+    /// The rider's turn rate, rad/s, left positive.
+    pub const fn turn_rate(&self) -> f64 {
+        self.turn_rate
+    }
+
+    /// The lean into the turn the rider holds now, radians of roll, right side down positive.
+    pub const fn turn_lean(&self) -> f64 {
+        self.turn_lean
+    }
+
+    /// The line the rider keeps: the heading target, radians from world +x, left positive.
+    pub const fn line(&self) -> f64 {
+        self.heading_target
+    }
+
+    /// Drops tick history after model settling without changing the settled controller target.
+    pub(crate) fn reset_delays(&mut self) {
+        self.commands.clear();
+        self.observations.clear();
+        self.feedback = None;
     }
 
     /// Tells the rider the firmware's tiltback (radians, nose up), or `None` when it is not known.
@@ -132,14 +264,77 @@ impl RiderController {
         }
     }
 
-    /// Changes what the rider wants, from the next step on.
+    /// Changes the desired request. Nonfinite requests leave the previous request unchanged.
+    /// The command delay and lean slew limit apply on physics steps, never on input arrival.
+    /// A speed/lean mode switch clears the speed integral and reseeds delays on the next step.
     pub const fn set_intent(&mut self, intent: Intent) {
+        let (Intent::Lean(value) | Intent::Speed(value)) = intent;
+        if !value.is_finite() {
+            return;
+        }
+        if !matches!((self.intent, intent), (Intent::Lean(_), Intent::Lean(_)) | (Intent::Speed(_), Intent::Speed(_))) {
+            self.integral = 0.0;
+            self.mode_changed = true;
+        }
         self.intent = intent;
+    }
+
+    /// Sets desired world heading, radians, left positive; zero follows world +x.
+    /// Rejects nonfinite values without changing controller state.
+    pub fn set_heading_target(&mut self, rad: f64) -> Result<(), String> {
+        if !rad.is_finite() {
+            return Err("heading target must be finite".into());
+        }
+        self.heading_target = wrap_angle(rad);
+        Ok(())
+    }
+
+    /// Desired world heading before command delay, radians.
+    pub const fn heading_target(&self) -> f64 {
+        self.heading_target
+    }
+
+    /// Heading target after command delay, radians.
+    pub const fn applied_heading_target(&self) -> f64 {
+        self.applied_heading_target
+    }
+
+    /// Clears pending requests for pause/disarm/release without changing physical state.
+    /// Neutral lean and the supplied measured heading bypass command delay. The existing lean
+    /// command still returns to neutral through its normal slew limit when physics resumes.
+    pub fn clear_input(&mut self, heading_rad: f64) -> Result<(), String> {
+        self.set_heading_target(heading_rad)?;
+        self.intent = Intent::Lean(0.0);
+        self.applied_intent = self.intent;
+        self.desired_lean = 0.0;
+        self.applied_heading_target = self.heading_target;
+        self.integral = 0.0;
+        self.commands.clear();
+        self.observations.clear();
+        self.feedback = None;
+        self.mode_changed = false;
+        self.turn_rate = 0.0;
+        self.applied_turn_rate = 0.0;
+        Ok(())
     }
 
     /// What the rider wants.
     pub const fn intent(&self) -> Intent {
         self.intent
+    }
+
+    /// Intent after command delay, before the lean slew limit.
+    pub const fn applied_intent(&self) -> Intent {
+        self.applied_intent
+    }
+
+    /// Desired manual lean before delay and limits, radians. In speed mode this reports the
+    /// most recent lean target computed from the delayed speed request and rider observations.
+    pub const fn desired_lean(&self) -> f64 {
+        match self.intent {
+            Intent::Lean(lean) => lean,
+            Intent::Speed(_) => self.desired_lean,
+        }
     }
 
     /// The lean the ankles are holding, radians from vertical, forward positive.
@@ -151,10 +346,56 @@ impl RiderController {
     /// forward).
     pub(crate) fn ankle_torque(&mut self, s: &Sense) -> f64 {
         let c = self.control;
+        if self.mode_changed || s.held {
+            self.commands.clear();
+            self.observations.clear();
+            if self.mode_changed {
+                // Seed the new mode from measured state. Do not replace poses, velocities, or
+                // the existing rate-limited lean command.
+                self.applied_intent = match self.intent {
+                    Intent::Lean(_) => Intent::Lean(s.lean),
+                    Intent::Speed(_) => Intent::Speed(s.speed),
+                };
+                self.applied_heading_target = s.heading;
+                self.applied_turn_rate = 0.0;
+            }
+            self.mode_changed = false;
+        }
+        let turn_rate = if s.held {
+            0.0
+        } else {
+            self.turn_rate.clamp(-c.turn_rate_max_rad_s, c.turn_rate_max_rad_s)
+                * (s.speed.abs() / c.twist_fade_mps).min(1.0)
+        };
+        if turn_rate != 0.0 {
+            self.heading_target = wrap_angle(self.heading_target + turn_rate * s.dt);
+        }
+        let request = Command { intent: self.intent, heading: self.heading_target, turn_rate };
+        let initial = Command {
+            intent: self.applied_intent,
+            heading: self.applied_heading_target,
+            turn_rate: self.applied_turn_rate,
+        };
+        let command = self.commands.sample(if s.held { 0.0 } else { c.command_delay_s }, request, initial);
+        self.applied_intent = command.intent;
+        self.applied_heading_target = command.heading;
+        self.applied_turn_rate = command.turn_rate;
+        let observation = Observation { sense: *s, tiltback: self.commanded_tiltback };
+        let mut observation =
+            self.observations.sample(if s.held { 0.0 } else { c.feedback_delay_s }, observation, observation);
+        // Stand/release state and the integration interval are never delayed observations.
+        observation.sense.held = s.held;
+        observation.sense.dt = s.dt;
+        self.feedback = Some(observation.sense);
+        let s = &observation.sense;
         let max_lean = c.lean_max_deg.to_radians();
-        let felt = self.felt_tiltback(s);
+        let felt = if c.feedback_delay_s == 0.0 || s.held {
+            self.felt_tiltback(s)
+        } else {
+            observation.tiltback.unwrap_or(s.pitch_up - self.riding_pitch)
+        };
         self.track_riding_pitch(s);
-        let target = match self.intent {
+        let target = match self.applied_intent {
             Intent::Lean(lean) => lean,
             Intent::Speed(wanted) => {
                 let speed = eased(wanted, felt, s, &c);
@@ -173,6 +414,7 @@ impl RiderController {
                 ((limited + s.drag.decel(speed)) / s.gravity).atan()
             }
         };
+        self.desired_lean = target;
         let target = target.clamp(-max_lean, max_lean);
         let step = c.lean_rate_deg_s.to_radians() * s.dt;
         self.lean_command += (target - self.lean_command).clamp(-step, step);
@@ -180,11 +422,29 @@ impl RiderController {
         torque.clamp(-c.ankle_max_nm, c.ankle_max_nm)
     }
 
-    /// The steering torque for this step, N·m about the vertical (positive turns left): feet and
-    /// legs twist the wheel back onto the line, no harder than a rider can.
-    pub(crate) fn steering_torque(&self, s: &Sense) -> f64 {
+    /// How the rider steers this step: back onto the line (the heading target), turning at the
+    /// turn rate. The rider asks for a turn rate from the heading error, leans the wheel over so
+    /// that the cambered tire carves it (`tan(lean) = v·rate / g` balances the turn), and below
+    /// walking pace, where a lean turns nothing, twists the wheel with the feet. The external
+    /// heading spring fades with speed; external yaw-rate damping remains active at every speed.
+    /// The legs have no twist joint, so both moments remain identified as external aids.
+    pub(crate) fn steer(&mut self, s: &Sense) -> Steer {
         let c = self.control;
-        (-(c.steer_kp * s.heading + c.steer_kd * s.yaw_rate)).clamp(-c.steer_max_nm, c.steer_max_nm)
+        let dt = s.dt;
+        let s = if c.feedback_delay_s > 0.0 { self.feedback.as_ref().unwrap_or(s) } else { s };
+        let error = wrap_angle(s.heading - self.applied_heading_target);
+        let wanted =
+            (self.applied_turn_rate - c.heading_kp * error).clamp(-c.turn_rate_max_rad_s, c.turn_rate_max_rad_s);
+        // Left (positive) turns need the left side down (negative roll); backwards, the other way.
+        let max = c.turn_lean_max_deg.to_radians();
+        let target = (-(s.speed * wanted / s.gravity).atan()).clamp(-max, max);
+        let step = c.turn_lean_rate_deg_s.to_radians() * dt;
+        self.turn_lean += (target - self.turn_lean).clamp(-step, step);
+        let twist = 1.0 / (1.0 + (s.speed / c.twist_fade_mps).powi(2));
+        // Fade the heading spring, not yaw-rate damping. Removing damping at road speed lets
+        // tire camber and the roll aid excite a growing yaw/roll wobble even on a straight run.
+        let yaw = -(c.steer_kp * error * twist + c.steer_kd * (s.yaw_rate - wanted));
+        Steer { roll: self.turn_lean, yaw_nm: yaw.clamp(-c.steer_max_nm, c.steer_max_nm) }
     }
 }
 
@@ -280,16 +540,100 @@ mod tests {
     }
 
     #[test]
-    fn steers_back_onto_the_line_within_human_strength() {
-        let rider = RiderController::new(RiderControl::default());
+    fn leans_the_wheel_to_turn_and_twists_it_only_at_walking_pace() {
+        let mut rider = RiderController::new(RiderControl::default());
         let c = RiderControl::default();
-        let off_left = Sense { heading: 0.01, ..sense(5.0) };
-        let torque = rider.steering_torque(&off_left);
-        assert!(torque < 0.0 && (torque + c.steer_kp * 0.01).abs() < 1e-9, "turns right: {torque}");
-        let far_off = Sense { heading: 1.0, yaw_rate: 1.0, ..sense(5.0) };
-        assert_eq!(rider.steering_torque(&far_off), -c.steer_max_nm, "limited");
-        let turning_back = Sense { heading: 0.01, yaw_rate: -0.5, ..sense(5.0) };
-        assert!(rider.steering_torque(&turning_back) > 0.0, "damps the turn");
+        // Heading left of the line at 5 m/s: the rider wants to turn right (0.01 rad/s), and leans
+        // right (positive roll) towards tan(lean) = v·rate/g, ramping at the turn lean rate.
+        let off_left = Sense { heading: 0.01, yaw_rate: -0.01, ..sense(5.0) };
+        let steer = rider.steer(&off_left);
+        assert!(steer.roll > 0.0 && (steer.roll - c.turn_lean_rate_deg_s.to_radians() * 0.001).abs() < 1e-12);
+        for _ in 0..5000 {
+            rider.steer(&off_left);
+        }
+        let steady = rider.steer(&off_left).roll;
+        assert!((steady - (5.0_f64 * 0.01 / 9.81).atan()).abs() < 1e-9, "{steady}");
+        // With the requested yaw rate already reached, only the faded heading spring acts.
+        assert!(steer.yaw_nm < 0.0 && steer.yaw_nm.abs() < 0.1 * c.steer_kp * 0.01, "{}", steer.yaw_nm);
+        // Standing still, the feet twist the wheel back with the full aid, within its cap.
+        let mut standing = RiderController::new(RiderControl::default());
+        let torque = standing.steer(&Sense { heading: 0.01, ..sense(0.0) }).yaw_nm;
+        let expected = -(c.steer_kp * 0.01 + c.steer_kd * c.heading_kp * 0.01);
+        assert!((torque - expected).abs() < 1e-9, "{torque} vs {expected}");
+        assert_eq!(standing.steer(&Sense { heading: 1.0, yaw_rate: 1.0, ..sense(0.0) }).yaw_nm, -c.steer_max_nm);
+        assert!(standing.steer(&sense(0.0)).roll.abs() < 1e-9, "no lean standing still");
+        // The lean into a turn is capped.
+        let mut fast = RiderController::new(RiderControl::default());
+        fast.set_turn_rate(1.0);
+        for _ in 0..20_000 {
+            fast.ankle_torque(&sense(10.0));
+            fast.steer(&sense(10.0));
+        }
+        assert!((fast.turn_lean() + c.turn_lean_max_deg.to_radians()).abs() < 1e-9, "{}", fast.turn_lean());
+    }
+
+    #[test]
+    fn turns_the_line_at_the_turn_rate_and_keeps_the_heading_reached() {
+        let mut rider = RiderController::new(RiderControl::default());
+        rider.set_turn_rate(0.5);
+        for _ in 0..1000 {
+            rider.ankle_torque(&sense(5.0));
+        }
+        assert!((rider.line() - 0.5).abs() < 1e-9, "{}", rider.line());
+        // Still heading along +x, the rider leans left (roll negative) towards the line.
+        assert!(rider.steer(&sense(5.0)).roll < 0.0);
+        rider.set_turn_rate(0.0);
+        rider.ankle_torque(&sense(5.0));
+        let on_line = Sense { heading: rider.line(), ..sense(5.0) };
+        for _ in 0..5000 {
+            rider.steer(&on_line);
+        }
+        assert!(rider.steer(&on_line).roll.abs() < 1e-9, "keeps the heading reached");
+        // Across ±π the shorter way round.
+        rider.set_heading_target(3.1).unwrap();
+        rider.ankle_torque(&sense(5.0));
+        let past = Sense { heading: -3.1, ..sense(5.0) };
+        assert!(rider.steer(&past).yaw_nm < 0.0, "turns right, back across π");
+    }
+
+    #[test]
+    fn manual_turn_at_rest_does_not_spin_the_wheel_or_wind_up_the_heading() {
+        let mut rider = RiderController::new(RiderControl::default());
+        rider.set_turn_rate(0.5);
+        let stopped = sense(0.0);
+        for _ in 0..1000 {
+            rider.ankle_torque(&stopped);
+            let steer = rider.steer(&stopped);
+            assert_eq!(steer.yaw_nm, 0.0, "manual turning needs forward or backward motion");
+            assert_eq!(steer.roll, 0.0);
+        }
+        assert_eq!(rider.line(), 0.0, "a stopped rider must not store a future turn");
+    }
+
+    #[test]
+    fn manual_turn_obeys_command_delay_and_clears_with_input() {
+        let mut rider = RiderController::new(RiderControl { command_delay_s: 0.01, ..RiderControl::default() });
+        rider.set_turn_rate(0.5);
+        let moving = Sense { dt: crate::TIMESTEP_S, ..sense(5.0) };
+        for _ in 0..20 {
+            rider.ankle_torque(&moving);
+            let steer = rider.steer(&moving);
+            assert_eq!(steer.yaw_nm, 0.0, "turn feed-forward must wait for the command delay");
+            assert_eq!(steer.roll, 0.0);
+        }
+        rider.ankle_torque(&moving);
+        assert!(rider.steer(&moving).roll < 0.0);
+        rider.clear_input(0.0).unwrap();
+        rider.ankle_torque(&moving);
+        assert_eq!(rider.steer(&moving).yaw_nm, 0.0, "clear_input must discard queued turns");
+    }
+
+    #[test]
+    fn high_speed_keeps_yaw_rate_damping_against_wobble() {
+        let control = RiderControl::default();
+        let mut rider = RiderController::new(control);
+        let wobble = Sense { yaw_rate: 0.1, ..sense(20.0) };
+        assert_eq!(rider.steer(&wobble).yaw_nm, -control.steer_kd * 0.1);
     }
 
     #[test]

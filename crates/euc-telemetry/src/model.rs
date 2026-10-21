@@ -217,7 +217,7 @@ pub struct Snapshot {
 
 /// What the wheel shows and sounds: the board's outputs, as the firmware drives them. Sent when
 /// they change, not with every snapshot.
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct Outputs {
     /// The display driver's grid memory (TM1640: 16 bytes, one per grid, one bit per segment).
     /// How grids and bits map to the digits and icons is board data (`display.toml`).
@@ -230,6 +230,21 @@ pub struct Outputs {
     pub leds: Vec<[u8; 3]>,
     /// Buzzer tone in Hz; 0 when silent.
     pub buzzer_hz: u32,
+    /// Instantaneous PB12 GPIO drive. `None` means released, unwired, or unavailable.
+    #[serde(default)]
+    pub headlight_pin_high: Option<bool>,
+    /// Measured GPIO high-time fraction, 0..=1, over up to 40 ms of simulated edges.
+    #[serde(default)]
+    pub headlight_duty: Option<f64>,
+    /// Measurement source. This describes simulated GPIO timing, not a physical brightness measurement.
+    #[serde(default)]
+    pub headlight_source: Option<String>,
+    /// Actual PB14 latch drive, independent of the momentary Power contact.
+    #[serde(default)]
+    pub power_latched: Option<bool>,
+    /// Effective modeled controller rail. None for legacy or unavailable output sources.
+    #[serde(default)]
+    pub controller_powered: Option<bool>,
 }
 
 /// What kind of thing happened.
@@ -278,6 +293,14 @@ mod tests {
         for spec in CHANNELS {
             assert!((s.get(spec.channel) - (f32::from(spec.id) + 0.5)).abs() < f32::EPSILON, "{}", spec.key);
         }
+    }
+
+    #[test]
+    fn controller_supply_is_explicit_and_legacy_outputs_stay_unknown() {
+        let legacy = r#"{"display_grid":[],"display_on":false,"display_brightness":0,"leds":[],"buzzer_hz":0}"#;
+        let outputs: Outputs = serde_json::from_str(legacy).unwrap();
+        let json = serde_json::to_value(outputs).unwrap();
+        assert_eq!(json.get("controller_powered"), Some(&serde_json::Value::Null));
     }
 
     #[test]

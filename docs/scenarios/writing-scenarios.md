@@ -23,8 +23,9 @@ cargo run --release -p euc-cli -- sim compare --scenario scenarios/<name>.toml -
 ```
 
 Useful options of `sim run`: `--settings <preset>` (or `blank`) overrides the scenario's settings,
-`--max-quantum <n>` sets the emulator's quantum (see "Robustness" below), `--record <file.eucr>` writes
-a recording for the studio, and `--json` prints the result as JSON. `sim compare` takes
+`--max-quantum <n>` sets the emulator's quantum (see "Robustness" below), `--record <file.eucrec>`
+writes a recording (see [recordings.md](../recordings.md): `euc rec info`, CSV export, replay in the
+studio, Python), and `--json` prints the result as JSON. `sim compare` takes
 `--tolerance <file>` (see [compare.md](../compare.md)). Each check prints one line, `PASS` or `FAIL`,
 then `RESULT`.
 
@@ -50,6 +51,8 @@ Record the timing settings with each result. See [CPU timing](../models/cpu-timi
 | `seconds` | yes | Simulated seconds from power-on. |
 | `release_s` | yes | When the stand lets the wheel go, inside the run. The stock firmware boots in about 1.7 s; `2.5` is usual. |
 | `speed_kmh` | yes | The rider's target speed as `[seconds, km/h]` points, in time order, linear in between and held after the last. Negative is backwards. |
+| `phase_start_s` | no | Start time for measured-speed lean phases, at or after release. Defaults to `release_s`. |
+| `[[phase]]` | no | Ordered lean commands with measured-speed gates and finite timeouts. See below. |
 | `settings` | no | Settings preset the wheel boots with, from `profiles/<wheel>/settings.toml` (`neutral`, `tarik-2026-10-15`). Without it the settings journal is blank, which tilts the stock pedals 4.8° nose down. |
 | `step_off_s` | no | When the rider steps off the pedals (between `release_s` and the end); the wheel goes on alone. |
 | `push` | no | Pushes on the rider, `[[start s, newtons forward, duration s], ...]`; overlapping pushes add up. |
@@ -72,14 +75,16 @@ Every field has a default; give only what you change. The model is described in
 
 | Field | Default | Meaning |
 |---|---|---|
-| `mass_kg` | 80 | Rider mass. |
-| `com_above_pedals_m` | 1.0 | Centre of mass above the pedals. |
-| `ankle_above_pedals_m` | 0.08 | Ankle joint above the pedals. |
-| `gyration_m` | 0.35 | Radius of gyration for pitch and roll. |
-| `height_m` | 1.78 | Standing height (drawing, and where the limbs are). |
+| `mass_kg` | 80 | Rider mass; every segment's mass scales with it. |
+| `height_m` | 1.78 | Standing height; every segment's length scales with it. |
+| `ankle_above_pedals_m` | 0.08 | Ankle joints above the pedals, shoe included. |
 | `cda_m2` | 0.6 | Drag area of rider and wheel. |
-| `control.lean_kp`, `control.lean_kd` | 6000, 900 | Ankle stiffness (N·m/rad) and damping (N·m·s/rad). |
-| `control.ankle_max_nm` | 400 | Strongest ankle torque. |
+| `control.lean_kp`, `control.lean_kd` | 6000, 900 | Ankle stiffness (N·m/rad) and damping (N·m·s/rad) about the lean. |
+| `control.ankle_max_nm` | 400 | Strongest ankle torque, both legs. |
+| `control.knee_bend_deg`, `control.torso_lean_deg` | 25, 5 | The standing pose: knee bend, and the torso's pitch forward of the lean. |
+| `control.knee_kp`, `control.knee_kd`, `control.knee_max_nm` | 300, 30, 400 | How far the knees give under a bump (both legs). |
+| `control.hip_kp`, `control.hip_kd`, `control.hip_max_nm` | 2500, 190, 400 | How the hips hold the torso's pitch (both legs). |
+| `control.hip_strategy`, `control.hip_bend_max_deg` | 1, 30 | How far the torso bends when the ankles are at their limit. |
 | `control.speed_kp`, `control.speed_ki` | 0.6, 0.03 | Acceleration asked per m/s of speed error, and its integral. |
 | `control.accel_max`, `control.brake_max` | 1.5, 2.5 | Strongest acceleration and braking asked, m/s². |
 | `control.lean_max_deg`, `control.lean_rate_deg_s` | 15, 12 | Largest lean, and how fast it changes. |
@@ -96,9 +101,141 @@ tiltback_feel_deg = 90.0
 lean_max_deg = 18.0
 ```
 
+### Measured-speed lean phases: `[[phase]]`
+
+Use phases when the next rider command depends on measured ground speed.
+The `speed_kmh` schedule still controls the rider before `phase_start_s`.
+Each phase then sends `Intent::Lean` through the existing rider controller.
+The scenario never sets body speed, body pose, or motor torque.
+
+```toml
+# Top-level fields, before any tables:
+seconds = 68.0
+release_s = 4.0
+phase_start_s = 6.0
+speed_kmh = [[0, 0]]
+
+[rider.control]
+lean_max_deg = 30.0
+lean_rate_deg_s = 60.0
+ankle_max_nm = 400.0
+
+[[phase]]
+name = "accelerate"
+lean_deg = 30.0
+until_speed_kmh = 70.0
+crossing = "above"
+timeout_s = 40.0
+
+[[phase]]
+name = "brake"
+lean_deg = -30.0
+until_speed_kmh = 1.0
+crossing = "below"
+timeout_s = 20.0
+```
+
+| Phase field | Meaning |
+|---|---|
+| `name` | Unique, nonempty name, at most 64 bytes. |
+| `lean_deg` | Desired lean from vertical. Forward is positive. Its magnitude must stay within `rider.control.lean_max_deg`. |
+| `until_speed_kmh` | Finite signed forward ground speed. This is a gate, not a speed command. |
+| `crossing` | `above`: previous speed is below the threshold, then reaches or exceeds it. `below`: the reverse. |
+| `timeout_s` | Positive finite time from this phase's first command. |
+
+The parser accepts at most 16 phases.
+The run duration must include the start time, all timeouts, and two seconds of final observation.
+A phase completes only at a healthy measured crossing before its timeout.
+A crossing at the exact timeout can complete the phase.
+Cutoff, fall, halt, and nonfinite speed take priority over a crossing.
+A cutoff or fall after release also aborts a pending launch.
+Normal boot cutoff flags before release do not abort it.
+
+The next command starts from the crossing sample.
+At the default 100 Hz, detection can take up to one sample period.
+No interpolation moves the command back in time.
+The existing command delay, lean slew limit, ankle torque cap, and rigid rider aids still apply.
+Manual lean does not use the speed controller's acceleration limits or tiltback easing.
+Firmware protections remain active.
+The target speed telemetry channel is unavailable during manual lean.
+
+`Outcome.phases` adds structured measurements to JSON results.
+Each phase also adds a verdict check, so an incomplete gate cannot produce a passing run.
+The phase status is `reached`, `target_unreachable`, or `not_started`.
+Failure reasons include `timeout`, `cutoff`, `fall`, `halted`, `nonfinite_speed`, and `duration_ended`.
+Later phases remain `not_started` after failure.
+Their time, distance, speed, current, and voltage measurements stay null.
+
+Phase results include command and end times, elapsed time, start and end speeds, and maximum forward speed.
+`distance_m` is the signed forward distance change from `Signals.distance_m`, not total path length.
+For a straight forward brake, it measures braking distance from the measured 70 km/h crossing.
+The stopping gate uses 1 km/h, not exact zero speed.
+Current results include the largest absolute motor phase sample and signed q-current and battery-current ranges.
+Voltage results give the minimum and maximum bus samples.
+These are sample-rate measurements, not electrical-step peak bounds.
+
+After the last healthy crossing, the rider requests zero speed for two seconds of physical observation.
+After failure, the rider requests neutral lean for two seconds, unless the machine already halted.
+No pose or velocity reset occurs.
+Upright, cutoff, and final-speed checks still cover this observation period.
+A reached stopping gate does not prove stable standing afterward.
+
+#### Full effort to 70 km/h, then stop
+
+The public cases are `full-effort-70kmh-stop-soc100`, `full-effort-70kmh-stop-soc50`, and `full-effort-70kmh-stop-soc20`.
+They use the documented generic 80 kg rider and initial SOC values of 100%, 50%, and 20%.
+A `battery_soc` event at time zero sets the initial charge once.
+Normal discharge and regeneration then change the charge.
+These cases use the same settings, ground, rider limits, and rigid rider aids.
+
+The current cases use five phases, a 30° lean cap, a 24°/s slew limit, and a 400 N·m ankle cap.
+The stand releases at 4 s; the first effort command starts at 6 s.
+
+| Phase | Desired lean | Measured forward-speed crossing | Timeout |
+|---|---:|---|---:|
+| `launch` | +30° | Above 35 km/h | 15 s |
+| `build` | +20° | Above 50 km/h | 10 s |
+| `accelerate` | +15° | Above 70 km/h | 40 s |
+| `brake` | -30° | Below 15 km/h | 15 s |
+| `settle` | -5° | Below 1 km/h | 15 s |
+
+Every transition requires an actual measured crossing in the specified direction.
+The thresholds do not command speed or motor torque.
+A cutoff, fall, halt, or timeout prevents later phases from starting.
+The generated phase checks prevent an incomplete target from passing.
+
+Full braking includes **both `brake` and `settle`**.
+Its time starts at the measured 70 km/h crossing and ends at the measured crossing below 1 km/h.
+Calculate that time as `settle.end_s - brake.start_s`.
+Calculate braking distance as `brake.distance_m + settle.distance_m`.
+These distances are signed forward changes, not total path length.
+Both stopping phases must reach their gates before full stopping time or distance becomes available.
+If the 70 km/h target fails, stopping metrics remain **unavailable**, and later phase measurements remain null.
+A failed stopping phase can retain partial measurements; those values do not describe a completed stop.
+
+Two seconds of zero-speed rider control follow the final gate.
+The upright, cutoff, and final-speed checks still apply during this observation.
+The 103 s duration covers all phase timeouts and that observation.
+Run-wide top speed and distance include the observation after success or failure.
+They do not establish a healthy 70 km/h crossing or a completed stopping distance.
+
+Full effort describes commands inside this bounded envelope.
+It does not define a measured human maximum or prove a global acceleration or braking optimum.
+Keep failed gates as results when comparing firmware images.
+Motor, tire, suspension, battery, and rigid rider results remain PRELIMINARY.
+See [full-effort acceptance](../models/full-effort-acceptance.md) for the corrected-RTC evidence and rejected alternatives.
+
+An initial 100% SOC does not guarantee a full battery at the braking gate.
+Acceleration consumes charge first.
+A battery capacity-limit halt means the model cannot accept further charge.
+It does not establish real BMS cutoff voltage, pack isolation, or wheel recovery behavior.
+Run all three firmware images at quanta 4000, 3000, and 2000 before a robustness claim.
+Keep separate rider-mass studies outside public scenarios and identify their mass in private results.
+
 ### The roll aid: `[assist]`
 
-The rigid rider cannot balance sideways, so a roll spring on the shell holds it upright:
+The rider cannot balance sideways yet (the joints bend only forward and back), so a roll spring on
+the shell holds it upright:
 `roll_stiffness` (5000 N·m/rad) and `roll_damping` (500 N·m·s/rad). Set `roll_stiffness = 0.0` to
 see the wheel fall over sideways.
 

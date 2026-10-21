@@ -1,8 +1,9 @@
 import { LayoutGroup, motion } from "motion/react";
 import { RadioGroup } from "radix-ui";
-import { type ReactNode, useId } from "react";
+import { type KeyboardEvent, type ReactNode, useId } from "react";
 import { snappy } from "../design/motion.ts";
 import { cx } from "../lib/cx.ts";
+import { keyTarget } from "./segmentKeys.ts";
 import { Tooltip } from "./Tooltip.tsx";
 
 export interface SegmentOption<T extends string> {
@@ -25,7 +26,12 @@ export interface SegmentedControlProps<T extends string> {
   force?: { value: T; state: "hover" | "focus" };
 }
 
-/** Single choice with a knob that slides between options (snappy spring). */
+/**
+ * Single choice with a knob that slides between options (snappy spring). Arrow keys move the
+ * selection with the focus. Radix checks a radio when an arrow key moves focus onto it, but only
+ * while the key is still down when its deferred focus lands, so a quick tap (or a test's key
+ * press) moved the focus without the selection; the keydown here selects the target itself.
+ */
 export function SegmentedControl<T extends string>({
   value,
   onValueChange,
@@ -43,6 +49,10 @@ export function SegmentedControl<T extends string>({
         onValueChange={(v) => onValueChange(v as T)}
         orientation="horizontal"
         aria-label={aria["aria-label"]}
+        onKeyDown={(e: KeyboardEvent) => {
+          const next = keyTarget(e.key, value, options);
+          if (next !== null && next !== value) onValueChange(next);
+        }}
         className={cx(
           "relative inline-flex shrink-0 items-center rounded-pill border border-hairline bg-card p-2",
           size === "md" ? "h-(--control-md)" : "h-(--control-sm)",

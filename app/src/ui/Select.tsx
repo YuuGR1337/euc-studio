@@ -7,6 +7,8 @@ export interface SelectOption<T extends string> {
   value: T;
   label: string;
   detail?: string;
+  /** Shown instead of the detail; the option cannot be chosen. */
+  disabledReason?: string | undefined;
 }
 
 export interface SelectProps<T extends string> {
@@ -57,24 +59,27 @@ export function Select<T extends string>({
           sideOffset={8}
           collisionPadding={8}
           className={cx(
-            "pop z-50 min-w-(--radix-select-trigger-width) overflow-hidden rounded-12 border border-hairline-strong bg-raised p-4 shadow-overlay",
+            "pop z-50 flex max-h-[min(360px,var(--radix-select-content-available-height))] min-w-(--radix-select-trigger-width) flex-col overflow-hidden rounded-12 border border-hairline-strong bg-raised p-4 shadow-overlay",
             contentClassName,
           )}
         >
-          <S.Viewport>
+          <S.Viewport className="min-h-0 overflow-y-auto overscroll-contain">
             {options.map((o) => (
               <S.Item
                 key={o.value}
                 value={o.value}
+                disabled={!!o.disabledReason}
                 className={cx(
                   "relative flex cursor-default flex-col rounded-8 py-8 pr-32 pl-8 outline-none select-none",
-                  "data-[highlighted]:bg-track",
+                  "data-[highlighted]:bg-track data-[disabled]:opacity-40",
                 )}
               >
                 <S.ItemText>
                   <span className="text-13 font-medium text-fg">{o.label}</span>
                 </S.ItemText>
-                {o.detail && <span className="text-12 text-fg-2-safe">{o.detail}</span>}
+                {(o.disabledReason ?? o.detail) && (
+                  <span className="text-12 text-fg-2-safe">{o.disabledReason ?? o.detail}</span>
+                )}
                 <S.ItemIndicator className="absolute top-8 right-8 text-accent-text [&_svg]:size-[16px]">
                   <Check />
                 </S.ItemIndicator>

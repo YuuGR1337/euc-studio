@@ -66,3 +66,20 @@ be compared with the stock image in lock-step; **clean** fixes those quirks one 
 Stock images are never stored in this repository. `euc fetch <wheel>` downloads them from the vendor's own update
 server on your machine and checks them against pinned sha256 hashes. See [the image spec](spec/euc-info.md) for how
 our own images identify themselves.
+
+## Adding a wheel
+
+Use [Adding a wheel](adding-a-wheel.md) for the second-wheel implementation sequence and evidence checklists.
+The guide identifies current CPU, peripheral, firmware, protocol, and image limits.
+The architecture above includes planned interfaces.
+The guide distinguishes those plans from current implementation.
+
+## Engineering rule
+
+Fix causes. Do not hide missing behavior with simulated UI responses, delayed replay, or a misleading success state.
+Use one authoritative source for each behavior. Keep presentation interpolation separate from raw simulation measurements.
+Preserve bounded resource use, cancellation, and source identity through every state change.
+If a feature lacks required evidence or implementation, state that limit and complete the missing work.
+A build result does not establish runtime correctness or physical accuracy.
+
+Controller rail switching is described in [Controller supply](models/controller-supply.md). The pack and physical world continue while the controller is off.

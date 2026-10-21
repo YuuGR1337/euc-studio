@@ -5,8 +5,10 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { formatStats, measureFrames } from "../lib/perf.ts";
 import { RingBuffer } from "../lib/ring.ts";
+import { readStored } from "../lib/storage.ts";
 import { readBatch } from "./batch.ts";
 import type { Tone } from "./buzzerAudio.ts";
+import { POSE_MAX_BODIES, PoseHistory } from "./poseHistory.ts";
 import {
   type BodyInfo,
   CH,
@@ -26,29 +28,39 @@ import {
   type FirmwareInfo,
   HISTORY_SECONDS,
   type Latest,
+  type NativeAudioStatus,
   type PhoneCommand,
   type PhoneFrame,
   SAMPLE_RATE,
   type ScenarioInfo,
   type SimEvent,
   type TerrainProfile,
+  type WheelButton,
 } from "./types.ts";
 
 interface BackendStatus {
+  run_mode: "scenario" | "free_ride";
+  run_epoch: number;
+  buttons_ready: boolean;
+  power_button_ready: boolean;
   state: EngineStatus["state"];
   message: string;
   label: string | null;
   build: string | null;
   backend: string;
   scenario: string;
+  firmware: FirmwareId;
   t_s: number;
   rtf: number;
   target_rtf: number;
   playing: boolean;
+  /** The file "Record this run" writes, while it does. */
 }
 
-type Message =
+/** What the backend sends on the JSON channel (the live engine and a recording's player alike). */
+export type Message =
   | ({ type: "status" } & BackendStatus)
+  | { type: "audio"; status: NativeAudioStatus }
   | { type: "reset"; scenario: string }
   | { type: "bodies"; bodies: BodyInfo[] }
   | { type: "display"; layout: DisplayLayout | null }
@@ -62,8 +74,10 @@ type Message =
 
 interface EngineInfo {
   backend: string;
+  audio: NativeAudioStatus;
   scenarios: ScenarioInfo[];
   commands: PhoneCommand[];
+  firmwares: FirmwareInfo[];
   perf_seconds: number | null;
 }
 
@@ -90,13 +104,13 @@ const FIRMWARES: FirmwareInfo[] = [
     id: "ours-compat",
     label: "Ours-compat",
     detail: "Our C rewrite, stock behaviour",
-    disabledReason: "Our firmware runs on the simulated controller from M5",
+    disabledReason: "Loading firmware availability",
   },
   {
     id: "ours-clean",
     label: "Ours-clean",
     detail: "Our C rewrite, quirks fixed",
-    disabledReason: "Our firmware runs on the simulated controller from M5",
+    disabledReason: "Loading firmware availability",
   },
 ];
 
@@ -135,14 +149,17 @@ export class LiveEngine implements EngineClient {
   terrain: TerrainProfile | null = null;
   suspension: EngineClient["suspension"] = null;
   beeps = 0;
+  audio?: NativeAudioStatus;
   status: EngineStatus = { state: "starting", message: "Connecting to the engine", backend: "…" };
   playing = true;
   targetRtf = 1;
-  readonly firmware: FirmwareId = "stock";
+  firmware: FirmwareId = "stock";
+  private firmwareList: FirmwareInfo[] = FIRMWARES;
+  /** The file "Record this run" writes, while it does. */
   scenarioId = "";
 
-  private scenarioList: ScenarioInfo[] = [];
-  private rtf = 0;
+  protected scenarioList: ScenarioInfo[] = [];
+  protected rtf = 0;
   private eventId = 0;
   private version = 0;
   private listeners = new Set<() => void>();
@@ -150,20 +167,44 @@ export class LiveEngine implements EngineClient {
   private dataListeners = new Set<() => void>();
   private toneListeners = new Set<(tones: Tone[]) => void>();
   private buzzing = false;
+  private readonly connected: Promise<void>;
+  private audioRequests = Promise.resolve();
+  private readonly poseHistory = new PoseHistory();
+  private poseBatchSeq: number | null = null;
+  private poseStepPending = false;
+  private poseStepAfterT = -Infinity;
   /** Batches received, samples dropped by the backend (for diagnostics). */
   readonly stats = { batches: 0, samples: 0, dropped: 0 };
 
-  constructor() {
-    void this.connect();
+  /**
+   * `connect`: attach to the live engine now; a subclass that streams something else (a recording's
+   * player) passes false and never answers audio requests.
+   */
+  constructor(connect = true) {
+    this.connected = connect ? this.connect() : Promise.resolve();
+  }
+
+  get poseEpoch(): number {
+    return this.poseHistory.epoch;
+  }
+
+  samplePoses(out: Float32Array, wallNowMs: number): number {
+    // A caller must own the visual output. Never let sampling rewrite the raw latest frame.
+    if (out.buffer === this.latest.poses?.buffer) return Number.NaN;
+    return this.poseHistory.sample(out, wallNowMs, this.measuredRtf());
   }
 
   private async connect(): Promise<void> {
     const stream = new Channel<ArrayBuffer>((buffer) => this.onBatch(buffer));
     const messages = new Channel<Message>((message) => this.onMessage(message));
     try {
-      const info = await invoke<EngineInfo>("engine_connect", { stream, messages });
+      // Supply the preference before native startup can execute the first firmware step.
+      const soundEnabled = readStored<boolean>("buzzerSound", true) !== false;
+      const info = await invoke<EngineInfo>("engine_connect", { stream, messages, soundEnabled });
+      this.audio = info.audio;
       this.scenarioList = info.scenarios;
       this.phoneCommands = info.commands;
+      this.firmwareList = info.firmwares;
       this.status = { ...this.status, backend: info.backend };
       if (!this.scenarioId) this.scenarioId = info.scenarios[0]?.id ?? "";
       if (info.perf_seconds) void this.reportFrameTimes(info.perf_seconds);
@@ -192,18 +233,38 @@ export class LiveEngine implements EngineClient {
 
   /* ---- incoming ---- */
 
-  private onBatch(buffer: ArrayBuffer): void {
+  protected onBatch(buffer: ArrayBuffer): void {
     const b = readBatch(buffer);
+    const receivedWallMs = performance.now();
     this.stats.batches++;
     this.stats.samples += b.n;
     this.stats.dropped += b.dropped;
+    if (b.dropped > 0 || (this.poseBatchSeq !== null && b.seq !== (this.poseBatchSeq + 1) >>> 0)) {
+      this.poseHistory.reset(this.bodies.length);
+    }
+    this.poseBatchSeq = b.seq;
     if (b.n === 0) return;
+    const hasVisualPoses =
+      b.bodies > 0 && b.bodies <= POSE_MAX_BODIES && b.bodies === this.bodies.length;
+    if (!hasVisualPoses) this.poseHistory.reset(this.bodies.length);
     const cols = CHANNEL_IDS.map((id) => [this.channels[id], b.column(LANE[id])] as const);
     for (let i = 0; i < b.n; i++) {
       this.time.push(b.t[i] as number);
       for (const [ring, col] of cols) ring.push(col[i] ?? Number.NaN);
+      if (hasVisualPoses) {
+        this.poseHistory.push(
+          b.t[i] as number,
+          b.poses,
+          i * b.bodies * POSE_FLOATS,
+          receivedWallMs,
+        );
+      }
     }
     const last = b.n - 1;
+    if (this.poseStepPending && (b.t[last] as number) > this.poseStepAfterT) {
+      this.poseHistory.finishStep();
+      this.poseStepPending = false;
+    }
     const at = (id: number) => b.column(id)[last] ?? Number.NaN;
     const l = this.latest;
     l.t = b.t[last] as number;
@@ -228,10 +289,22 @@ export class LiveEngine implements EngineClient {
     }
   }
 
-  private onMessage(m: Message): void {
+  protected onMessage(m: Message): void {
     switch (m.type) {
+      case "audio":
+        this.audio = m.status;
+        break;
       case "status": {
+        if (this.status.runEpoch !== undefined && this.status.runEpoch !== m.run_epoch) {
+          this.poseHistory.reset(this.bodies.length);
+          this.poseBatchSeq = null;
+          this.poseStepPending = false;
+        }
         this.status = {
+          runMode: m.run_mode,
+          runEpoch: m.run_epoch,
+          buttonsReady: m.buttons_ready === true,
+          powerButtonReady: m.power_button_ready === true,
           state: m.state,
           message: m.message,
           backend: m.backend,
@@ -242,15 +315,22 @@ export class LiveEngine implements EngineClient {
         this.targetRtf = m.target_rtf;
         this.rtf = m.rtf;
         this.scenarioId = m.scenario;
+        this.firmware = m.firmware;
         break;
       }
       case "reset":
+        this.status = { ...this.status, buttonsReady: false, powerButtonReady: false };
+        this.poseHistory.reset(this.bodies.length);
+        this.poseBatchSeq = null;
+        this.poseStepPending = false;
         this.time.clear();
         for (const id of CHANNEL_IDS) this.channels[id].clear();
         this.events = [];
         this.frames = [];
         this.latest.poses = null;
-        this.latest.t = 0;
+        for (const key of Object.keys(this.latest) as (keyof Latest)[]) {
+          if (key !== "poses") this.latest[key] = key === "t" ? 0 : Number.NaN;
+        }
         this.outputs = null;
         this.beeps = 0;
         this.buzzing = false;
@@ -258,6 +338,9 @@ export class LiveEngine implements EngineClient {
         break;
       case "bodies":
         this.bodies = m.bodies;
+        this.poseHistory.reset(this.bodies.length);
+        this.poseBatchSeq = null;
+        this.poseStepPending = false;
         break;
       case "display":
         this.display = m.layout;
@@ -304,6 +387,37 @@ export class LiveEngine implements EngineClient {
 
   /* ---- EngineClient ---- */
 
+  setSound(enabled: boolean): Promise<void> {
+    return this.requestAudioStatus("engine_sound", { enabled });
+  }
+
+  refreshAudioStatus(): Promise<void> {
+    return this.requestAudioStatus("engine_audio_status");
+  }
+
+  private requestAudioStatus(command: string, args?: Record<string, unknown>): Promise<void> {
+    // Wait for native startup and serialize mutations/reads so late replies cannot undo a mute.
+    const request = this.audioRequests.then(async () => {
+      await this.connected;
+      try {
+        this.audio = await invoke<NativeAudioStatus>(command, args);
+      } catch (error) {
+        this.audio = {
+          backend: this.audio?.backend ?? "unsupported",
+          enabled: this.audio?.enabled ?? false,
+          state: "error",
+          error: String(error),
+        };
+        throw error;
+      } finally {
+        this.emit();
+      }
+    });
+    // Keep the next command usable after an IPC failure; the caller still receives the error.
+    this.audioRequests = request.catch(() => {});
+    return request;
+  }
+
   subscribe = (fn: () => void): (() => void) => {
     this.listeners.add(fn);
     return () => this.listeners.delete(fn);
@@ -311,7 +425,7 @@ export class LiveEngine implements EngineClient {
 
   getVersion = (): number => this.version;
 
-  private emit(): void {
+  protected emit(): void {
     this.version++;
     for (const fn of this.listeners) fn();
     this.emitData();
@@ -336,17 +450,27 @@ export class LiveEngine implements EngineClient {
 
   firmwares(): FirmwareInfo[] {
     // The stock entry names the build the engine loaded (the update server's label).
-    const build = this.status.build;
+    const build = this.firmware === "stock" ? this.status.build : undefined;
     return build
-      ? FIRMWARES.map((f) => (f.id === "stock" ? { ...f, detail: `${f.detail} ${build}` } : f))
-      : FIRMWARES;
+      ? this.firmwareList.map((f) =>
+          f.id === "stock" ? { ...f, detail: `${f.detail} ${build}` } : f,
+        )
+      : this.firmwareList;
   }
 
   scenarios(): ScenarioInfo[] {
     return this.scenarioList;
   }
 
-  private call(cmd: string, args?: Record<string, unknown>): void {
+  async importScenario(text: string): Promise<ScenarioInfo> {
+    const info = await invoke<ScenarioInfo>("engine_import_scenario", { text });
+    this.scenarioList = [...this.scenarioList, info];
+    this.emit();
+    this.setScenario(info.id);
+    return info;
+  }
+
+  protected call(cmd: string, args?: Record<string, unknown>): void {
     invoke(cmd, args).catch((e: unknown) => {
       this.status = { ...this.status, state: "error", message: String(e) };
       this.emit();
@@ -369,22 +493,26 @@ export class LiveEngine implements EngineClient {
     this.emit();
   }
 
-  setFirmware(): void {
-    // Only the stock image runs on the simulated controller until M5.
+  setFirmware(id: FirmwareId): void {
+    if (id === this.firmware || this.firmwareList.find((f) => f.id === id)?.disabledReason) return;
+    this.call("engine_set_firmware", { firmware: id });
   }
 
   setScenario(id: string): void {
-    if (id === this.scenarioId) return;
     this.scenarioId = id;
     this.call("engine_restart", { scenario: id });
     this.emit();
   }
 
   restart(): void {
-    this.call("engine_restart", { scenario: this.scenarioId || null });
+    this.call("engine_restart", { scenario: null });
   }
 
   step(): void {
+    if (!this.playing) {
+      this.poseStepPending = true;
+      this.poseStepAfterT = this.latest.t;
+    }
     this.call("engine_step");
   }
 
@@ -398,5 +526,23 @@ export class LiveEngine implements EngineClient {
 
   sendCommand(id: string, value?: number): Promise<string> {
     return invoke<string>("engine_send", { id, value: value ?? null });
+  }
+
+  setManual(input: { lean: number; steer: number } | null): void {
+    this.call("engine_manual", { manual: input });
+  }
+
+  stepOff(): void {
+    this.call("engine_step_off");
+  }
+
+  pressButton(button: WheelButton, durationMs: number): Promise<string> {
+    return invoke<string>("engine_button", { button, durationMs });
+  }
+
+  setButton(button: WheelButton, pressed: boolean, epoch = this.status.runEpoch): Promise<string> {
+    if (epoch === undefined)
+      return Promise.reject(new Error("The simulator has no active input epoch"));
+    return invoke<string>("engine_button_state", { button, pressed, epoch });
   }
 }

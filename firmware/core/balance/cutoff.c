@@ -6,6 +6,7 @@
  *   fast roll   |roll| > 50 / 58 / 66 deg and (hall activity or Vq > 30000)        -> tipped
  *   pitch       |pitch| > 40 deg, or tipped, for 52 ticks  -> soft disable, automatic recovery allowed
  *   error       |error| > 40 deg, or tipped, for 11 ticks  -> soft disable, one 121 ms beep
+ *               (clean: an error angle alone counts 52 ticks, as the pitch; quirk ERROR_CUTOFF_22MS)
  *   overload    |Vq| > 31000 (command above 1033 of 1050) for 752 ticks (1.5 s)    -> soft disable
  * Start-up: after the power-on countdown, the wheel must stand nearly level (accelerometer-only tilt).
  * Recovery: after a pitch cut-off, 101 ticks level and still re-enable the motor, unless a hard fault is set.
@@ -14,6 +15,7 @@
 
 #include "balance_internal.h"
 #include "euc/balance/balance.h"
+#include "euc/quirks.h"
 
 #define PITCH_CUTOFF_DEG        40.0F
 #define PITCH_CUTOFF_TICKS      51U
@@ -81,6 +83,17 @@ static bool within_40_deg(float angle_deg)
     return (angle_deg <= PITCH_CUTOFF_DEG) && (angle_deg >= -PITCH_CUTOFF_DEG);
 }
 
+/*
+ * Ticks past 40 deg before the error detector cuts. Stock: 11 (22 ms), shorter than the swing after a deep
+ * pothole dip that the balance is already recovering (5 cm at 20 km/h: about 40 ms past 40 deg). Clean: an
+ * error angle alone gets the pitch detector's 52 ticks (105 ms), so a dip that comes back rides on; a roll
+ * cut-off (tipped) keeps the stock 22 ms (quirk ERROR_CUTOFF_22MS).
+ */
+static uint16_t error_cutoff_ticks(const struct euc_balance_state *state)
+{
+    return (EUC_QUIRK(ERROR_CUTOFF_22MS) || state->tipped) ? ERROR_CUTOFF_TICKS : PITCH_CUTOFF_TICKS;
+}
+
 void euc_balance_step_cutoffs(struct euc_balance_state *state, const struct euc_balance_in *in,
                               struct euc_balance_out *out)
 {
@@ -95,13 +108,17 @@ void euc_balance_step_cutoffs(struct euc_balance_state *state, const struct euc_
         state->fallen = true;
     }
 
+    /* The count stops one above the longest limit once it has cut, so the beep sounds once. */
+    const uint16_t error_limit = error_cutoff_ticks(state);
+    const uint16_t error_latched =
+        EUC_QUIRK(ERROR_CUTOFF_22MS) ? (ERROR_CUTOFF_TICKS + 1U) : (PITCH_CUTOFF_TICKS + 1U);
     if (within_40_deg(state->error_deg) && !state->tipped) {
         state->error_over_ticks = 0U;
-    } else if (state->error_over_ticks < ERROR_CUTOFF_TICKS) {
+    } else if (state->error_over_ticks < error_limit) {
         state->error_over_ticks++;
     } else {
-        if (state->error_over_ticks == ERROR_CUTOFF_TICKS) {
-            state->error_over_ticks = ERROR_CUTOFF_TICKS + 1U;
+        if (state->error_over_ticks < error_latched) {
+            state->error_over_ticks = error_latched;
             balance_request_beep(out, ERROR_CUTOFF_BEEP_TICKS);
         }
         state->motor_disabled = true;

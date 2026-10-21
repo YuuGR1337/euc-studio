@@ -2,16 +2,15 @@
 //!
 //! [`Host`] is the seam between the studio and the engine. [`RideHost`] rides a scenario on an
 //! [`euc_sim::Session`]: the firmware on the emulated board, the electrical plant and the MuJoCo
-//! body. [`StillHost`] runs the firmware with a still plant, for a wheel without a body model.
-//! Both read the board the same way ([`BoardWatch`]): BLE frames, boot milestones, display, LEDs
+//! body. A failed physical model stops the run.
+//! [`BoardWatch`] reads the board: BLE frames, boot milestones, display, LEDs
 //! and buzzer.
 
-use euc_devices::{Buzzer, Tm1640, ws2812};
+use euc_devices::Buzzer;
 use euc_proto_begode::{Assembler, Segment, Telemetry};
 use euc_sim::scenario::{Ride, Scenario};
-use euc_sim::{Machine, Report, Session};
-use euc_stm32f1::Dma;
-use euc_telemetry::{BodyInfo, BodyRole, Event, EventKind, Geom, GeomKind, Outputs, Pose, Signals, Snapshot};
+use euc_sim::{Machine, Manual, Report, Session};
+use euc_telemetry::{BodyInfo, Event, EventKind, Outputs, Snapshot};
 use serde::Serialize;
 
 /// A simulation the runner can step. Nothing in it reads the wall clock or blocks. It is built
@@ -31,14 +30,63 @@ pub trait Host {
     fn drain_ble_tx(&mut self, out: &mut Vec<(f64, u8)>);
     /// Sends bytes to the firmware's BLE module now.
     fn inject_ble(&mut self, bytes: &[u8]) -> Result<(), String>;
+    /// Sends a bounded physical GPIO pulse; firmware interprets its gesture.
+    fn pulse_button(&mut self, _button: &str, _duration_ms: u32) -> Result<(), String> {
+        Err("This host does not expose physical buttons".into())
+    }
+    /// Applies a live physical GPIO state at the current simulated cycle.
+    fn set_button(&mut self, _button: &str, _pressed: bool) -> Result<(), String> {
+        Err("This host does not expose physical buttons".into())
+    }
+    /// Releases desktop input pulses and live holds without running firmware.
+    fn release_button_pulses(&mut self) {}
+    /// Initial power hold finished and the latch is currently high.
+    fn buttons_ready(&self) -> bool {
+        false
+    }
+    /// Whether Power can start or renew a hold, including waking an unpowered controller.
+    fn power_button_ready(&self) -> bool {
+        self.buttons_ready()
+    }
+    /// Active power and handle pulses, respectively.
+    fn button_pulses(&self) -> [bool; 2] {
+        [false; 2]
+    }
     /// Why the run stopped for good, if it did.
     fn halted(&self) -> Option<String>;
+    /// The declared scenario duration ended and its checks were judged.
+    fn completed(&self) -> bool {
+        false
+    }
+    /// Clears manual requests without changing the measured body pose.
+    fn manual_pause(&mut self) {}
+    /// The interactive host asks the runner to pause at a control or map boundary.
+    fn wants_pause(&self) -> bool {
+        false
+    }
     /// What the board shows and sounds (display, LEDs, buzzer), if the host models it.
     fn outputs(&self) -> Option<Outputs> {
         None
     }
     /// Buzzer changes since the last call, at their exact simulated time.
     fn drain_tones(&mut self, _out: &mut Vec<Tone>) {}
+    /// Takes manual control of the rider (keyboard, gamepad), or gives it back (`None`). A host
+    /// without a rider ignores it.
+    fn set_manual(&mut self, _manual: Option<Manual>) {}
+    /// The rider steps off the pedals.
+    fn step_off(&mut self) {}
+    /// Exclusive simulated interrupt-cycle counters.
+    fn handler_counters(&self) -> Option<super::tune::HandlerCounters> {
+        None
+    }
+    /// Named numeric firmware probes, when this host owns a mapped Session.
+    fn firmware_var_names(&self) -> Option<Vec<String>> {
+        None
+    }
+    /// Reads one named value on the simulation thread, without advancing it.
+    fn firmware_value(&self, _name: &str) -> Option<f64> {
+        None
+    }
 }
 
 /// A buzzer change: from `t_s` on, the buzzer sounds `hz` at `duty` of the period high (`hz` 0:
@@ -50,16 +98,12 @@ pub struct Tone {
     pub duty: f64,
 }
 
-/// The LED strip's timer period in ticks (TIM3 ARR 29 + 1) and its DMA channel.
-const LED_PERIOD: u16 = 30;
-const LED_DMA_CHANNEL: u8 = 2;
-
 /// Boot markers are watched for the machine's first few seconds; reports stop after that (a
 /// report walks the whole run log, so it gets slower as the run grows).
 const REPORT_UNTIL_S: f64 = 6.0;
 
 /// What the studio reads from the board, whichever plant it runs with.
-struct BoardWatch {
+pub(super) struct BoardWatch {
     hclk: f64,
     ble_read: usize,
     assembler: Assembler,
@@ -77,7 +121,7 @@ struct BoardWatch {
 }
 
 impl BoardWatch {
-    fn new(machine: &Machine) -> Self {
+    pub(super) fn new(machine: &Machine) -> Self {
         Self {
             hclk: machine.hclk() as f64,
             ble_read: 0,
@@ -94,12 +138,12 @@ impl BoardWatch {
         }
     }
 
-    fn time_s(&self, machine: &Machine) -> f64 {
+    pub(super) fn time_s(&self, machine: &Machine) -> f64 {
         machine.cycles as f64 / self.hclk
     }
 
     /// Turns what changed on the board since the last call into events.
-    fn after_step(&mut self, machine: &Machine) {
+    pub(super) fn after_step(&mut self, machine: &Machine) {
         let now = self.time_s(machine);
         if self.halted.is_none()
             && let Some(why) = machine.halted()
@@ -138,7 +182,7 @@ impl BoardWatch {
         self.reported_markers = reached.len();
     }
 
-    fn drain_ble_tx(&mut self, machine: &Machine, out: &mut Vec<(f64, u8)>) {
+    pub(super) fn drain_ble_tx(&mut self, machine: &Machine, out: &mut Vec<(f64, u8)>) {
         let tx = &machine.board().ble_tx;
         let new = &tx[self.ble_read.min(tx.len())..];
         self.ble_read = tx.len();
@@ -162,31 +206,27 @@ impl BoardWatch {
         }
     }
 
-    fn outputs(machine: &Machine) -> Outputs {
-        let display = machine.component::<Tm1640>("display");
-        let leds = machine
-            .component::<Dma>("DMA1")
-            .and_then(|dma| dma.memory(LED_DMA_CHANNEL))
-            .and_then(|(addr, count)| machine.memory(addr, count as usize))
-            .map(|duties| ws2812::decode(duties.iter().map(|&d| u16::from(d)), LED_PERIOD))
-            .unwrap_or_default();
-        Outputs {
-            display_grid: display.map(|d| d.grid().to_vec()).unwrap_or_default(),
-            display_on: display.is_some_and(Tm1640::display_on),
-            display_brightness: display.map_or(0, Tm1640::brightness),
-            leds: leds.iter().map(|c| [c.r, c.g, c.b]).collect(),
-            buzzer_hz: machine
-                .component::<Buzzer>("buzzer")
-                .and_then(Buzzer::tone)
-                .map_or(0, |pwm| pwm.frequency_hz().round() as u32),
-        }
+    pub(super) fn outputs(machine: &Machine) -> Outputs {
+        euc_sim::recording::outputs(machine)
+    }
+
+    pub(super) fn drain_events(&mut self, out: &mut Vec<Event>) {
+        out.append(&mut self.events);
+    }
+
+    pub(super) fn drain_tones(&mut self, out: &mut Vec<Tone>) {
+        out.append(&mut self.tones);
+    }
+
+    pub(super) fn halted(&self) -> Option<String> {
+        self.halted.clone()
     }
 }
 
 /// A scenario ridden on a session by `euc_sim::scenario::Ride` (the same driver as `euc sim run`):
 /// the rider follows the target speed, the stand lets go at the release time, faults and pushes
 /// come on cue, and the checks are judged (and posted as events) when the scenario's time is up.
-/// The run goes on after that, holding the last target.
+/// The run stops after its declared duration.
 pub struct RideHost {
     session: Session,
     scenario: Scenario,
@@ -213,7 +253,7 @@ impl RideHost {
     fn ride_sample(&mut self) {
         self.ride.sample(&self.scenario, &mut self.session);
         self.watch.after_step(self.session.machine());
-        if !self.judged && self.ride.finished(&self.scenario, &self.session) {
+        if !self.judged && self.watch.halted.is_none() && self.ride.finished(&self.scenario, &self.session) {
             self.judge();
         }
     }
@@ -232,6 +272,28 @@ impl RideHost {
                 text: format!("Check {verdict}: {} ({})", check.what, check.measured),
             });
         }
+        for phase in &outcome.phases {
+            let value =
+                |v: Option<f64>, unit: &str| v.map_or_else(|| "unavailable".into(), |n| format!("{n:.2} {unit}"));
+            self.watch.events.push(Event {
+                t_s,
+                kind: if phase.status == euc_sim::scenario::PhaseStatus::Reached {
+                    EventKind::Scenario
+                } else {
+                    EventKind::Fault
+                },
+                text: format!(
+                    "Phase {} {:?}{}: elapsed {}, forward distance {}, end speed {}, peak phase current {}",
+                    phase.name,
+                    phase.status,
+                    phase.reason.as_ref().map_or(String::new(), |reason| format!(" ({reason})")),
+                    value(phase.elapsed_s, "s"),
+                    value(phase.distance_m, "m"),
+                    value(phase.end_speed_kmh, "km/h"),
+                    value(phase.max_abs_phase_current_a, "A"),
+                ),
+            });
+        }
         let passed = outcome.checks.iter().filter(|c| c.passed).count();
         let (kind, verdict) =
             if outcome.passed() { (EventKind::Scenario, "passed") } else { (EventKind::Fault, "failed") };
@@ -244,11 +306,27 @@ impl RideHost {
 }
 
 impl Host for RideHost {
+    fn handler_counters(&self) -> Option<super::tune::HandlerCounters> {
+        self.session.machine().isr_metrics_available().then(|| super::tune::handler_counters(self.session.machine()))
+    }
+
+    fn completed(&self) -> bool {
+        self.judged
+    }
+
+    fn firmware_var_names(&self) -> Option<Vec<String>> {
+        Some(self.session.firmware_var_names())
+    }
+
+    fn firmware_value(&self, name: &str) -> Option<f64> {
+        self.session.firmware_value(name)
+    }
+
     fn step(&mut self, sim_s: f64) {
         let period = self.session.sample_period_s();
         let samples = (sim_s / period).round().max(1.0) as u32;
         for _ in 0..samples {
-            if self.watch.halted.is_some() {
+            if self.watch.halted.is_some() || self.judged {
                 return;
             }
             self.ride_sample();
@@ -278,7 +356,7 @@ impl Host for RideHost {
             }
             e
         }));
-        out.append(&mut self.watch.events);
+        self.watch.drain_events(out);
     }
 
     fn drain_ble_tx(&mut self, out: &mut Vec<(f64, u8)>) {
@@ -286,7 +364,7 @@ impl Host for RideHost {
     }
 
     fn drain_tones(&mut self, out: &mut Vec<Tone>) {
-        out.append(&mut self.watch.tones);
+        self.watch.drain_tones(out);
     }
 
     fn inject_ble(&mut self, bytes: &[u8]) -> Result<(), String> {
@@ -294,103 +372,104 @@ impl Host for RideHost {
         Ok(())
     }
 
+    fn pulse_button(&mut self, button: &str, duration_ms: u32) -> Result<(), String> {
+        self.session.machine_mut().pulse_button(button, duration_ms)?;
+        self.session.log(EventKind::Command, format!("Physical {button} button pressed for {duration_ms} ms"));
+        Ok(())
+    }
+
+    fn release_button_pulses(&mut self) {
+        self.session.machine_mut().release_button_pulses();
+    }
+
+    fn set_button(&mut self, button: &str, pressed: bool) -> Result<(), String> {
+        self.session.machine_mut().set_button(button, pressed)
+    }
+
+    fn buttons_ready(&self) -> bool {
+        self.session.machine().board().buttons_ready()
+    }
+
+    fn power_button_ready(&self) -> bool {
+        self.session.machine().board().power_button_ready()
+    }
+
+    fn button_pulses(&self) -> [bool; 2] {
+        self.session.machine().board().button_pulses()
+    }
+
     fn halted(&self) -> Option<String> {
-        self.watch.halted.clone()
+        self.watch.halted()
     }
 
     fn outputs(&self) -> Option<Outputs> {
         Some(BoardWatch::outputs(self.session.machine()))
     }
-}
 
-/// Axle height of the Extreme's 22-inch tire, metres.
-const AXLE_Z: f32 = 0.28;
+    fn set_manual(&mut self, manual: Option<Manual>) {
+        self.session.set_manual(manual);
+    }
 
-/// The machine with a still plant: real firmware, the wheel standing upright, readouts from the
-/// firmware's own Live frames.
-pub struct StillHost {
-    machine: Machine,
-    watch: BoardWatch,
-    battery_v: f64,
-}
-
-impl StillHost {
-    /// Wraps a built machine; `battery_v` is the still plant's pack voltage.
-    pub fn new(machine: Machine, battery_v: f64) -> Self {
-        Self { watch: BoardWatch::new(&machine), machine, battery_v }
+    fn step_off(&mut self) {
+        self.session.step_off();
     }
 }
 
-impl Host for StillHost {
-    fn step(&mut self, sim_s: f64) {
-        if self.watch.halted.is_some() {
-            return;
+#[cfg(test)]
+#[path = "power_tests.rs"]
+mod power_tests;
+
+#[cfg(test)]
+mod tests {
+    use euc_sim::Manual;
+    use euc_telemetry::Snapshot;
+
+    use super::super::firmware::build_host;
+    use super::Host;
+
+    fn run(host: &mut dyn Host, seconds: f64) -> Snapshot {
+        for _ in 0..(seconds * 120.0).round() as u32 {
+            host.step(1.0 / 120.0);
         }
-        self.machine.run((sim_s * self.watch.hclk) as u64);
-        self.watch.after_step(&self.machine);
+        let mut snap = Snapshot::default();
+        host.snapshot(&mut snap);
+        snap
     }
 
-    fn time_s(&self) -> f64 {
-        self.watch.time_s(&self.machine)
-    }
-
-    fn bodies(&self) -> Vec<BodyInfo> {
-        vec![
-            BodyInfo { name: "wheel".into(), role: BodyRole::Wheel, geoms: vec![tire()] },
-            BodyInfo { name: "shell".into(), role: BodyRole::Shell, geoms: Vec::new() },
-        ]
-    }
-
-    fn snapshot(&self, out: &mut Snapshot) {
-        out.t_s = self.time_s();
-        out.signals = Signals {
-            battery_v: self.battery_v as f32,
-            pitch_deg: 0.0,
-            roll_deg: 0.0,
-            distance_m: 0.0,
-            wheel_rad_s: 0.0,
-            ..Signals::default()
+    /// The studio's keyboard on the stock firmware: lean forward and the wheel rides off, turn
+    /// and it turns, lean back and it stops, give the rider back and the scenario's stand-still
+    /// holds.
+    #[test]
+    #[ignore = "needs the stock image in the local firmware cache"]
+    fn manual_lean_rides_the_stock_firmware() {
+        let mut built = build_host("balance-60s", "stock", &mut |_| {}).expect("host");
+        let host = built.host.as_mut();
+        run(host, 4.0);
+        host.set_manual(Some(Manual { lean: 0.6, steer: 0.0 }));
+        let fast = run(host, 3.0).signals.speed_kmh;
+        // A full left turn at a gentle lean: the shell's heading swings left.
+        host.set_manual(Some(Manual { lean: 0.2, steer: 1.0 }));
+        let yaw = |snap: &Snapshot| {
+            let [w, x, y, z] = snap.bodies[1].quat.map(f64::from);
+            (2.0 * (w * z + x * y)).atan2(1.0 - 2.0 * (y * y + z * z))
         };
-        if let Some(live) = &self.watch.live {
-            out.signals.speed_kmh = live.speed_kmh() as f32;
-            out.signals.battery_v = live.voltage_v() as f32;
-            out.signals.iq_a = live.phase_current_a() as f32;
-            out.signals.board_temp_c = live.temperature_c() as f32;
+        let turned = yaw(&run(host, 1.5));
+        host.set_manual(Some(Manual { lean: -0.6, steer: 0.0 }));
+        let mut slow = f32::MAX;
+        for _ in 0..30 {
+            slow = slow.min(run(host, 0.1).signals.speed_kmh.abs());
         }
-        let upright = Pose { pos: [0.0, 0.0, AXLE_Z], quat: [1.0, 0.0, 0.0, 0.0] };
-        out.bodies.clear();
-        out.bodies.extend([upright, upright]);
+        host.set_manual(None);
+        let after = run(host, 4.0).signals.speed_kmh;
+        let mut events = Vec::new();
+        host.drain_events(&mut events);
+        println!("fast {fast:.1} km/h, turned {turned:.2} rad, slowest {slow:.1} km/h, after {after:.1} km/h");
+        assert!(turned > 0.5, "a full left turn for 1.5 s turns left: {turned} rad");
+        assert!(host.halted().is_none());
+        assert!(fast > 4.0, "leaning forward rides off: {fast}");
+        assert!(slow < fast / 2.0, "leaning back brakes: {slow}");
+        assert!(after.abs() < 2.0, "the scenario stands still again: {after}");
+        let texts: Vec<_> = events.iter().map(|e| e.text.as_str()).collect();
+        assert!(texts.contains(&"Manual control") && texts.contains(&"Control back to the scenario"), "{texts:?}");
     }
-
-    fn drain_events(&mut self, out: &mut Vec<Event>) {
-        out.append(&mut self.watch.events);
-    }
-
-    fn drain_ble_tx(&mut self, out: &mut Vec<(f64, u8)>) {
-        self.watch.drain_ble_tx(&self.machine, out);
-    }
-
-    fn drain_tones(&mut self, out: &mut Vec<Tone>) {
-        out.append(&mut self.watch.tones);
-    }
-
-    fn inject_ble(&mut self, bytes: &[u8]) -> Result<(), String> {
-        self.machine.inject_ble(bytes);
-        Ok(())
-    }
-
-    fn halted(&self) -> Option<String> {
-        self.watch.halted.clone()
-    }
-
-    fn outputs(&self) -> Option<Outputs> {
-        Some(BoardWatch::outputs(&self.machine))
-    }
-}
-
-/// The tire as a torus approximated by a cylinder about the axle (MJCF y axis).
-fn tire() -> Geom {
-    // A cylinder's axis is local z; rotate it onto y (90° about x).
-    let half = std::f32::consts::FRAC_1_SQRT_2;
-    Geom { kind: GeomKind::Cylinder, size: [AXLE_Z, 0.04, 0.0], pos: [0.0; 3], quat: [half, half, 0.0, 0.0] }
 }

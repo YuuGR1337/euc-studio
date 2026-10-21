@@ -1,0 +1,48 @@
+[package]
+name = "euc-python"
+description = "Native Python access to the EUC simulator with local custom firmware"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.99"
+license = "LicenseRef-PolyForm-Noncommercial-1.0.0"
+repository = "https://github.com/tarikbc/euc-studio"
+publish = false
+
+# Its own cargo workspace, like the app: PyO3 needs a Python to build against, which the engine
+# workspace's `cargo build`, `cargo test --workspace` and clippy should not. maturin builds it from
+# python/ (python/pyproject.toml); `cargo clippy` here lints it (ci-python.yml).
+[workspace]
+
+[lib]
+name = "_native"
+crate-type = ["cdylib"]
+
+[dependencies]
+euc-image = { path = "../euc-image" }
+euc-physics = { path = "../euc-physics" }
+euc-profile = { path = "../euc-profile" }
+euc-sim = { path = "../euc-sim", default-features = false }
+euc-telemetry = { path = "../euc-telemetry" }
+pyo3 = { version = "=0.29.3", features = ["abi3-py311"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+toml = "1.1"
+
+[lints.rust]
+missing_docs = "warn"
+unsafe_code = "warn"
+unused_qualifications = "warn"
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+cast_possible_truncation = "allow"
+cast_possible_wrap = "allow"
+cast_precision_loss = "allow"
+cast_sign_loss = "allow"
+missing_errors_doc = "allow"
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
+
+# The emulator is too slow to ride unoptimized; keep debug builds of the engine fast.
+[profile.dev.package."*"]
+opt-level = 3

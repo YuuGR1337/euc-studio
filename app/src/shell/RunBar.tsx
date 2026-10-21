@@ -1,3 +1,4 @@
+import { ScenarioImport } from "./ScenarioImport.tsx";
 import { AnimatePresence, motion } from "motion/react";
 import { DropdownMenu } from "radix-ui";
 import { snappy } from "../design/motion.ts";
@@ -5,7 +6,16 @@ import { cx } from "../lib/cx.ts";
 import { type FirmwareId, engine, useEngineVersion, useLive } from "../engine/index.ts";
 import { useUi } from "../state/ui.ts";
 import { IconButton } from "../ui/Button.tsx";
-import { Check, LogoMark, Pause, Play, RotateCcw, Search, StepForward } from "../ui/icons.tsx";
+import {
+  Check,
+  Diverge,
+  LogoMark,
+  Pause,
+  Play,
+  RotateCcw,
+  Search,
+  StepForward,
+} from "../ui/icons.tsx";
 import { Shortcut } from "../ui/Kbd.tsx";
 import { RollingNumber } from "../ui/RollingNumber.tsx";
 import { formatClock } from "../ui/rolling.ts";
@@ -13,6 +23,7 @@ import { SegmentedControl } from "../ui/SegmentedControl.tsx";
 import { Select } from "../ui/Select.tsx";
 import { Tooltip } from "../ui/Tooltip.tsx";
 import { RTF_STEPS } from "./commands.tsx";
+import { ReplayBar } from "./ReplayBar.tsx";
 
 function Readout({
   label,
@@ -24,7 +35,7 @@ function Readout({
   dim?: boolean;
 }) {
   return (
-    <span className="flex flex-col items-start leading-none">
+    <span className="flex shrink-0 flex-col items-start whitespace-nowrap leading-none">
       <span
         className={cx(
           "text-15 font-medium transition-colors duration-(--dur-hover)",
@@ -149,19 +160,34 @@ function PlayButton() {
   );
 }
 
+/**
+ * In Compare the run bar does not drive the ride: the comparison has its own controls in the
+ * workspace, and the ride stays paused while a comparison runs (engine/compareGate.ts).
+ */
+function CompareNote() {
+  return (
+    <span className="flex items-center gap-8 text-12 text-fg-2" data-testid="runbar-compare-note">
+      <Diverge className="size-[14px] text-fg-3" />
+      Comparison controls are below
+    </span>
+  );
+}
+
 export function RunBar() {
   useEngineVersion();
   const setPaletteOpen = useUi((s) => s.setPaletteOpen);
+  const comparing = useUi((s) => s.route === "compare");
+  const playback = engine.kind === "playback";
   return (
     <header
       data-tauri-drag-region
-      className="runbar flex h-(--runbar) shrink-0 items-center gap-16 border-b border-hairline bg-bg pr-16 pl-16"
+      className="runbar flex h-(--runbar) shrink-0 items-center gap-16 max-[1439px]:gap-8 border-b border-hairline bg-bg pr-16 pl-16"
     >
-      <div data-tauri-drag-region className="flex items-center gap-8 pr-8">
+      <div data-tauri-drag-region className="flex shrink-0 items-center gap-8 pr-8">
         <LogoMark className="size-[20px] text-accent" />
         <span
           data-tauri-drag-region
-          className="text-13 font-bold tracking-[-0.01em] max-[1279px]:hidden"
+          className="whitespace-nowrap text-13 font-bold tracking-[-0.01em] max-[1439px]:hidden"
         >
           EUC Studio
         </span>
@@ -169,55 +195,71 @@ export function RunBar() {
 
       <span className="h-[24px] w-px bg-hairline" />
 
-      <SegmentedControl<FirmwareId>
-        aria-label="Firmware"
-        value={engine.firmware}
-        onValueChange={(v) => engine.setFirmware(v)}
-        options={engine.firmwares().map((f) => ({
-          value: f.id,
-          label: f.label,
-          tooltip: f.detail,
-          ...(f.disabledReason ? { disabledReason: f.disabledReason } : {}),
-        }))}
-      />
+      {comparing ? (
+        <CompareNote />
+      ) : (
+        <>
+          {!playback && (
+            <>
+              <SegmentedControl<FirmwareId>
+                aria-label="Firmware"
+                value={engine.firmware}
+                onValueChange={(v) => engine.setFirmware(v)}
+                options={engine.firmwares().map((f) => ({
+                  value: f.id,
+                  label: f.label,
+                  tooltip: f.detail,
+                  ...(f.disabledReason ? { disabledReason: f.disabledReason } : {}),
+                }))}
+              />
 
-      <Select<string>
-        aria-label="Scenario"
-        value={engine.scenarioId}
-        onValueChange={(v) => engine.setScenario(v)}
-        options={engine.scenarios().map((s) => ({ value: s.id, label: s.label, detail: s.detail }))}
-        className="w-[236px] max-[1279px]:w-[196px]"
-        contentClassName="w-[300px]"
-      />
+              <Select<string>
+                aria-label="Scenario"
+                value={engine.status.runMode === "free_ride" ? "" : engine.scenarioId}
+                display={engine.status.runMode === "free_ride" ? "Free ride" : undefined}
+                onValueChange={(v) => engine.setScenario(v)}
+                options={engine
+                  .scenarios()
+                  .map((s) => ({ value: s.id, label: s.label, detail: s.detail }))}
+                className="w-[236px] max-[1439px]:w-[196px]"
+                contentClassName="w-[300px]"
+              />
+              <ScenarioImport />
+            </>
+          )}
 
-      <span className="h-[24px] w-px bg-hairline" />
+          <span className="h-[24px] w-px bg-hairline" />
 
-      <div className="flex items-center gap-8">
-        <IconButton
-          label="Restart from t = 0"
-          shortcut="r"
-          icon={<RotateCcw />}
-          onClick={() => engine.restart()}
-        />
-        <PlayButton />
-        <StepButton />
-      </div>
+          <div className="flex items-center gap-8">
+            <IconButton
+              label="Restart from t = 0"
+              shortcut="r"
+              icon={<RotateCcw />}
+              onClick={() => engine.restart()}
+            />
+            <PlayButton />
+            <StepButton />
+          </div>
 
-      <div className="flex items-center gap-24 pl-8">
-        <RtfReadout />
-        <SimClock />
-      </div>
+          <div className="flex shrink-0 items-center gap-24 pl-8 max-[1439px]:gap-16">
+            <RtfReadout />
+            <SimClock />
+          </div>
+
+          <ReplayBar />
+        </>
+      )}
 
       <div data-tauri-drag-region className="h-full flex-1" />
 
       <button
         type="button"
         onClick={() => setPaletteOpen(true)}
-        className="pressable flex h-(--control-md) items-center gap-8 rounded-8 border border-hairline bg-card pr-4 pl-8 text-13 text-fg-2 live:hover:bg-raised live:hover:text-fg-2-safe max-[1279px]:pr-4"
+        className="pressable flex shrink-0 h-(--control-md) items-center gap-8 rounded-8 border border-hairline bg-card pr-4 pl-8 text-13 text-fg-2 live:hover:bg-raised live:hover:text-fg-2-safe max-[1279px]:pr-4"
         aria-label="Search commands"
       >
         <Search className="size-[16px] text-fg-3" />
-        <span className="w-[120px] text-left max-[1279px]:hidden">Search commands</span>
+        <span className="w-[120px] text-left max-[1439px]:hidden">Search commands</span>
         <Shortcut keys="mod+k" />
       </button>
     </header>

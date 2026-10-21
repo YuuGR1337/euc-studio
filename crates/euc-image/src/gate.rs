@@ -389,7 +389,7 @@ fn identify(bytes: &[u8], wheel: &WheelProfile, sha256: Sha256) -> (Outcome, Out
             let provenance = if check.is_fail() {
                 Outcome::Skip("the .euc_info block failed its check".to_owned())
             } else if info.is_sealed() {
-                Outcome::Pass("our build, sealed (signatures are checked by the flasher)".to_owned())
+                Outcome::Pass("our build, sealed (length and CRC checked; signature not verified)".to_owned())
             } else {
                 Outcome::Pass("our development build, unsealed".to_owned())
             };

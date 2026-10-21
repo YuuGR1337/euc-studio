@@ -65,6 +65,23 @@ All values are recomputed at every refresh from the firmware's own state.
 | Temperature | controller board NTC in °C, filtered | `NN.N°C`, truncated, leading zero shown (`05.2`), clamped to `99.9`, `00.0` below 0 °C | OBSERVED (simulator, owner photo) |
 | Odometer | **total** (life) distance, not the trip, in 0.1 km (0.1 mi in miles mode), truncated | `NNNNN.N`, leading zeros shown, clamped to `99999.9` | OBSERVED (simulator, owner photo) |
 
+### Distance during a simulation
+
+The firmware counts Hall transitions. BLE reports whole distance units, approximately one metre each.
+The display shows only complete tenths of a kilometre. It changes once per 100 firmware distance units.
+The metric display can therefore stay unchanged throughout a short ride even while BLE distance increases.
+
+The stock-firmware integration test `stock_odometer_counts_distance_and_updates_the_display` checks this path through the native host.
+In its 50-second ride, physical distance reaches 220.1 m and BLE odometer reaches 222 m.
+The decoded TM1640 display changes from `00000.0` to `00000.1` near 103 m of physical travel.
+It shows `00000.2` at the end. Small differences between these distances reflect Hall calibration and sampling.
+The test uses the cached stock image, not a replacement display counter.
+
+A scenario restart builds a fresh simulated board and loads its settings preset.
+It does not carry odometer changes from the previous run into the next run.
+The `neutral` preset starts at zero. The owner's preset starts at its captured lifetime distance.
+This reset keeps scenario runs repeatable. Persistent virtual-wheel storage remains a separate feature.
+
 ### The small digit is the pedal mode
 
 The single small digit left of the temperature is the pedal mode plus one. `display_refresh` writes
@@ -101,7 +118,7 @@ simulator at 98 V: on 0.6 s, off 0.4 s. OBSERVED.
 
 | State | What the display shows | Tag |
 |---|---|---|
-| Power-on | dark until the first refresh; the 496 Hz tick starts late in `main` (after IMU, BMS and current-sensor init), so the first frame appears about 1.9 s after power-on in the simulator. No animation. | OBSERVED (simulator timing) |
+| Power-on | Dark until the first refresh. The 496 Hz tick starts late in `main`, after IMU, BMS, and current-sensor initialization. Earlier measurements gave a first display frame near 1.9 s. They used the previous RTC model. | OBSERVED (previous RTC model) |
 | Idle, standing | `000`, battery bars, pedal digit, board temperature, total odometer | OBSERVED |
 | Riding | the same layout; the speed digits follow the firmware's speed estimate at 5 Hz (it can differ from the true speed by a few tenths, so the last digit can flicker between two values at a steady speed); battery bars follow the sagging voltage | OBSERVED (simulator ride, owner photo); bar sag INFERRED |
 | Miles mode (`m`; `g` back to km) | speed in mph and odometer in miles (both x 0.62); there is no unit indicator on the display. The change shows at the next refresh. | odometer OBSERVED, mph INFERRED (same code path as km/h) |

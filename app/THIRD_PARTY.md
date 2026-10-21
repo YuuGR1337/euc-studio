@@ -26,6 +26,7 @@ Checked on 2026-10-16:
 | -------------------------- | ------- | ----------------------------- |
 | react, react-dom           | 19.3.1  | MIT                           |
 | @tauri-apps/api            | 2.12.4  | Apache-2.0 OR MIT             |
+| @tauri-apps/plugin-dialog  | 2.8.3   | Apache-2.0 OR MIT             |
 | motion                     | 14.3.0  | MIT                           |
 | radix-ui                   | 1.8.1   | MIT                           |
 | cmdk                       | 1.1.1   | MIT                           |
@@ -60,10 +61,12 @@ Checked on 2026-10-16:
 
 ## Rust dependencies (`src-tauri`)
 
-| Crate                    | License           |
-| ------------------------ | ----------------- |
-| tauri, tauri-build (2.x) | Apache-2.0 OR MIT |
-| serde, serde_json (1.x)  | MIT OR Apache-2.0 |
+| Crate                     | License                               |
+| ------------------------- | ------------------------------------- |
+| tauri, tauri-build (2.x)  | Apache-2.0 OR MIT                     |
+| tauri-plugin-dialog (2.x) | Apache-2.0 OR MIT (pulls in rfd, MIT) |
+| directories (6.x)         | MIT OR Apache-2.0                     |
+| serde, serde_json (1.x)   | MIT OR Apache-2.0                     |
 
 ## Assets
 

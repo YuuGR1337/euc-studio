@@ -62,6 +62,7 @@ struct euc_balance_in {
     int32_t motor_current_lpf_ma;    /* low-passed q-axis current, mA */
     int16_t motor_voltage_q;         /* FOC Vq, 31500 = 100 % modulation */
     uint32_t motor_voltage_sq;       /* clean: |Vd, Vq|^2 after the circle limit (31500^2 = 100 %) */
+    int16_t motor_voltage_d;         /* clean: Vd after the circle limit; positive while the motor drives */
     bool pwm_alarm_active;           /* alarm task: PWM above the 'W' 'P' threshold */
     bool hard_inhibit;               /* hard fault or lock: no automatic recovery */
     bool hall_fault;                 /* hall sensor fault: no automatic recovery */
@@ -99,6 +100,7 @@ struct euc_balance_state {
     bool battery_limit; /* clean: battery or board temperature outside its window: speed limit, capped
                            tiltback */
     float tiltback_pwm_deg;
+    float headroom_vd_q; /* clean: the driving part of Vd, low-passed over 0.3 s (31500 = 100 %) */
     float pedal_trim_deg;
     float restart_offset_deg;
     float handle_offset_deg;
