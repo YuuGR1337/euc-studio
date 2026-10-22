@@ -223,7 +223,9 @@ DEFAULT 1000 N·m/rad, 60 N·m·s/rad, 180 N·m), so they give under a bump and 
   the end of a turn, topples the rider sideways off the pedals.
 - **Lifting a foot** (`articulated_contact_v1`). `Physics::set_foot_lift(foot, rad)` bends one leg (that much more hip flexion,
   twice that at the knee, the foot kept level) at 3 rad/s; 0.3 rad lifts the foot about 2 cm. One
-  foot at a time; the other leg then carries the whole lean task.
+  foot at a time; the other leg then carries the whole lean task. Its sole sticks to its pedal
+  meanwhile (under 1 mm of slip in a quarter-second lift), but setting the foot down again unloads
+  the other foot: it hops for up to about 1 s and lands 2-5 cm back on its deck.
 - **Foot state.** `Physics::feet()` reports each foot: contact, the pedal's normal load and friction,
   and how far the sole has moved on its deck since the model was built (slip) and above it (lift).
 - **Leaving.** A step-off, a let-go and (contact feet) a lost footing release the pedal welds or
