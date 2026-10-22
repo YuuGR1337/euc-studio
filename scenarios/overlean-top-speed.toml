@@ -22,6 +22,14 @@ settings = "tarik-2026-10-15"
 # With the rear suspension, a rider who leans at most 15° (the default) ends at the edge: the speed
 # and PWM tiltbacks hold the stock wheel near 71 km/h, and the outcome changes with the emulator's
 # timing. This rider leans up to 18°, as a rider who pushes harder at speed, and reaches the cutout.
+# Pinned to the rigid baseline (model = "rigid_ankle_v1"): the cutout this run shows, and its
+# numbers in docs/models/scenarios.md, come from that rider. Known limitation of the default
+# articulated rider: with the same lean its drive torque is smoother and keeps the PWM out of saturation;
+# on stock its PWM alarm comes at 26.4 s, its PWM stays below 100 %, the speed and PWM tiltbacks
+# hold the wheel near 75 km/h, and it does not cut out (2026-10-22, all three quanta).
+[rider]
+model = "rigid_ankle_v1"
+
 [rider.control]
 tiltback_feel_deg = 90.0      # never eases off, whatever the tiltback
 lean_max_deg = 18.0           # leans harder than the default 15°

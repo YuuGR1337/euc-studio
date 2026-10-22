@@ -358,6 +358,7 @@ impl Session {
                 Leaving::SteppedOff => None,
                 Leaving::LetGoAfterCut => Some("rider off: lets go of the pedals (drive cut, the wheel tips)"),
                 Leaving::LetGoFalling => Some("rider off: lets go of the pedals (the wheel falls)"),
+                Leaving::LostFooting => Some("rider off: both feet off the pedals (the wheel stays up)"),
             };
             if let Some(text) = text {
                 self.events.push(Event { t_s, kind: EventKind::Fault, text: text.to_owned() });

@@ -1,7 +1,10 @@
 # Human model and free ride: design and implementation plan
 
 Status: implementation audit, 2026-10-16, completion worktree.
-The rigid baseline remains the default.
+Update 2026-10-22: `articulated_sagittal_v1` is now the default rider for scenarios and the Ride workspace.
+Independent foot contact (the first H4 step) is the opt-in model `articulated_contact_v1`; `articulated_sagittal_v1` keeps welded feet. Free Ride starts on `articulated_sagittal_v1` too. The rigid baseline stays selectable.
+See [articulated acceptance](articulated-acceptance.md#default-rider-and-foot-contact-2026-10-22).
+The text below is the 2026-10-16 audit.
 The first physical `articulated_sagittal_v1` slice is implemented in `euc-physics`.
 Actual cached stock FreeRide acceptance now passes for both models after the articulated task-torque mapping correction.
 The articulated model remains experimental. Mechanical braking, mild grades, a small bump, and momentum-preserving release now pass focused tests. Native generated-terrain steering passes for both rider models over 14 driven seconds. These bounded checks do not establish measured rider behavior.

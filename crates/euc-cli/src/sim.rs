@@ -74,8 +74,8 @@ pub(crate) struct Args {
     /// Most instructions per quantum.
     #[arg(long, default_value_t = 4000)]
     max_quantum: u32,
-    /// With --scenario: ride with this rider model instead of the scenario's (`rigid_ankle_v1` or
-    /// `articulated_sagittal_v1`).
+    /// With --scenario: ride with this rider model instead of the scenario's (`rigid_ankle_v1`,
+    /// `articulated_sagittal_v1` or `articulated_contact_v1`).
     #[arg(long, value_name = "MODEL", requires = "scenario", value_parser = rider_model)]
     rider_model: Option<euc_physics::RiderModel>,
     /// CPU backend: `own` (our Cortex-M3 core, in every build) or `unicorn` (development builds
@@ -256,7 +256,10 @@ pub(crate) fn rider_model(text: &str) -> Result<euc_physics::RiderModel, String>
     match text {
         "rigid_ankle_v1" => Ok(euc_physics::RiderModel::RigidAnkleV1),
         "articulated_sagittal_v1" => Ok(euc_physics::RiderModel::ArticulatedSagittalV1),
-        other => Err(format!("unknown rider model {other}: rigid_ankle_v1 or articulated_sagittal_v1")),
+        "articulated_contact_v1" => Ok(euc_physics::RiderModel::ArticulatedContactV1),
+        other => Err(format!(
+            "unknown rider model {other}: rigid_ankle_v1, articulated_sagittal_v1 or articulated_contact_v1"
+        )),
     }
 }
 
@@ -294,6 +297,7 @@ fn ride(
                 .or(scenario.settings.as_deref())
                 .filter(|preset| *preset != BLANK)
                 .map(str::to_owned);
+            header.context = Some(recording::RecordingContext::scenario(&session).to_json());
             Some(Recorder::create(path, &header).with_context(|| format!("cannot write {}", ui::path(path)))?)
         }
         None => None,

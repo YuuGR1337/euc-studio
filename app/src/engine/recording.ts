@@ -26,11 +26,14 @@ export interface RecordingModelAids {
   steer_kp: number;
   steer_kd: number;
   steer_max_nm: number;
+  /** Roll aid on the articulated upper body; present only for `articulated_contact_v1`. */
+  upper_body_roll_stiffness?: number;
+  upper_body_roll_damping?: number;
 }
 
 interface RecordingContextBase {
   schema: 1;
-  rider_model: "rigid_ankle_v1" | "articulated_sagittal_v1";
+  rider_model: "rigid_ankle_v1" | "articulated_sagittal_v1" | "articulated_contact_v1";
   model_aids: RecordingModelAids;
 }
 

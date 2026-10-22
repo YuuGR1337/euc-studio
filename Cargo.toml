@@ -4,11 +4,13 @@ members = ["crates/*"]
 # so a plain `cargo build` or `cargo test` does not compile it.
 default-members = [
     "crates/euc-armv7m",
+    "crates/euc-ble",
     "crates/euc-ble-radio",
     "crates/euc-cli",
     "crates/euc-core",
     "crates/euc-devices",
     "crates/euc-flash-sim",
+    "crates/euc-flasher",
     "crates/euc-fwsource",
     "crates/euc-image",
     "crates/euc-physics",
@@ -17,6 +19,7 @@ default-members = [
     "crates/euc-proto-begode",
     "crates/euc-sim",
     "crates/euc-stm32f1",
+    "crates/euc-ymodem",
 ]
 # The Tauri app has its own workspace until the engine crates it embeds settle. The Python bindings
 # have their own too: PyO3 builds against a Python, which the engine's CI does not need (python/ builds them).
@@ -33,10 +36,15 @@ publish = false
 
 [workspace.dependencies]
 euc-armv7m = { path = "crates/euc-armv7m" }
+# The OTA path's BLE side. Its CoreBluetooth central (feature `central`) stays off in every default build.
+euc-ble = { path = "crates/euc-ble", default-features = false }
 # Members that need the CoreBluetooth radio enable its `radio` feature (euc-cli does).
 euc-ble-radio = { path = "crates/euc-ble-radio", default-features = false }
 euc-core = { path = "crates/euc-core" }
 euc-devices = { path = "crates/euc-devices" }
+euc-flash-sim = { path = "crates/euc-flash-sim" }
+# The gated OTA flasher. Its BleTransport (feature `ble`) stays off in every default build.
+euc-flasher = { path = "crates/euc-flasher", default-features = false }
 euc-fwsource = { path = "crates/euc-fwsource" }
 euc-image = { path = "crates/euc-image" }
 euc-physics = { path = "crates/euc-physics" }
@@ -47,6 +55,7 @@ euc-sim = { path = "crates/euc-sim" }
 euc-stm32f1 = { path = "crates/euc-stm32f1" }
 euc-telemetry = { path = "crates/euc-telemetry" }
 euc-unicorn = { path = "crates/euc-unicorn" }
+euc-ymodem = { path = "crates/euc-ymodem" }
 
 anstream = "1.0"
 anstyle = "1.0"

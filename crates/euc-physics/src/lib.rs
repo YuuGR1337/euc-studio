@@ -6,10 +6,13 @@
 //! - **wheel out**: the rotor's angle and speed relative to the stator, for the electrical plant;
 //! - **IMU out**: specific force and angular rate at the IMU site, in the sensor frame.
 //!
-//! The default rider is one rigid body hinged at the ankles ([`RiderController`] sets the ankle torque
-//! from a target speed). A roll spring on the shell stands in for the lateral balance a rigid
-//! rider cannot do ([`Assist`]). Steering retains a capped external yaw aid on the shell, without
-//! an internal rider reaction. `docs/models/body.md` describes the model and every parameter.
+//! The default rider is articulated: an upper body on two legs with hip, knee and ankle hinges
+//! ([`RiderModel::ArticulatedSagittalV1`]); the rigid rider, one body hinged at the ankles, stays
+//! selectable as the controlled baseline. [`RiderController`] turns a target speed into the lean
+//! the ankles (and, for the articulated rider, the hips and knees) hold. A roll spring on the
+//! shell stands in for the lateral balance neither rider can do ([`Assist`]). Steering retains a
+//! capped external yaw aid on the shell, without an internal rider reaction.
+//! `docs/models/body.md` describes the model and every parameter.
 //!
 //! Frames: world and shell are x forward, y left, z up; positive wheel angle rolls forward;
 //! the IMU site is the shell frame moved up to the sensor.
@@ -37,14 +40,16 @@ use mjcf::names;
 /// Physics step, seconds.
 pub const TIMESTEP_S: f64 = 0.0005;
 
-/// Existing rigid ankle model, including its external roll and yaw aids; not articulated.
-pub const RIDER_MODEL: &str = "rigid_ankle_v1";
+/// The default rider model's id ([`RiderModel::default`]).
+pub const RIDER_MODEL: &str = "articulated_sagittal_v1";
 
 /// Pitch or roll beyond which the wheel counts as fallen, radians (45°).
 const FALLEN_RAD: f64 = std::f64::consts::FRAC_PI_4;
 
-/// The push of the foot that steps off: a roll torque on the shell, N·m, for [`STEP_OFF_KICK_S`].
-/// Without it a riderless wheel in this symmetric model would roll on upright for ever.
+/// The push of the foot that steps off: its roll moment on the shell, N·m, for [`STEP_OFF_KICK_S`]
+/// (the rigid rider: an external torque; the articulated rider: the right foot pressing its
+/// pedal, an internal force pair). Without it a riderless wheel in this symmetric model would roll
+/// on upright for ever.
 const STEP_OFF_KICK_NM: f64 = 30.0;
 
 /// How long the stepping foot pushes, seconds.
@@ -52,6 +57,19 @@ const STEP_OFF_KICK_S: f64 = 0.2;
 
 /// Time the model settles on its stand before the clock starts, seconds.
 const SETTLE_S: f64 = 0.2;
+
+/// Contact margin of a released sole-on-pedal pair, metres: far below any penetration, so the
+/// pair never makes a contact again.
+const RELEASED_MARGIN_M: f64 = -1.0e3;
+
+/// Normal load above which a sole counts as standing on its pedal, newtons.
+const FOOT_CONTACT_N: f64 = 1.0;
+
+/// Largest requested foot lift, radians of hip flexion (about 15 cm at the default leg length).
+const FOOT_LIFT_MAX_RAD: f64 = 0.6;
+
+/// How fast a leg lifts or lowers its foot, radians of hip flexion per second: a step, not a kick.
+const FOOT_LIFT_RATE_RAD_S: f64 = 3.0;
 
 /// How the rider left the pedals.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -62,7 +80,15 @@ pub enum Leaving {
     LetGoAfterCut,
     /// Let go as the wheel fell ([`LetGo::fall_deg`]).
     LetGoFalling,
+    /// Both articulated feet were off their pedals for [`LOST_FOOTING_S`]: the rider fell or
+    /// jumped off while the wheel stayed up.
+    LostFooting,
 }
+
+/// Time both contact feet must be off their pedals before the rider counts as off, seconds:
+/// longer than the airtime of the shipped impacts (a 2 cm pothole at 12 km/h unloads both soles
+/// for about 0.06 s).
+pub const LOST_FOOTING_S: f64 = 0.5;
 
 /// The model could not be built.
 #[derive(Debug, Error)]
@@ -143,7 +169,7 @@ pub struct RiderState {
     pub rider_position_m: [f64; 3],
     /// Horizontal length of the shell's physical path, metres, always nonnegative.
     pub path_length_m: f64,
-    /// The rider remains welded to the feet.
+    /// The rider is still on the pedals (has not stepped off or let go).
     pub attached: bool,
     /// The stand holds the shell.
     pub held: bool,
@@ -199,11 +225,20 @@ struct LegJoint {
 #[derive(Debug, Clone, Copy)]
 struct ArticulatedIds {
     joints: [LegJoint; 6],
+    /// The pedal welds (`articulated_sagittal_v1`), left then right.
+    welds: Option<[usize; 2]>,
+    /// The sole-on-pedal contact pairs (`articulated_contact_v1`), left then right.
+    pairs: Option<[usize; 2]>,
+    /// The sole geoms, left then right.
+    soles: [usize; 2],
+    /// The pedal geoms on the shell, left then right.
     pedals: [usize; 2],
+    /// The foot bodies, left then right.
+    feet: [usize; 2],
 }
 
 impl ArticulatedIds {
-    fn resolve(model: &MjModel) -> Result<Self, PhysicsError> {
+    fn resolve(model: &MjModel, contact: bool) -> Result<Self, PhysicsError> {
         let id = |kind, name: &str| {
             model.name_to_id(kind, name).ok_or_else(|| PhysicsError::Model(format!("no {name} in the model")))
         };
@@ -216,11 +251,64 @@ impl ArticulatedIds {
                 motor: id(MjtObj::mjOBJ_ACTUATOR, &format!("{name}_motor"))?,
             };
         }
+        let sides = |kind, name: &dyn Fn(&str) -> String| -> Result<[usize; 2], PhysicsError> {
+            Ok([id(kind, &name("left"))?, id(kind, &name("right"))?])
+        };
+        let (welds, pairs) = if contact {
+            (None, Some(sides(MjtObj::mjOBJ_PAIR, &|side| format!("{side}{}", mjcf::SOLE_PAIR_SUFFIX))?))
+        } else {
+            (Some(sides(MjtObj::mjOBJ_EQUALITY, &|side| format!("on_{side}_pedal"))?), None)
+        };
         Ok(Self {
             joints,
-            pedals: [id(MjtObj::mjOBJ_EQUALITY, "on_left_pedal")?, id(MjtObj::mjOBJ_EQUALITY, "on_right_pedal")?],
+            welds,
+            pairs,
+            soles: sides(MjtObj::mjOBJ_GEOM, &|side| format!("{side}_sole"))?,
+            pedals: sides(MjtObj::mjOBJ_GEOM, &|side| format!("pedal_{side}"))?,
+            feet: sides(MjtObj::mjOBJ_BODY, &|side| format!("{side}_foot"))?,
         })
     }
+}
+
+/// One of the rider's feet.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Foot {
+    /// The left foot, on the left pedal.
+    Left,
+    /// The right foot, on the right pedal.
+    Right,
+}
+
+impl Foot {
+    const fn index(self) -> usize {
+        match self {
+            Self::Left => 0,
+            Self::Right => 1,
+        }
+    }
+}
+
+/// One articulated foot on its pedal, as of the last step.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FootState {
+    /// `left` or `right`.
+    pub name: &'static str,
+    /// The sole stands on its pedal: an active contact pushing with more than 1 N, or, for
+    /// welded feet, an attached rider.
+    pub in_contact: bool,
+    /// How hard the pedal pushes on the sole along the deck's normal, newtons (NaN for welded
+    /// feet: the weld's force is not a contact load).
+    pub normal_n: f64,
+    /// Friction of the pedal on the sole, along the deck, newtons (NaN for welded feet).
+    pub friction_n: f64,
+    /// How far the sole's centre has moved along the deck from where it stood when the model was
+    /// built (slip, or a foot put down elsewhere), metres.
+    pub slip_m: f64,
+    /// That move along the deck, metres: forward, then to the left.
+    pub offset_m: [f64; 2],
+    /// Height of the sole's centre above where it stood when the model was built, normal to the
+    /// deck, metres (positive: lifted).
+    pub lift_m: f64,
 }
 
 /// Indices into the compiled model.
@@ -242,7 +330,8 @@ struct Ids {
     accel: usize,
     gyro: usize,
     stand: usize,
-    on_pedals: usize,
+    /// The rigid rider's weld to the feet (the articulated feet have their own welds or pairs).
+    on_pedals: Option<usize>,
     articulated: Option<ArticulatedIds>,
 }
 
@@ -274,6 +363,16 @@ pub struct Physics {
     total_mass: f64,
     body_ids: Vec<(usize, BodyRole, &'static str)>,
     crouch_rad: f64,
+    /// Requested lift of each articulated foot, radians of hip flexion (left, right).
+    foot_lift_target_rad: [f64; 2],
+    /// The lift the legs are moving to now: the request at [`FOOT_LIFT_RATE_RAD_S`].
+    foot_lift_rad: [f64; 2],
+    /// Since when both contact feet have been off their pedals, seconds.
+    feet_off_since: Option<f64>,
+    /// At least one sole carried load in the last complete step (always true without contact feet).
+    soles_loaded: bool,
+    /// Where each articulated sole's centre stood in the shell frame when the model was built.
+    foot_home: [[f64; 3]; 2],
     distance_m: f64,
     path_length_m: f64,
     motor_torque: f64,
@@ -314,7 +413,7 @@ impl Physics {
             id(MjtObj::mjOBJ_BODY, names::WHEEL)?,
             id(MjtObj::mjOBJ_BODY, names::RIDER)?,
         );
-        let articulated = setup.rider.model == RiderModel::ArticulatedSagittalV1;
+        let articulated = setup.rider.model.is_articulated();
         let (root, axle, lean) = (
             id(MjtObj::mjOBJ_JOINT, names::ROOT)?,
             id(MjtObj::mjOBJ_JOINT, names::AXLE)?,
@@ -330,7 +429,8 @@ impl Physics {
             }
             None => None,
         };
-        let articulated_ids = articulated.then(|| ArticulatedIds::resolve(&model)).transpose()?;
+        let articulated_ids =
+            articulated.then(|| ArticulatedIds::resolve(&model, setup.rider.model.has_contact_feet())).transpose()?;
         let mut body_ids = vec![(wheel, BodyRole::Wheel, names::WHEEL), (shell, BodyRole::Shell, names::SHELL)];
         if articulated {
             for name in HUMAN_BODIES {
@@ -355,7 +455,7 @@ impl Physics {
             accel: sensor(names::IMU_ACCEL)?,
             gyro: sensor(names::IMU_GYRO)?,
             stand: id(MjtObj::mjOBJ_EQUALITY, names::STAND)?,
-            on_pedals: id(MjtObj::mjOBJ_EQUALITY, if articulated { "on_left_pedal" } else { names::ON_PEDALS })?,
+            on_pedals: if articulated { None } else { Some(id(MjtObj::mjOBJ_EQUALITY, names::ON_PEDALS)?) },
             articulated: articulated_ids,
         };
         let total_mass = model.body_mass().iter().sum();
@@ -369,6 +469,11 @@ impl Physics {
             total_mass,
             body_ids,
             crouch_rad: 0.0,
+            foot_lift_target_rad: [0.0; 2],
+            foot_lift_rad: [0.0; 2],
+            feet_off_since: None,
+            soles_loaded: true,
+            foot_home: [[0.0; 3]; 2],
             distance_m: 0.0,
             path_length_m: 0.0,
             motor_torque: 0.0,
@@ -384,22 +489,38 @@ impl Physics {
             letting_go: None,
             drive_cut: false,
         };
-        // The stand and the tire are soft constraints: let them take the load before time starts,
-        // so the first IMU sample already reads a wheel at rest.
+        physics.settle();
+        Ok(physics)
+    }
+
+    /// The stand and the tire are soft constraints: let them take the load before time starts,
+    /// so the first IMU sample already reads a wheel at rest.
+    fn settle(&mut self) {
         for _ in 0..(SETTLE_S / TIMESTEP_S).round() as usize {
-            physics.step(0.0);
+            self.step(0.0);
         }
-        physics.data.set_time(0.0);
-        physics.distance_m = 0.0;
-        physics.path_length_m = 0.0;
-        physics.ankle_saturation_s = 0.0;
-        physics.yaw_aid_work_j = 0.0;
-        physics.roll_aid_work_j = 0.0;
+        self.data.set_time(0.0);
+        self.distance_m = 0.0;
+        self.path_length_m = 0.0;
+        self.ankle_saturation_s = 0.0;
+        self.yaw_aid_work_j = 0.0;
+        self.roll_aid_work_j = 0.0;
         // Settling is not part of the public simulation clock or delay history. Keep the
         // settled controller state, but discard observations and requests from that interval.
-        physics.rider.reset_delays();
-        physics.data.forward();
-        Ok(physics)
+        self.rider.reset_delays();
+        self.data.forward();
+        if let Some(legs) = self.ids.articulated {
+            self.foot_home = legs.soles.map(|sole| self.in_shell(self.data.geom_xpos()[sole]));
+        }
+    }
+
+    /// A world point in the shell's frame (x forward, y left, z up along the shell), metres from
+    /// the shell's origin, as of the last kinematics.
+    fn in_shell(&self, point: [f64; 3]) -> [f64; 3] {
+        let origin = self.data.xpos()[self.ids.shell];
+        let r = self.data.xmat()[self.ids.shell];
+        let d = [point[0] - origin[0], point[1] - origin[1], point[2] - origin[2]];
+        std::array::from_fn(|j| r[j] * d[0] + r[3 + j] * d[1] + r[6 + j] * d[2])
     }
 
     /// The parameters the model was built from.
@@ -475,6 +596,40 @@ impl Physics {
         (up[0] * heading[0] + up[1] * heading[1]).atan2(up[2])
     }
 
+    /// The articulated upper body's roll about the heading (radians, right side down positive,
+    /// as the shell's) and its rate about the heading (rad/s).
+    fn rider_roll(&self, heading: [f64; 2]) -> (f64, f64) {
+        let offset = self.ids.rider_qpos + 3;
+        let positions = self.data.qpos();
+        let [w, x, y, z] = [positions[offset], positions[offset + 1], positions[offset + 2], positions[offset + 3]];
+        // The rotation matrix: its left (y) column gives the roll, and it turns the free joint's
+        // body-frame angular velocity into the world.
+        let rotation = [
+            [1.0 - 2.0 * (y * y + z * z), 2.0 * (x * y - w * z), 2.0 * (x * z + w * y)],
+            [2.0 * (x * y + w * z), 1.0 - 2.0 * (x * x + z * z), 2.0 * (y * z - w * x)],
+            [2.0 * (x * z - w * y), 2.0 * (y * z + w * x), 1.0 - 2.0 * (x * x + y * y)],
+        ];
+        let roll = rotation[2][1].clamp(-1.0, 1.0).asin();
+        let rates = &self.data.qvel()[self.ids.rider_dof + 3..self.ids.rider_dof + 6];
+        let omega: [f64; 3] =
+            std::array::from_fn(|i| rotation[i][0] * rates[0] + rotation[i][1] * rates[1] + rotation[i][2] * rates[2]);
+        (roll, omega[0] * heading[0] + omega[1] * heading[1])
+    }
+
+    /// The roll aid on the articulated upper body with contact feet (zero otherwise), N·m about
+    /// the heading, toward the wheel's roll target `target`; adds its torque and work to the
+    /// reported roll aid.
+    fn rider_roll_aid(&mut self, heading: [f64; 2], target: f64, assist: Assist) -> f64 {
+        if self.ids.articulated.is_none_or(|legs| legs.pairs.is_none()) || self.rider_off() {
+            return 0.0;
+        }
+        let (roll, rate) = self.rider_roll(heading);
+        let torque = -(assist.roll_stiffness * (roll - target) + assist.roll_damping * rate);
+        self.roll_aid_work_j += torque * rate * TIMESTEP_S;
+        self.roll_aid_torque += torque;
+        torque
+    }
+
     /// Physical rider and controller state without advancing simulation time.
     pub fn rider_state(&self) -> RiderState {
         let att = self.attitude();
@@ -543,14 +698,21 @@ impl Physics {
 
     fn leave(&mut self, how: Leaving) {
         if self.left.is_none() {
-            self.data.eq_active_mut()[self.ids.on_pedals] = false;
+            if let Some(weld) = self.ids.on_pedals {
+                self.data.eq_active_mut()[weld] = false;
+            }
             if let Some(legs) = self.ids.articulated {
-                for pedal in legs.pedals {
-                    self.data.eq_active_mut()[pedal] = false;
+                for weld in legs.welds.into_iter().flatten() {
+                    self.data.eq_active_mut()[weld] = false;
+                }
+                if let Some(pairs) = legs.pairs {
+                    self.release_soles(pairs);
                 }
                 for joint in legs.joints {
                     self.data.ctrl_mut()[joint.motor] = 0.0;
                 }
+                self.foot_lift_rad = [0.0; 2];
+                self.foot_lift_target_rad = [0.0; 2];
             }
             self.left = Some((self.time_s(), how));
             self.clear_rider_input();
@@ -560,15 +722,45 @@ impl Physics {
         }
     }
 
+    /// The rider has left: the soles stop meeting the pedals, so the feet pass the decks as the
+    /// welded feet do once released. MuJoCo generates a pair's contacts only within its margin
+    /// (its `gap` does not apply to explicit pairs in 3.9); the same model with both pairs'
+    /// margins far below any penetration goes in. Sizes and state are unchanged, so the swap
+    /// keeps every coordinate and velocity.
+    fn release_soles(&mut self, pairs: [usize; 2]) {
+        let mut released = Box::new(MjModel::clone(self.data.model()));
+        for pair in pairs {
+            released.pair_margin_mut()[pair] = RELEASED_MARGIN_M;
+        }
+        self.data.swap_model(released);
+    }
+
     /// A rider lets go of a wheel that goes down: once the drive is cut and the shell tips past
     /// `after_cut_deg`, or past `fall_deg` in any case, after the reaction time. Letting go keeps
     /// the rider's own momentum (no push, unlike a step-off).
     fn watch_for_letting_go(&mut self, att: &Attitude) {
         let rule = self.setup.rider.let_go;
-        if !rule.enabled || self.left.is_some() || self.held() {
+        if !rule.enabled || self.left.is_some() {
+            self.feet_off_since = None;
             return;
         }
         let now = self.time_s();
+        // Contact feet that have both left their pedals for a while: the rider is off, on the
+        // stand or not (judged on the last complete step's contact loads).
+        if self.ids.articulated.is_some_and(|legs| legs.pairs.is_some()) {
+            if self.soles_loaded {
+                self.feet_off_since = None;
+            } else {
+                let since = *self.feet_off_since.get_or_insert(now);
+                if now - since >= LOST_FOOTING_S {
+                    self.leave(Leaving::LostFooting);
+                    return;
+                }
+            }
+        }
+        if self.held() {
+            return;
+        }
         match self.letting_go {
             Some((at, how)) if now >= at => self.leave(how),
             Some(_) => {}
@@ -637,32 +829,48 @@ impl Physics {
         self.motor_torque = motor_torque_nm;
 
         let assist = if rider_off { Assist { roll_stiffness: 0.0, roll_damping: 0.0 } } else { self.setup.assist };
-        let kick = match self.left {
-            Some((at, Leaving::SteppedOff)) if ids.articulated.is_none() && self.time_s() - at < STEP_OFF_KICK_S => {
-                STEP_OFF_KICK_NM
-            }
-            _ => 0.0,
-        };
+        let pushing_off = matches!(self.left, Some((at, Leaving::SteppedOff)) if self.time_s() - at < STEP_OFF_KICK_S);
+        // The rigid rider's stepping foot is an external roll torque on the shell; the articulated
+        // rider's right foot presses its own pedal (an internal force pair, below).
+        let kick = if pushing_off && ids.articulated.is_none() { STEP_OFF_KICK_NM } else { 0.0 };
         self.roll_aid_torque = -(assist.roll_stiffness * (att.roll - steer.roll) + assist.roll_damping * att.roll_rate);
         self.roll_aid_work_j += self.roll_aid_torque * att.roll_aid_rate * TIMESTEP_S;
         let roll_torque = kick + self.roll_aid_torque;
         let [hx, hy] = att.heading;
         if let Some(legs) = ids.articulated {
             let config = self.setup.rider.articulation;
+            let step = FOOT_LIFT_RATE_RAD_S * TIMESTEP_S;
+            for (lift, target) in self.foot_lift_rad.iter_mut().zip(self.foot_lift_target_rad) {
+                *lift += (target - *lift).clamp(-step, step);
+            }
+            let lifted = self.foot_lift_rad.map(|lift| lift > 0.0);
             for (index, joint) in legs.joints.into_iter().enumerate() {
-                let target = match index % 3 {
-                    1 => self.crouch_rad,
-                    _ => -self.crouch_rad / 2.0,
-                };
-                let posture = config.joint_kp * (target - self.data.qpos()[joint.qpos])
-                    - config.joint_kd * self.data.qvel()[joint.dof];
+                let leg = index / 3;
                 let ankle = index % 3 == 2;
+                // A rider leans from the ankles with the body straight, as the rigid rider does:
+                // hips and knees hold the crouch, and a standing ankle has no posture spring, so
+                // the lean task alone sets the ankle angle and the legs lean with the upper body.
+                // With a spring at the ankle too, the three joints shared the lean, the legs leaned
+                // a third as far as the upper body, and the centre of mass leaned (and the wheel
+                // accelerated) about half as much as asked. A lifted foot keeps its spring.
+                let stiffness = if ankle && !lifted[leg] { 0.0 } else { config.joint_kp };
+                let target = self.posture_target(index);
+                let posture =
+                    stiffness * (target - self.data.qpos()[joint.qpos]) - config.joint_kd * self.data.qvel()[joint.dof];
                 let limit = if ankle { self.setup.rider.control.ankle_max_nm / 2.0 } else { config.joint_max_nm };
                 // Upper pitch relative to a supported foot is -(hip + knee + ankle).
                 // Its Jacobian transpose applies the same negative task moment at every hinge.
                 // Applying upper-body damping only at the ankle can inject energy into the
-                // hip/knee modes. Both legs share the task moment and keep internal reactions.
-                let command = posture - self.ankle_torque / 2.0;
+                // hip/knee modes. The legs that stand on their pedals share the task moment and
+                // keep internal reactions; a lifted leg has nothing to push against.
+                let share = if lifted[leg] {
+                    0.0
+                } else if lifted[1 - leg] {
+                    1.0
+                } else {
+                    0.5
+                };
+                let command = posture - self.ankle_torque * share;
                 self.data.ctrl_mut()[joint.motor] = if rider_off { 0.0 } else { command.clamp(-limit, limit) };
             }
             self.ankle_torque = -(self.data.ctrl()[legs.joints[2].motor] + self.data.ctrl()[legs.joints[5].motor]);
@@ -678,13 +886,47 @@ impl Physics {
             self.data.qfrc_applied_mut()[v] = -s.axle_force_n(travel, rate);
         }
         self.data.xfrc_applied_mut()[ids.shell] = [0.0, 0.0, 0.0, roll_torque * hx, roll_torque * hy, steer.yaw_nm];
+        if let Some(legs) = ids.articulated {
+            for foot in legs.feet {
+                self.data.xfrc_applied_mut()[foot] = [0.0; 6];
+            }
+            if pushing_off {
+                self.push_off(legs);
+            }
+        }
         let along = if rider_off { 0.0 } else { self.push_n - aero };
-        self.data.xfrc_applied_mut()[ids.rider] = [along * hx, along * hy, 0.0, 0.0, 0.0, 0.0];
+        // Contact feet do not hold the rider's body to the shell, and the sagittal legs cannot
+        // roll: the same roll aid holds the upper body at the wheel's roll target, standing in
+        // for the hip and ankle roll a person balances with. External, like the shell's aid.
+        let rider_roll = self.rider_roll_aid(att.heading, steer.roll, assist);
+        self.data.xfrc_applied_mut()[ids.rider] = [along * hx, along * hy, 0.0, rider_roll * hx, rider_roll * hy, 0.0];
         let before = self.position_m();
         self.data.step2();
         let after = self.position_m();
         self.path_length_m += (after[0] - before[0]).hypot(after[1] - before[1]);
         self.distance_m += att.speed * TIMESTEP_S;
+        // Contact loads are consistent only now: this step's contacts with this step's forces.
+        self.soles_loaded = self.feet().is_none_or(|feet| feet.iter().any(|foot| foot.in_contact));
+    }
+
+    /// The articulated rider's stepping foot pushes off: the right foot presses its pedal straight
+    /// down and the pedal pushes the foot up, an equal and opposite pair at the pedal's centre, as
+    /// strong as the rigid rider's kick about the heading. It tips the riderless wheel as a real
+    /// step-off does, without an external force or moment on wheel and rider together, and
+    /// without changing the rider's horizontal momentum.
+    fn push_off(&mut self, legs: ArticulatedIds) {
+        let point = self.data.geom_xpos()[legs.pedals[1]];
+        let lever = self.in_shell(point)[1].abs().max(0.05);
+        let down = [0.0, 0.0, -STEP_OFF_KICK_NM / lever];
+        for (body, force) in [(self.ids.shell, down), (legs.feet[1], down.map(|f| -f))] {
+            let com = self.data.xipos()[body];
+            let arm = [point[0] - com[0], point[1] - com[1], point[2] - com[2]];
+            let [tx, ty, tz] = cross(arm, force);
+            let applied = &mut self.data.xfrc_applied_mut()[body];
+            for (axis, value) in force.into_iter().chain([tx, ty, tz]).enumerate() {
+                applied[axis] += value;
+            }
+        }
     }
 
     /// Simulated seconds since the model was built.
@@ -787,6 +1029,93 @@ impl Physics {
         Ok(())
     }
 
+    /// Lifts one articulated foot off its pedal by bending that leg: `lift_rad` more hip flexion,
+    /// twice that at the knee and the ankle keeping the sole level (0.3 rad lifts it about 4 cm at
+    /// the default leg length); 0 puts it back down. One foot at a time, with contact feet and an
+    /// attached rider. Internal joint torques only: no pose or velocity writes. While a foot is up
+    /// the other leg alone carries the lean.
+    pub fn set_foot_lift(&mut self, foot: Foot, lift_rad: f64) -> Result<(), ParamError> {
+        let contact = self.ids.articulated.is_some_and(|legs| legs.pairs.is_some());
+        let other = self.foot_lift_target_rad[1 - foot.index()].max(self.foot_lift_rad[1 - foot.index()]);
+        if !contact
+            || self.rider_off()
+            || !lift_rad.is_finite()
+            || !(0.0..=FOOT_LIFT_MAX_RAD).contains(&lift_rad)
+            || (lift_rad > 0.0 && other > 0.0)
+        {
+            return Err(ParamError(format!(
+                "a foot lift needs an attached articulated rider with contact feet, 0..{FOOT_LIFT_MAX_RAD} radians, and the other foot down"
+            )));
+        }
+        self.foot_lift_target_rad[foot.index()] = lift_rad;
+        Ok(())
+    }
+
+    /// The posture target of articulated joint `index` (left hip, knee, ankle, then right),
+    /// radians: the crouch, plus the leg's foot lift. A standing ankle holds no posture (see
+    /// `step`); its target is what it would hold with the body upright and the foot level.
+    fn posture_target(&self, index: usize) -> f64 {
+        let lift = self.foot_lift_rad[index / 3];
+        match index % 3 {
+            1 => self.crouch_rad + 2.0 * lift,
+            _ => -self.crouch_rad / 2.0 - lift,
+        }
+    }
+
+    /// Each articulated foot on its pedal (left, then right); `None` for the rigid rider.
+    /// Contact loads come from the last step's constraint forces; positions from the kinematics
+    /// at its start.
+    pub fn feet(&self) -> Option<[FootState; 2]> {
+        let legs = self.ids.articulated?;
+        let attached = !self.rider_off();
+        let shell = self.data.xmat()[self.ids.shell];
+        let deck_normal = [shell[2], shell[5], shell[8]];
+        Some(std::array::from_fn(|side| {
+            let (sole, pedal) = (legs.soles[side], legs.pedals[side]);
+            let at = self.in_shell(self.data.geom_xpos()[sole]);
+            let home = self.foot_home[side];
+            let offset_m = [at[0] - home[0], at[1] - home[1]];
+            let (slip_m, lift_m) = (offset_m[0].hypot(offset_m[1]), at[2] - home[2]);
+            let name = ["left", "right"][side];
+            if legs.pairs.is_none() {
+                return FootState {
+                    name,
+                    in_contact: attached,
+                    normal_n: f64::NAN,
+                    friction_n: f64::NAN,
+                    slip_m,
+                    offset_m,
+                    lift_m,
+                };
+            }
+            // Sum the pedal's contact forces on this sole in the world.
+            let mut force = [0.0; 3];
+            for (index, contact) in self.data.contact().iter().enumerate() {
+                let pair = [contact.geom[0] as usize, contact.geom[1] as usize];
+                if contact.exclude != 0 || !(pair == [sole, pedal] || pair == [pedal, sole]) {
+                    continue;
+                }
+                let f = self.data.contact_force(index);
+                let frame = contact.frame;
+                for (axis, value) in force.iter_mut().enumerate() {
+                    *value += f[0] * frame[axis] + f[1] * frame[3 + axis] + f[2] * frame[6 + axis];
+                }
+            }
+            let normal = force[0] * deck_normal[0] + force[1] * deck_normal[1] + force[2] * deck_normal[2];
+            let along: [f64; 3] = std::array::from_fn(|axis| force[axis] - normal * deck_normal[axis]);
+            let normal_n = normal.abs();
+            FootState {
+                name,
+                in_contact: attached && normal_n > FOOT_CONTACT_N,
+                normal_n,
+                friction_n: (along[0] * along[0] + along[1] * along[1] + along[2] * along[2]).sqrt(),
+                slip_m,
+                offset_m,
+                lift_m,
+            }
+        }))
+    }
+
     /// Actual joint coordinates and bounded applied motor commands, not decorative limb angles.
     pub fn rider_joints(&self) -> Vec<RiderJointState> {
         self.ids.articulated.map_or_else(Vec::new, |legs| {
@@ -795,7 +1124,7 @@ impl Physics {
                 .enumerate()
                 .map(|(i, joint)| RiderJointState {
                     name: LEG_JOINTS[i],
-                    posture_target_rad: if i % 3 == 1 { self.crouch_rad } else { -self.crouch_rad / 2.0 },
+                    posture_target_rad: self.posture_target(i),
                     angle_rad: self.data.qpos()[joint.qpos],
                     rate_rad_s: self.data.qvel()[joint.dof],
                     torque_nm: self.data.ctrl()[joint.motor],
@@ -883,7 +1212,7 @@ mod articulated_tests {
             let joint_id = p.data.model().name_to_id(MjtObj::mjOBJ_JOINT, LEG_JOINTS[index]).unwrap();
             assert_eq!(p.data.model().jnt_axis()[joint_id], [0.0, 1.0, 0.0]);
         }
-        for equality in legs.pedals {
+        for equality in legs.welds.into_iter().flatten() {
             p.data.eq_active_mut()[equality] = false;
         }
         p.data.qpos_mut()[p.ids.rider_qpos + 2] += 3.0;
@@ -930,12 +1259,32 @@ mod articulated_tests {
     }
 
     #[test]
-    fn articulated_step_off_adds_no_external_kick() {
+    fn articulated_step_off_push_is_an_internal_force_pair() {
         let mut p = Physics::new(setup()).unwrap();
         p.step_off();
         p.step(0.0);
-        assert_eq!(p.data.xfrc_applied()[p.ids.shell], [0.0; 6]);
+        let legs = p.ids.articulated.unwrap();
+        let (shell, foot) = (p.data.xfrc_applied()[p.ids.shell], p.data.xfrc_applied()[legs.feet[1]]);
+        // Equal and opposite forces, and their moments about one point cancel: no external
+        // force or moment on wheel and rider together (the rigid rider's kick is external).
+        let moment = |body: usize, w: [f64; 6]| {
+            let com = p.data.xipos()[body];
+            let r = cross(com, [w[0], w[1], w[2]]);
+            [r[0] + w[3], r[1] + w[4], r[2] + w[5]]
+        };
+        let (a, b) = (moment(p.ids.shell, shell), moment(legs.feet[1], foot));
+        for axis in 0..3 {
+            assert!((shell[axis] + foot[axis]).abs() < 1e-9, "{shell:?} {foot:?}");
+            assert!((a[axis] + b[axis]).abs() < 1e-9, "{a:?} {b:?}");
+        }
+        // The shell feels the stepping foot's push about the heading, as the rigid kick.
+        assert!((shell[3] - STEP_OFF_KICK_NM).abs() < 1.0, "{shell:?}");
         assert!(p.rider_joints().iter().all(|joint| joint.torque_nm == 0.0));
+        for _ in 0..=((STEP_OFF_KICK_S / TIMESTEP_S) as usize) {
+            p.step(0.0);
+        }
+        assert_eq!(p.data.xfrc_applied()[p.ids.shell], [0.0; 6], "the push lasts STEP_OFF_KICK_S");
+        assert_eq!(p.data.xfrc_applied()[legs.feet[1]], [0.0; 6]);
     }
 
     #[test]

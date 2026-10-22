@@ -49,8 +49,10 @@ pub enum RunMode {
 pub enum RiderModel {
     /// The rigid ankle model.
     RigidAnkleV1,
-    /// The articulated sagittal model.
+    /// The articulated sagittal model, feet welded to the pedals.
     ArticulatedSagittalV1,
+    /// The articulated model with each sole on its own pedal through contact.
+    ArticulatedContactV1,
 }
 
 impl RiderModel {
@@ -59,6 +61,17 @@ impl RiderModel {
         match self {
             Self::RigidAnkleV1 => "rigid_ankle_v1",
             Self::ArticulatedSagittalV1 => "articulated_sagittal_v1",
+            Self::ArticulatedContactV1 => "articulated_contact_v1",
+        }
+    }
+}
+
+impl From<euc_physics::RiderModel> for RiderModel {
+    fn from(model: euc_physics::RiderModel) -> Self {
+        match model {
+            euc_physics::RiderModel::RigidAnkleV1 => Self::RigidAnkleV1,
+            euc_physics::RiderModel::ArticulatedSagittalV1 => Self::ArticulatedSagittalV1,
+            euc_physics::RiderModel::ArticulatedContactV1 => Self::ArticulatedContactV1,
         }
     }
 }
@@ -78,6 +91,35 @@ pub struct ModelAids {
     pub steer_kd: f64,
     /// External yaw torque cap, N·m.
     pub steer_max_nm: f64,
+    /// External roll stiffness on the articulated upper body, N·m/rad: contact feet do not hold
+    /// the body to the shell (`articulated_contact_v1` only; absent for the other models).
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub upper_body_roll_stiffness: f64,
+    /// External roll damping on the articulated upper body, N·m·s/rad (as above).
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub upper_body_roll_damping: f64,
+}
+
+#[allow(clippy::trivially_copy_pass_by_ref)] // serde's skip_serializing_if passes a reference.
+fn is_zero(value: &f64) -> bool {
+    *value == 0.0
+}
+
+impl ModelAids {
+    /// The aids a rider and its assist settings run with: the shell's roll spring and the yaw
+    /// aid for every model, and for contact feet the same roll spring on the upper body.
+    pub fn of(rider: &euc_physics::Rider, assist: &euc_physics::Assist) -> Self {
+        let contact = rider.model.has_contact_feet();
+        Self {
+            roll_stiffness: assist.roll_stiffness,
+            roll_damping: assist.roll_damping,
+            steer_kp: rider.control.steer_kp,
+            steer_kd: rider.control.steer_kd,
+            steer_max_nm: rider.control.steer_max_nm,
+            upper_body_roll_stiffness: if contact { assist.roll_stiffness } else { 0.0 },
+            upper_body_roll_damping: if contact { assist.roll_damping } else { 0.0 },
+        }
+    }
 }
 
 /// The header's optional `context` (schema 1). `from_json` and `validate` are the one gate: the
@@ -128,9 +170,17 @@ impl RecordingContext {
             map.validate().map_err(|e| format!("invalid recording map: {e}"))?;
         }
         let aids = self.model_aids;
-        if [aids.roll_stiffness, aids.roll_damping, aids.steer_kp, aids.steer_kd, aids.steer_max_nm]
-            .iter()
-            .any(|value| !value.is_finite() || *value < 0.0)
+        if [
+            aids.roll_stiffness,
+            aids.roll_damping,
+            aids.steer_kp,
+            aids.steer_kd,
+            aids.steer_max_nm,
+            aids.upper_body_roll_stiffness,
+            aids.upper_body_roll_damping,
+        ]
+        .iter()
+        .any(|value| !value.is_finite() || *value < 0.0)
         {
             return Err("recording model_aids must be finite and not negative".into());
         }
@@ -151,6 +201,22 @@ impl RecordingContext {
     /// The context of `header`, validated; `None` when it has none.
     pub fn of(header: &Header) -> Result<Option<Self>, String> {
         header.context.as_ref().map(Self::from_json).transpose()
+    }
+
+    /// The context of a scenario run on `session`: the rider model and the aids the session's
+    /// physics was actually built with (after any command-line override), not the scenario's text.
+    ///
+    /// # Panics
+    /// If the session's plant is static (a session always has a live one).
+    pub fn scenario(session: &Session) -> Self {
+        let setup = session.machine().plant().live_part().expect("a session has a live plant").physics().setup();
+        Self {
+            schema: CONTEXT_SCHEMA,
+            run_mode: RunMode::Scenario,
+            rider_model: setup.rider.model.into(),
+            height_map: None,
+            model_aids: ModelAids::of(&setup.rider, &setup.assist),
+        }
     }
 }
 
@@ -368,8 +434,8 @@ mod tests {
     }
 
     #[test]
-    fn context_round_trips_both_rider_models_and_fills_in_the_schema() {
-        for model in ["rigid_ankle_v1", "articulated_sagittal_v1"] {
+    fn context_round_trips_every_rider_model_and_fills_in_the_schema() {
+        for model in ["rigid_ankle_v1", "articulated_sagittal_v1", "articulated_contact_v1"] {
             let json = serde_json::json!({ "run_mode": "scenario", "rider_model": model, "model_aids": aids() });
             let context = RecordingContext::from_json(&json).unwrap();
             let mut expected = json.clone();
@@ -386,6 +452,29 @@ mod tests {
             "schema": 2, "run_mode": "scenario", "rider_model": "rigid_ankle_v1", "model_aids": aids()
         }));
         assert!(RecordingContext::of(&header).unwrap_err().contains("schema 2"));
+    }
+
+    #[test]
+    fn contact_feet_record_the_upper_body_roll_aid_and_welded_feet_do_not() {
+        let assist = euc_physics::Assist::default();
+        for (model, upper) in [
+            (euc_physics::RiderModel::RigidAnkleV1, 0.0),
+            (euc_physics::RiderModel::ArticulatedSagittalV1, 0.0),
+            (euc_physics::RiderModel::ArticulatedContactV1, assist.roll_stiffness),
+        ] {
+            let rider = euc_physics::Rider { model, ..euc_physics::Rider::default() };
+            let aids = ModelAids::of(&rider, &assist);
+            assert_eq!(aids.upper_body_roll_stiffness, upper);
+            let json = serde_json::to_value(aids).unwrap();
+            // Absent unless the model has the aid, so welded and rigid contexts stay as before.
+            assert_eq!(json.get("upper_body_roll_stiffness").is_some(), upper > 0.0, "{model:?}: {json}");
+            assert_eq!(serde_json::from_value::<ModelAids>(json).unwrap(), aids);
+        }
+        let mut bad = aids();
+        bad["upper_body_roll_damping"] = (-1.0).into();
+        let json =
+            serde_json::json!({ "run_mode": "scenario", "rider_model": "articulated_contact_v1", "model_aids": bad });
+        assert!(RecordingContext::from_json(&json).is_err());
     }
 
     #[test]

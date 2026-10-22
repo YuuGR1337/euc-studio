@@ -22,8 +22,11 @@ anstream.workspace = true
 anstyle.workspace = true
 anyhow.workspace = true
 clap.workspace = true
+directories.workspace = true
 euc-ble-radio = { workspace = true, features = ["radio"] }
 euc-fwsource.workspace = true
+# The gated flasher, simulator transport only: its BLE feature stays off here (SAFETY.md).
+euc-flasher.workspace = true
 euc-image.workspace = true
 euc-physics.workspace = true
 euc-profile.workspace = true

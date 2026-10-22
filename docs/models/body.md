@@ -64,8 +64,12 @@ world ── floor (plane, or the scenario's terrain)
        │                    origin at the axle at full extension
        ├─ carriage (slide "suspension")   stator, axle clamps, slider blocks; spring, damper, end stops
        │    └─ wheel (hinge "axle", y)    tire: a torus, as a ring of 48 capsules
-       └─ feet (hinge "lean", y)    hinged at the ankles, ankle motor "ankle"
-  └─ rider (free joint)     the rider's body, welded to the feet ("on_pedals") until it steps off
+       └─ feet (hinge "lean", y)    rigid rider only: hinged at the ankles, ankle motor "ankle"
+  └─ rider (free joint)     articulated (default): upper body
+       ├─ left_thigh (hinge "left_hip") ── left_shank ("left_knee") ── left_foot ("left_ankle")
+       └─ right_thigh ...                  each foot welded to the shell ("on_<side>_pedal"), or for
+                                           articulated_contact_v1 a sole-on-pedal pair "<side>_sole_on_pedal"
+     rigid: one body, welded to the feet ("on_pedals") until it steps off
 ```
 
 Without `[body.suspension]` the carriage is left out and the wheel hinges straight in the shell.
@@ -111,10 +115,24 @@ Without `[body.suspension]` the carriage is left out and the wheel hinges straig
   boots; the scenario releases it. Before time starts, the model settles on the stand for 0.2 s, so
   the first IMU sample already reads a wheel at rest (both the weld and the tire contact are soft).
 
-## The rider (M2: rigid)
+## The rider
 
-The rider is one rigid body: mass, centre of mass height above the pedals and a radius of gyration,
-hinged at the ankles. The ankles are a motor driven by the rider controller:
+Two rider models share one controller (below). A scenario names its model in `[rider] model`.
+
+- **`articulated_sagittal_v1` (the default since 2026-10-22).** An upper body (trunk, head, fixed
+  arms) on two legs, each a thigh, a shank and a foot on hip, knee and ankle hinges that turn
+  forward and back only. Its feet are welded to the pedals. See
+  [the articulated rider](#the-articulated-rider-default) below.
+- **`articulated_contact_v1` (opt-in).** The same articulated rider with each sole standing on its
+  own pedal through friction contact instead of a weld. It has its own id so that a recording or a
+  result that names `articulated_sagittal_v1` keeps meaning welded feet.
+- **`rigid_ankle_v1`.** One rigid body: mass, centre of mass height above the pedals and a radius
+  of gyration, hinged at the ankles and welded to the feet. It is the controlled baseline of the
+  results before 2026-10-22; a scenario selects it with `model = "rigid_ankle_v1"`, and
+  `euc sim run --rider-model rigid_ankle_v1` overrides any scenario. Recordings name the model
+  that ran (`context.rider_model`).
+
+The rider controller sets the lean the ankles hold:
 
 1. **Target speed to lean.** `a = kp·(v_target − v) + ki·∫(v_target − v)`, limited to the rider's
    strongest acceleration and braking; `lean = atan((a + drag(v_target)/m) / g)`, limited to ±15°
@@ -145,27 +163,102 @@ hinged at the ankles. The ankles are a motor driven by the rider controller:
    scenario that turns will need a path heading.
 5. **Letting go.** A rider leaves a wheel that goes down: once the firmware has cut the drive (the
    session watches the cutoff flags) and the shell's pitch or roll passes 20°, or as soon as either
-   passes 45° (a fall, cut or not), the rider lets go of the pedals 0.1 s later. The feet weld
-   releases as in a step-off, but without the stepping foot's push, so the rider keeps their own
+   passes 45° (a fall, cut or not), the rider lets go of the pedals 0.1 s later. The feet leave the
+   pedals as in a step-off, but without the stepping foot's push, so the rider keeps their own
    momentum; ankle torque, steering and the roll aid stop. The timeline records "rider off" with
    the reason. `[rider.let_go]` sets `after_cut_deg`, `fall_deg` and `reaction_s` (DEFAULT 20°, 45°,
-   0.1 s), and `enabled = false` keeps the rider on the pedals whatever happens.
+   0.1 s), and `enabled = false` keeps the rider on the pedals whatever happens (with contact feet
+   the soles can still leave the pedals physically).
 
 Leaning works on a real wheel the same way: the firmware keeps the pedals near its set angle, so a
 rider who shifts the centre of mass forward makes it accelerate to stay under them. In a steady
 acceleration `a = g·tan(lean)` the ankles need no torque at all, which is why the controller holds a
 lean and does not push.
 
-What the rigid rider cannot do, and the M4 human rider will: bend knees and hips, absorb bumps,
-shift sideways, and balance sideways.
+### The articulated rider (default)
+
+Segment masses are fractions of the rider's mass (each foot 2 %, shank 5 %, thigh 10 %, upper body
+66 %); segment lengths scale with `height_m`; the upper body's centre of mass sits where the whole
+rider's lands at `com_above_pedals_m`. All are generic ESTIMATES, not anyone's body. The hips and
+knees hold a posture (`[rider.articulation] joint_kp`, `joint_kd`, at most `joint_max_nm` per joint;
+DEFAULT 1000 N·m/rad, 60 N·m·s/rad, 180 N·m), so they give under a bump and come back.
+
+- **Lean from the ankles.** The lean controller turns the upper body's pitch error into one task
+  moment, applied equally at the hip, knee and ankle of each standing leg (the Jacobian transpose
+  of the upper body's pitch over a supported foot), so the joints keep internal reactions and the
+  damping removes energy. A standing ankle has no posture spring: the hips and knees keep the body
+  straight and the whole body leans from the ankles, as on a real wheel and as the rigid rider
+  does. Until 2026-10-22 the ankles also held a posture spring; the three joints then shared the
+  lean, the legs leaned about a third as far as the upper body, and the wheel accelerated about half
+  as hard as the speed controller asked. Measured before and after the change:
+
+  | Measure | Ankle spring (before) | No standing ankle spring (now) | Rigid rider |
+  |---|---|---|---|
+  | `overlean-top-speed`, stock: speed at 15 s | 17.1 km/h | 33.6 km/h | 30.6 km/h |
+  | Steady 3.3 m/s, test balance law: upper-body lean, centre-of-mass lean | 1.92°, 1.28° | 0.74°, 0.93° | (one body) |
+  | Largest gap between the two leans | 0.69° | 0.19° | 0 |
+  | Mechanical braking test: stopping travel, axle work | 7.46 m, −68 J | 5.05 m, −195 J | |
+
+  The centre-of-mass lean is the angle from vertical of the line from the ankles to the rider's
+  centre of mass; the rigid rider's hinge angle is exactly that line. A regression test keeps the
+  two leans within 0.5° in steady riding.
+- **Feet on the pedals.** With `articulated_sagittal_v1` (the default) both feet are welded to
+  the pedals until the rider leaves. With `articulated_contact_v1` each sole is a box (24 × 9 × 6 cm,
+  from 9 cm behind the ankle to 15 cm ahead) that touches only its own pedal, through an explicit
+  contact pair: friction `sole_friction` (DEFAULT 1.0, rubber on grip pins), softness
+  `sole_contact_time_s` (DEFAULT 5 ms). A foot can lift, rock onto heel or toe and slip while the
+  other keeps its contact; the pedal pushes and never pulls. The soles therefore carry an ankle
+  moment only while the centre of pressure stays under them: for the default 80 kg rider about
+  70 N·m backward (heel) and 120 N·m forward (toes), both feet together, where a welded foot passes
+  the controller's whole 400 N·m. The lean controller was tuned on welded feet and does not keep
+  the centre of pressure under the soles: on contact feet the rider comes off the pedals in the hard
+  brake of `hard-braking-30kmh` (at 17.7 s), on the 20 % climb of `hill-climb-low-battery` (33.4 s)
+  and in the 30° launch of the full-effort runs, while the riderless wheel stays up. Contact feet
+  stay opt-in until the controller keeps within what the soles carry. The `rider_on_pedals`
+  check, in every scenario without a step-off, fails when this happens.
+- **The roll aid holds the upper body too** (`articulated_contact_v1` only). The legs have no roll joints and
+  contact feet do not hold the body to the shell, so the same roll spring that holds the shell also
+  holds the upper body at the wheel's roll target; it stands in for the hip and ankle roll a person
+  balances with. Its torque and work add to the reported roll aid. Without it a one-foot stance, or
+  the end of a turn, topples the rider sideways off the pedals.
+- **Lifting a foot** (`articulated_contact_v1`). `Physics::set_foot_lift(foot, rad)` bends one leg (that much more hip flexion,
+  twice that at the knee, the foot kept level) at 3 rad/s; 0.3 rad lifts the foot about 2 cm. One
+  foot at a time; the other leg then carries the whole lean task. Its sole sticks to its pedal
+  meanwhile (under 1 mm of slip in a quarter-second lift), but setting the foot down again unloads
+  the other foot: it hops for up to about 1 s and lands 2-5 cm back on its deck.
+- **Foot state.** `Physics::feet()` reports each foot: contact, the pedal's normal load and friction,
+  and how far the sole has moved on its deck since the model was built (slip) and above it (lift).
+- **Leaving.** A step-off, a let-go and (contact feet) a lost footing release the pedal welds or
+  switch the sole-pedal pairs off, so the feet pass the decks, and stop every joint motor and aid.
+  A step-off adds
+  the stepping foot's push: the right foot presses its pedal down for 0.2 s with the force that
+  gives the rigid rider's 30 N·m roll kick, and the pedal pushes the foot up as hard (an internal
+  pair, so the rider keeps its horizontal momentum). Without the push the riderless wheel rolled on
+  upright, and neither step-off scenario was cut within 3 s; with it stock cuts 2.24 s after the
+  15 km/h step-off and 1.50 s after the 5 km/h one (rigid rider: 2.75 s and 0.63 s). When both soles
+  have been off their pedals for
+  0.5 s with contact feet (longer than the 0.05 s a 2 cm pothole unloads them at 12 km/h), the rider
+  counts as off:
+  "rider off: both feet off the pedals (the wheel stays up)".
+
+What neither rider can do yet: balance sideways or twist without the external aids, step, use the
+hips to recover when the soles' centre of pressure reaches heel or toe, or brace the legs against
+the shell. The rigid rider also cannot bend its knees and hips.
 
 ## Aids (M2)
 
-- **Roll spring.** A rigid rider cannot balance sideways (a real rider steers and twists), so a
+- **Roll spring.** Neither rider can balance sideways (a real rider steers and twists), so a
   torque about the heading holds the shell upright: `τ = −k·roll − c·roll_rate`, k = 5000 N·m/rad,
   c = 500 N·m·s/rad, far stiffer than the toppling moment of wheel and rider (about 1200 N·m/rad).
-  It shows in recordings as a roll that stays at zero. Set `[assist] roll_stiffness = 0` in a scenario
-  to see the wheel fall over sideways.
+  It shows in recordings as a roll that stays at zero. Set `[assist] roll_stiffness = 0` in a
+  scenario to see the wheel fall over sideways.
+- **Upper-body roll aid** (`articulated_contact_v1` only). The same law, with the same gains, holds
+  the articulated upper body at the wheel's roll target, because contact feet do not hold the body to
+  the shell and the legs cannot roll. It is an external torque, like the shell's roll spring and the
+  yaw aid of the steering (point 4 above); its torque and work add to the reported roll aid.
+- **Recorded.** A recording's context (`model_aids`) carries every aid the run had: the shell's roll
+  stiffness and damping, the yaw aid's gains and cap, and for `articulated_contact_v1`
+  `upper_body_roll_stiffness` and `upper_body_roll_damping` (absent for the other models).
 - **Air drag** acts on the rider's centre of mass: `F = ½·ρ·CdA·v·|v|`, ρ = 1.2 kg/m³,
   CdA = 0.6 m² (sim.py's value, an upright adult).
 
@@ -205,11 +298,14 @@ Rider and aids (scenario `[rider]`, `[rider.control]`, `[assist]`; these are the
 
 | Parameter | Value | Note |
 |---|---|---|
+| `model` | `articulated_sagittal_v1` | `rigid_ankle_v1`: the controlled baseline; `articulated_contact_v1`: contact feet (opt-in) |
 | `mass_kg` | 80 kg | |
 | `com_above_pedals_m` | 1.0 m | about 55 % of a 1.78 m adult's height |
 | `ankle_above_pedals_m` | 0.08 m | the hinge |
-| `gyration_m` | 0.35 m | pitch and roll; 9.8 kg·m² about the centre of mass |
-| `height_m` | 1.78 m | drawing only |
+| `gyration_m` | 0.35 m | pitch and roll; 9.8 kg·m² about the centre of mass (rigid); the articulated upper body uses it for its own inertia |
+| `height_m` | 1.78 m | drawing; the articulated segment lengths scale with it |
+| `articulation.joint_kp`, `joint_kd`, `joint_max_nm` | 1000 N·m/rad, 60 N·m·s/rad, 180 N·m | ESTIMATE: hip and knee posture (and a lifted foot's ankle), per joint |
+| `articulation.sole_friction`, `sole_contact_time_s` | 1.0, 0.005 s | DEFAULT: rubber on grip pins; shoe and pedal give (`articulated_contact_v1`) |
 | `cda_m2` | 0.6 m² | air drag |
 | `control.lean_kp`, `lean_kd` | 6000 N·m/rad, 900 N·m·s/rad | about 1.3 Hz, damping 0.6 about the ankles |
 | `control.ankle_max_nm` | 400 N·m | both legs |
@@ -219,7 +315,7 @@ Rider and aids (scenario `[rider]`, `[rider.control]`, `[assist]`; these are the
 | `control.tiltback_feel_deg`, `tiltback_ease_kmh_per_deg`, `tiltback_ease_brake` | 2°, 1.5 km/h per degree, 1 m/s² | DEFAULT: how a rider reacts to tiltback |
 | `control.steer_kp`, `steer_kd`, `steer_max_nm` | 2000 N·m/rad, 200 N·m·s/rad, 60 N·m | DEFAULT: how a rider keeps the line |
 | `let_go.enabled`, `after_cut_deg`, `fall_deg`, `reaction_s` | true, 20°, 45°, 0.1 s | DEFAULT: when a rider leaves a wheel that goes down |
-| `assist.roll_stiffness`, `roll_damping` | 5000 N·m/rad, 500 N·m·s/rad | |
+| `assist.roll_stiffness`, `roll_damping` | 5000 N·m/rad, 500 N·m·s/rad | on the shell; for `articulated_contact_v1` also on the upper body |
 
 ## Scenarios
 
@@ -240,6 +336,7 @@ Checks (`[[expect]]`, judged after the run, from the release unless `from_s` say
 | `pitch` | \|pitch\| stays within `max_abs_deg` |
 | `speed_reached` | the ground speed reaches `kmh` |
 | `stopped_at_end` | \|speed\| at the end is within `max_abs_kmh` |
+| `rider_on_pedals` | the rider never comes off the pedals while the wheel stays up; every scenario without `step_off_s` has it by default; only `articulated_contact_v1` can fail it |
 
 `--record FILE` writes a recording the studio replays: a JSON header (wheel, firmware, scenario,
 bodies with their shapes, channel schema), the telemetry batches of `euc-telemetry`, and the events

@@ -292,15 +292,26 @@ fn bisect(mut low: f64, mut high: f64, f: impl Fn(f64) -> f64) -> f64 {
     f64::midpoint(low, high)
 }
 
-/// Physical rider topology. The existing rigid model remains the default.
+/// Physical rider topology. The articulated model is the default; the rigid model stays
+/// selectable (`model = "rigid_ankle_v1"`) as the controlled baseline for comparisons.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RiderModel {
-    #[default]
-    /// Existing rigid rider and ankle hinge.
+    /// Rigid rider on one ankle hinge: the controlled baseline of the earlier scenario results.
     RigidAnkleV1,
-    /// Experimental sagittal legs with internal joint motors and releasable pedal welds.
+    /// The default: sagittal legs (hips, knees, ankles) with internal joint motors, both feet
+    /// welded to the pedals until the rider leaves.
+    #[default]
     ArticulatedSagittalV1,
+    /// The articulated rider with each sole standing on its own pedal through friction contact:
+    /// a foot can lift, rock onto heel or toe and slip while the other keeps its contact. The
+    /// pedals push, never pull, so the soles carry an ankle moment only while the centre of
+    /// pressure stays under them (about 70 N·m back and 120 N·m forward for both feet of the
+    /// default rider); the roll aid also holds the upper body, which has no roll joints.
+    /// Opt-in: the lean controller does not keep the centre of pressure under the soles yet, so
+    /// in hard braking, the steep low-battery climb and full-effort launches the rider comes off
+    /// the pedals (docs/models/body.md).
+    ArticulatedContactV1,
 }
 
 impl RiderModel {
@@ -309,11 +320,22 @@ impl RiderModel {
         match self {
             Self::RigidAnkleV1 => "rigid_ankle_v1",
             Self::ArticulatedSagittalV1 => "articulated_sagittal_v1",
+            Self::ArticulatedContactV1 => "articulated_contact_v1",
         }
+    }
+
+    /// The rider has legs with hips, knees and ankles (either articulated model).
+    pub const fn is_articulated(self) -> bool {
+        matches!(self, Self::ArticulatedSagittalV1 | Self::ArticulatedContactV1)
+    }
+
+    /// Each sole stands on its pedal through contact instead of a weld.
+    pub const fn has_contact_feet(self) -> bool {
+        matches!(self, Self::ArticulatedContactV1)
     }
 }
 
-/// Estimated joint control for the opt-in articulated prototype, not measured human limits.
+/// Estimated joint control for the articulated model, not measured human limits.
 #[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct Articulation {
@@ -323,19 +345,26 @@ pub struct Articulation {
     pub joint_kd: f64,
     /// Hip/knee motor torque cap, N·m, per joint. Ankles retain the existing combined cap.
     pub joint_max_nm: f64,
+    /// Friction between a sole and its pedal (grip tape or pins under a shoe), sliding coefficient.
+    /// Used by [`RiderModel::ArticulatedContactV1`].
+    pub sole_friction: f64,
+    /// Contact time constant of a sole on its pedal, seconds (MuJoCo `solref`): how much shoe and
+    /// pedal give. Used by [`RiderModel::ArticulatedContactV1`].
+    pub sole_contact_time_s: f64,
 }
 
 impl Default for Articulation {
     fn default() -> Self {
-        Self { joint_kp: 1000.0, joint_kd: 60.0, joint_max_nm: 180.0 }
+        Self { joint_kp: 1000.0, joint_kd: 60.0, joint_max_nm: 180.0, sole_friction: 1.0, sole_contact_time_s: 0.005 }
     }
 }
 
-/// The rider: a rigid body standing on the pedals, hinged at the ankles.
+/// The rider standing on the pedals: articulated legs by default, or one rigid body hinged at the
+/// ankles.
 #[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct Rider {
-    /// Physical topology. Omission preserves the rigid model.
+    /// Physical topology. Omission selects the articulated model.
     pub model: RiderModel,
     /// Estimated posture parameters used only by the articulated model.
     pub articulation: Articulation,
@@ -650,10 +679,19 @@ impl Setup {
             ("joint_kp", r.articulation.joint_kp),
             ("joint_kd", r.articulation.joint_kd),
             ("joint_max_nm", r.articulation.joint_max_nm),
+            ("sole_friction", r.articulation.sole_friction),
         ] {
             if !value.is_finite() || value <= 0.0 {
                 return Err(ParamError(format!("rider.articulation.{name} must be finite and positive")));
             }
+        }
+        // MuJoCo needs at least two steps per contact time constant to stay stable.
+        let sole_time = r.articulation.sole_contact_time_s;
+        if !sole_time.is_finite() || sole_time < 2.0 * crate::TIMESTEP_S {
+            return Err(ParamError(format!(
+                "rider.articulation.sole_contact_time_s must be at least {} s",
+                2.0 * crate::TIMESTEP_S
+            )));
         }
         r.control.validate()?;
         if let Some(s) = &w.suspension {

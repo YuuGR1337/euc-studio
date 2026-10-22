@@ -35,10 +35,16 @@ torque_nm = 5.0
 iq_a = 6.0
 battery_a = 1.0      # climbs and top speed draw 30-60 A
 
+[scenario.balance-60s]
+note = "Rider model, not firmware: the default articulated rider (2026-10-22) sways for a few seconds after each push (about 0.4 Hz, pitch swinging about ±0.4°), where the rigid rider settles, so a few cycles of timing part the runs more. They differ by 0.58 km/h at 42.96 s, just after the third push (rigid rider: 0.06 km/h). Both firmwares hold the wheel alike: pitch within 0.69° and torque RMS 1.8 N·m."
+[scenario.balance-60s.channels]
+speed_kmh = 0.9       # 0.585 km/h measured at 42.96 s with the articulated rider; 0.056 with the rigid one (2026-10-22)
+
 [scenario.hard-braking-30kmh]
-note = "Regeneration lifts the pack to about 131 V when the rider brakes, and the peak differs more (0.42 V measured)."
+note = "Regeneration lifts the pack to about 131 V when the rider brakes, and the peak differs more (0.42 V measured). Rider model, not firmware: the default articulated rider (2026-10-22) stops sooner (below 1 km/h at 20.0 s, rigid 20.8 s) and then sways at rest, and the runs differ by 0.55 km/h at 21.41 s, the last second, where the rigid rider's differ by 0.26 km/h at most. Both firmwares brake alike until then (battery 0.29 V apart at most)."
 [scenario.hard-braking-30kmh.channels]
 battery_v = 1.0
+speed_kmh = 0.85      # 0.545 km/h measured at 21.41 s with the articulated rider; 0.26 with the rigid one (2026-10-22)
 
 [scenario.low-battery-tiltback]
 note = "Both firmwares start the battery tiltback on the same tick (1.73 s) with the same step and ramp it in the direction of their own speed sign; on the stand the 10 ms samples differ by one step only because compat writes it about 0.5 ms later in each tick. After the release the rider stands and rocks near zero speed and eases off 1.5 km/h per degree of tiltback beyond 2°, so each small difference in the ride flips the speed sign, and with it the ramp direction, on other ticks: the ramps drift up to 0.8° apart by 12 s and become speed, pitch and current differences."
@@ -74,16 +80,17 @@ note = "As overlean-top-speed-30pct with the PWM tiltback off: near the limit th
 until_s = 18.0
 
 [scenario.hill-climb-low-battery]
-note = "The low pack sags under climb current. Earlier builds showed battery-tiltback, pitch, and distance differences. The existing limits retain that allowance. This scenario uses the default rigid_ankle_v1 rider unless the CLI explicitly overrides it. See the current acceptance report for measured results."
+note = "The low pack sags under climb current. Earlier builds showed battery-tiltback, pitch, and distance differences. The existing limits retain that allowance. Since 2026-10-22 the scenario rides the default articulated rider. Rider model, not firmware: at the end the rider who never gives up stalls on the 20 % grade with the battery tiltback near 26°, and the articulated rider's sway there parts the runs by 0.52 km/h and 6.65° of pitch at 34.5 s (rigid rider: 0.28 km/h and 2.12°). See the current acceptance report for measured results."
 [scenario.hill-climb-low-battery.channels]
 battery_v = 1.5       # 0.81 V measured
-pitch_deg = 4.5       # 3.37° measured (2026-10-20)
-distance_m = 1.0      # 0.66 m measured (2026-10-20); 0.315 m with the rigid rider
+pitch_deg = 10.0      # 6.65° measured at 34.50 s with the articulated rider; 2.12° with the rigid one (2026-10-22)
+distance_m = 1.0      # 0.66 m measured (2026-10-20); 0.32 m with the articulated rider, 0.42 m with the rigid one (2026-10-22)
+speed_kmh = 0.8       # 0.52 km/h measured at 34.60 s with the articulated rider; 0.28 with the rigid one (2026-10-22)
 [scenario.hill-climb-low-battery.channels_rms]
 battery_a = 2.0
 
 [scenario.ride-20kmh-stop]
-note = "Earlier builds differed by up to 0.51 km/h as the wheel rocked near rest. The existing allowance remains. This scenario uses the default rigid_ankle_v1 rider unless the CLI explicitly overrides it."
+note = "Earlier builds differed by up to 0.51 km/h as the wheel rocked near rest. The existing allowance remains. Since 2026-10-22 the scenario rides the default articulated rider: 0.39 km/h measured (rigid rider: 0.29 km/h)."
 [scenario.ride-20kmh-stop.channels]
 speed_kmh = 0.8       # 0.51 km/h measured (2026-10-20)
 
@@ -98,8 +105,8 @@ until_s = 19.5
 same_checks = false
 
 [scenario.pothole-5cm-20kmh]
-note = "As pothole-20kmh with a 5 cm hole: the far edge (about 19.8 s) parts the runs within 0.1 s (pitch up to 4.9° apart at 20.03 s). Judged until the impact; both ride through on a clipped gyro, and the checks still compare."
-until_s = 19.5
+note = "As pothole-20kmh with a 5 cm hole, judged until the impact; both ride through on a clipped gyro, and the checks still compare. The impact starts at 19.46 s: the suspension compresses and the currents and the pack voltage part from there (Linux x86-64 CI, constant linkage ratio 1.7, articulated rider: battery 0.92 V apart at 19.47 s; macOS arm64 with the rocker curve: 0.60 km/h and 0.64 V at quanta 4000 and 2000). Until 19.45 s the runs stay within 0.23 km/h and 0.08 V, so the window ends there. The far edge (about 19.8 s) parts them further (pitch up to 4.9 degrees apart at 20.03 s)."
+until_s = 19.45
 
 [scenario.rider-steps-off-15kmh]
 note = "After the step-off at 15 s the riderless wheel tips over on its own, and a few cycles of timing change how it rolls (roll up to 15° apart). Judged until the step-off; the checks (cut, roll past 40°) still compare."

@@ -1,8 +1,17 @@
 //! The model on its own, balanced by a plain PD law on the motor torque instead of firmware.
+//! These cases pin the rigid rider: they are the controlled baseline (tests/articulated.rs covers
+//! the default articulated rider).
 
 use euc_physics::{
-    Intent, Leaving, Physics, Setup, Shapes, Shell, Suspension, TIMESTEP_S, Tire, Torus, Wheel, WheelBody,
+    Intent, Leaving, Physics, RiderModel, Shapes, Shell, Suspension, TIMESTEP_S, Tire, Torus, Wheel, WheelBody,
 };
+
+/// The wheel with the rigid baseline rider.
+fn rigid(wheel: WheelBody) -> euc_physics::Setup {
+    let mut setup = euc_physics::Setup::new(wheel);
+    setup.rider.model = RiderModel::RigidAnkleV1;
+    setup
+}
 
 /// The Begode Extreme's `[body]` values without its suspension (the axle fixed in the shell, the
 /// stator's mass in the shell), with the scanned tire torus.
@@ -60,7 +69,7 @@ fn run(physics: &mut Physics, seconds: f64) {
 
 #[test]
 fn stands_on_the_stand_with_the_imu_reading_one_g_up() {
-    let mut physics = Physics::new(Setup::new(extreme())).unwrap();
+    let mut physics = Physics::new(rigid(extreme())).unwrap();
     let start = physics.imu();
     assert!((start.accel_mps2[2] - 9.81).abs() < 1e-6, "{start:?}");
     run(&mut physics, 1.0);
@@ -74,7 +83,7 @@ fn stands_on_the_stand_with_the_imu_reading_one_g_up() {
 
 #[test]
 fn a_balanced_wheel_carries_the_rider_to_speed_and_back() {
-    let mut physics = Physics::new(Setup::new(extreme())).unwrap();
+    let mut physics = Physics::new(rigid(extreme())).unwrap();
     run(&mut physics, 0.5);
     physics.set_held(false);
     run(&mut physics, 5.0);
@@ -108,7 +117,7 @@ fn a_rider_who_steps_off_lands_beside_the_wheel() {
         let [_, x, y, _] = physics.poses()[2].quat;
         1.0 - 2.0 * (x * x + y * y)
     };
-    let mut physics = Physics::new(Setup::new(extreme())).unwrap();
+    let mut physics = Physics::new(rigid(extreme())).unwrap();
     run(&mut physics, 0.5);
     physics.set_held(false);
     run(&mut physics, 2.0);
@@ -127,7 +136,7 @@ fn a_rider_who_steps_off_lands_beside_the_wheel() {
 
 #[test]
 fn the_suspension_sits_at_its_sag_and_carries_the_rider() {
-    let setup = Setup::new(extreme_suspended());
+    let setup = rigid(extreme_suspended());
     let suspension = setup.wheel.suspension.clone().unwrap();
     let sag = suspension.sag_m(setup.wheel.shell.mass_kg + setup.rider.mass_kg, setup.gravity);
     assert!(sag > 0.005 && sag < 0.5 * suspension.travel_m(), "sag {sag} m");
@@ -214,7 +223,7 @@ fn rider_in_shell(physics: &Physics) -> [f64; 3] {
 
 #[test]
 fn the_rider_stays_on_the_pedals_and_never_sinks_into_the_ground() {
-    let mut physics = Physics::new(Setup::new(extreme_suspended())).unwrap();
+    let mut physics = Physics::new(rigid(extreme_suspended())).unwrap();
     run(&mut physics, 0.5);
     physics.set_held(false);
     let on_pedals = rider_in_shell(&physics);
@@ -246,7 +255,7 @@ fn the_rider_stays_on_the_pedals_and_never_sinks_into_the_ground() {
 
 #[test]
 fn the_rider_lets_go_when_the_drive_is_cut_and_the_wheel_tips() {
-    let mut physics = Physics::new(Setup::new(extreme_suspended())).unwrap();
+    let mut physics = Physics::new(rigid(extreme_suspended())).unwrap();
     run(&mut physics, 0.5);
     physics.set_held(false);
     physics.rider().set_intent(Intent::Speed(15.0 / 3.6));

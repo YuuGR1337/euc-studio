@@ -50,6 +50,7 @@ impl FreeRideSpec {
         let model = match self.rider_model.as_str() {
             "rigid_ankle_v1" => euc_physics::RiderModel::RigidAnkleV1,
             "articulated_sagittal_v1" => euc_physics::RiderModel::ArticulatedSagittalV1,
+            "articulated_contact_v1" => euc_physics::RiderModel::ArticulatedContactV1,
             _ => return Err("Select a supported rider model".into()),
         };
         Ok(euc_physics::Rider { model, ..Default::default() })
@@ -101,7 +102,7 @@ impl Default for FreeRideStatus {
             path_length_m: None,
             yaw_aid_work_j: None,
             roll_aid_work_j: None,
-            rider_model: "rigid_ankle_v1",
+            rider_model: euc_physics::RIDER_MODEL,
         }
     }
 }
@@ -163,18 +164,9 @@ impl FreeRideState {
         let context = euc_sim::recording::RecordingContext {
             schema: 1,
             run_mode: euc_sim::recording::RunMode::FreeRide,
-            rider_model: match rider.model {
-                euc_physics::RiderModel::RigidAnkleV1 => euc_sim::recording::RiderModel::RigidAnkleV1,
-                euc_physics::RiderModel::ArticulatedSagittalV1 => euc_sim::recording::RiderModel::ArticulatedSagittalV1,
-            },
+            rider_model: rider.model.into(),
             height_map: Some(map),
-            model_aids: euc_sim::recording::ModelAids {
-                roll_stiffness: assist.roll_stiffness,
-                roll_damping: assist.roll_damping,
-                steer_kp: rider.control.steer_kp,
-                steer_kd: rider.control.steer_kd,
-                steer_max_nm: rider.control.steer_max_nm,
-            },
+            model_aids: euc_sim::recording::ModelAids::of(&rider, &assist),
         };
         context.validate()?;
         serde_json::to_value(context).map(Some).map_err(|error| error.to_string())
@@ -681,10 +673,11 @@ mod tests {
     }
 
     #[test]
-    fn spec_accepts_only_the_two_supported_rider_models() {
+    fn spec_accepts_only_the_three_supported_rider_models() {
         for (id, model) in [
             ("rigid_ankle_v1", RiderModel::RigidAnkleV1),
             ("articulated_sagittal_v1", RiderModel::ArticulatedSagittalV1),
+            ("articulated_contact_v1", RiderModel::ArticulatedContactV1),
         ] {
             let spec = spec(id);
             spec.validate().unwrap();
@@ -1089,6 +1082,7 @@ mod tests {
         for (id, recorded_model, joint_count) in [
             ("rigid_ankle_v1", euc_sim::recording::RiderModel::RigidAnkleV1, 0),
             ("articulated_sagittal_v1", euc_sim::recording::RiderModel::ArticulatedSagittalV1, 6),
+            ("articulated_contact_v1", euc_sim::recording::RiderModel::ArticulatedContactV1, 6),
         ] {
             let spec = spec(id);
             let map = Arc::new(spec.map.generate(37).unwrap());
@@ -1119,6 +1113,17 @@ mod tests {
             let assist = euc_physics::Assist::default();
             assert_eq!(context.model_aids.roll_stiffness, assist.roll_stiffness);
             assert_eq!(context.model_aids.roll_damping, assist.roll_damping);
+            // Contact feet add the roll aid on the upper body; the welded models carry none.
+            let upper = if recorded_model == euc_sim::recording::RiderModel::ArticulatedContactV1 {
+                (assist.roll_stiffness, assist.roll_damping)
+            } else {
+                (0.0, 0.0)
+            };
+            assert_eq!(
+                (context.model_aids.upper_body_roll_stiffness, context.model_aids.upper_body_roll_damping),
+                upper
+            );
+            assert_eq!(value["model_aids"].get("upper_body_roll_stiffness").is_some(), upper.0 > 0.0);
             state.begin(EPOCH + 1, None, Rider::default());
             assert_eq!(RecordingContext::from_json(&value).unwrap(), context, "saved context owns its grid");
         }

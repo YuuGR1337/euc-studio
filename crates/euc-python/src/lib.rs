@@ -10,7 +10,7 @@ use euc_image::{Format, Image};
 use euc_profile::{ProfileDir, ProfileError, ProfileSource, Sha256};
 use euc_sim::config::{ROLE_CUTOFF, StockMap};
 use euc_sim::cpu::Backend;
-use euc_sim::recording::{CONTEXT_SCHEMA, FrameTap, ModelAids, RecordingContext, RiderModel, RunMode, verdict_events};
+use euc_sim::recording::{FrameTap, RecordingContext, verdict_events};
 use euc_sim::scenario::{Expect, Outcome, Ride, Scenario as EngineScenario, Stat};
 use euc_sim::{Machine, MachineConfig, Manual, Session as EngineSession, WheelFiles};
 use euc_telemetry::recording::{BleFrame, Header, OutputsAt, ReadLimits, Reader, Writer};
@@ -418,27 +418,7 @@ impl Built {
         header.cpi = Some(euc_sim::DEFAULT_CPI);
         header.scenario = Some(self.scenario.name.clone());
         header.settings = self.scenario.settings.clone().filter(|p| p != "blank");
-        let rider = self.scenario.rider;
-        let assist = self.scenario.assist;
-        header.context = Some(
-            RecordingContext {
-                schema: CONTEXT_SCHEMA,
-                run_mode: RunMode::Scenario,
-                rider_model: match rider.model {
-                    euc_physics::RiderModel::RigidAnkleV1 => RiderModel::RigidAnkleV1,
-                    euc_physics::RiderModel::ArticulatedSagittalV1 => RiderModel::ArticulatedSagittalV1,
-                },
-                height_map: None,
-                model_aids: ModelAids {
-                    roll_stiffness: assist.roll_stiffness,
-                    roll_damping: assist.roll_damping,
-                    steer_kp: rider.control.steer_kp,
-                    steer_kd: rider.control.steer_kd,
-                    steer_max_nm: rider.control.steer_max_nm,
-                },
-            }
-            .to_json(),
-        );
+        header.context = Some(RecordingContext::scenario(&self.session).to_json());
         header
     }
 }

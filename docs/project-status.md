@@ -1,19 +1,20 @@
 # Integration status
 
-Updated 2026-10-21 for the local m7-human-rider branch.
+Updated 2026-10-21 for the local m7-human-rider branch, and on 2026-10-22 for the rider default.
 The integration combines the accepted Claude and Human work from base aa129c4.
-The rigid model remains the controlled scenario baseline.
-The articulated model is available in Free Ride and explicit scenario configuration.
+Since 2026-10-22 the articulated rider is the default scenario rider; independent foot contact is opt-in.
+The rigid model remains selectable as the controlled baseline; seven scenarios pin it on purpose.
+See [the rider change](#rider-default-2026-10-22) below.
 
 ## Integrated behavior
 
 | Area | Current behavior | Remaining work |
 | --- | --- | --- |
-| Rider | Six-joint articulated rider, physical damping, lean-to-turn, command delay, and high-speed yaw damping | Independent foot contact and measured human calibration |
+| Rider | Six-joint articulated rider (the default), lean from the ankles, opt-in independent foot contact, lean-to-turn, command delay, and high-speed yaw damping | Centre-of-pressure-aware lean control (then contact feet by default), lateral balance without aids, and measured human calibration |
 | Desktop | Ride, Tune, Claude Compare, scenario import, manual controls, generated maps, native sound, lights, and buttons | Runtime gain edits and runtime quirk toggles |
 | Recordings | One .eucrec format across desktop, CLI, and Python; capture, save, open, seek, and playback | Precise audio playback and complete historical profile snapshots |
 | Recording integrity | Limits apply before decoding; duplicate indexes, inconsistent counts, and invalid sample bounds fail | Broader storage-failure injection |
-| Recording context | Actual rider model, external aids, scenario text, and generated Free Ride map | Complete parameter preset snapshots |
+| Recording context | Actual rider model, external aids, scenario text, and generated Free Ride map; CLI scenario recordings too | Complete parameter preset snapshots |
 | Python | Existing euc_studio API, typed Session, phase results, reset, recording save, and recording import | Linux and Windows package verification |
 | Engine | RTC correction, battery bounds, supply-state handling, output telemetry, image seal, and flash simulation | Complete OTA transport and recovery proof |
 | Firmware | Earlier approved clean cutoff and headroom changes remain | System-level stock/compat equivalence beyond limited comparison windows |
@@ -85,9 +86,37 @@ The [follow-up](models/soc50-high-speed-investigation.md) confirms the launch Ha
 Sixteen additional quantum studies expose timing sensitivity down to one instruction per quantum.
 Both one-instruction cases cut before 70 km/h; full-run equivalence remains open.
 
+## Rider default, 2026-10-22
+
+The articulated rider (`articulated_sagittal_v1`) is now the default for scenarios, the Ride workspace and the CLI.
+Its feet stay welded by default. The rigid rider remains selectable per scenario or with `--rider-model`.
+CLI recordings now carry the recording context with the model that actually ran.
+
+- A rider-model defect was fixed: the ankle posture spring shared the lean with the hips and knees, so the centre of mass leaned about half as far as commanded. The body now leans from the ankles.
+- Independent foot contact is the opt-in model `articulated_contact_v1`, with foot lift, per-foot loads and slip, lost-footing detection, and an external roll aid on the upper body that recordings name.
+- Every scenario without a step-off now checks `rider_on_pedals`; only contact feet can fail it.
+- Free Ride starts on `articulated_sagittal_v1` too; the rigid baseline and contact feet stay selectable.
+- Contact feet stay opt-in. The lean controller does not keep the soles' centre of pressure under the feet, so the rider comes off the pedals in hard braking, the steep low-battery climb and the full-effort launches.
+- The articulated step-off now has the stepping foot's push, as an internal force pair, so the riderless wheel tips as before.
+
+The matrix covers 20 scenarios, three firmwares, three quanta and three rider models (540 runs, no halts).
+All thirteen scenarios on the default rider keep every rigid-rider verdict.
+Seven scenarios pin the rigid rider because their checks or documented numbers describe it.
+The compat-vs-stock comparison passes on all twenty scenarios after three wider speed limits, each with a rider-model note.
+See [the comparison](models/scenarios.md#rigid-and-articulated-riders-2026-10-22) and [articulated acceptance](models/articulated-acceptance.md#default-rider-and-foot-contact-2026-10-22).
+
+## Flasher evidence (M6)
+
+The fault campaign ran 320 seeded simulated flashes with up to three injected faults each.
+None ended unrecoverable: 108 flashed, 35 restored the stock image, and 177 stopped safely.
+Of the safe stops, 138 were gate refusals, 26 left the old application running, and 13 stopped and then took a clean stock restore.
+Two further campaigns of 2,000 runs each also had no unrecoverable run.
+The verdicts rest on the emulated bootloader's assumptions; see [the flasher spec](spec/flasher.md).
+No build can flash a real wheel. Real writes need a feature no build enables and a per-wheel override.
+
 ## Open limits
 
 Suspension geometry, tire behavior, motor values, and rider parameters still include estimates.
-The rocker curve and independent pedal contact remain open.
+The rocker curve remains open. Independent pedal contact is in place as an option; its limits are in [body.md](models/body.md#the-articulated-rider-default).
 Simulation results do not authorize physical flashing.
 Bench work still requires its separate procedure and recovery evidence.

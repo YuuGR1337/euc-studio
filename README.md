@@ -86,6 +86,7 @@ python3 tools/fetch-mujoco/fetch.py                # once per clone: the pinned 
 cargo run -p euc-cli -- fetch begode-extreme       # download and verify the official Begode Extreme build
 cargo run -p euc-cli -- firmware list
 cargo run -p euc-cli -- image validate <file>      # the image gate the flasher will use
+cargo run -p euc-cli -- flash --sim --synthetic    # the gated flasher against the simulated wheel (no real flash)
 
 # run stock firmware with the project's CPU core
 cargo run --release -p euc-cli -- sim run begode-extreme --seconds 10 --inject V@2.6

@@ -174,25 +174,8 @@ pub fn build_host(id: &str, firmware: &str, progress: &mut dyn FnMut(&str)) -> R
     header.scenario = Some(scenario.name.clone());
     header.scenario_toml = toml;
     header.settings = scenario.settings.clone().filter(|p| p != "blank");
-    header.context = Some(
-        euc_sim::recording::RecordingContext {
-            schema: euc_sim::recording::CONTEXT_SCHEMA,
-            run_mode: euc_sim::recording::RunMode::Scenario,
-            rider_model: match scenario.rider.model {
-                euc_physics::RiderModel::RigidAnkleV1 => euc_sim::recording::RiderModel::RigidAnkleV1,
-                euc_physics::RiderModel::ArticulatedSagittalV1 => euc_sim::recording::RiderModel::ArticulatedSagittalV1,
-            },
-            height_map: None,
-            model_aids: euc_sim::recording::ModelAids {
-                roll_stiffness: scenario.assist.roll_stiffness,
-                roll_damping: scenario.assist.roll_damping,
-                steer_kp: scenario.rider.control.steer_kp,
-                steer_kd: scenario.rider.control.steer_kd,
-                steer_max_nm: scenario.rider.control.steer_max_nm,
-            },
-        }
-        .to_json(),
-    );
+    // The model and aids the session's physics actually runs with.
+    header.context = Some(euc_sim::recording::RecordingContext::scenario(&session).to_json());
     Ok(Built {
         wheel: wheel.id.clone(),
         header: Some(header),
@@ -621,10 +604,10 @@ roll_damping = 45.0
     }
 
     /// The poses the 3D view draws (a guard for the drawing: a changed body tree shows here
-    /// first): wheel, shell, then the rider's 12 segments from the torso (its root) down to the
-    /// feet; the wheel's centre one rolling radius above the ground, the shell's origin (the axle at
-    /// full extension) the sag below it, the torso's origin (between the hips) and the head above
-    /// it, every segment drawn from its own geoms.
+    /// first): wheel, shell, then the articulated rider's 7 bodies, the upper body ("rider", its
+    /// origin at the pelvis) and each leg's thigh, shank and foot; the wheel's centre one rolling
+    /// radius above the ground, the shell's origin (the axle at full extension) the sag below it,
+    /// the pelvis above the axle and the feet below it, every body drawn from its own geoms.
     #[test]
     #[ignore = "needs the stock image in the local firmware cache"]
     fn live_poses_stand_on_the_ground() {
@@ -633,37 +616,28 @@ roll_damping = 45.0
         let bodies = host.bodies();
         let roles: Vec<_> = bodies.iter().map(|b| b.role).collect();
         assert_eq!(roles[..2], [BodyRole::Wheel, BodyRole::Shell]);
-        assert_eq!(roles[2..], [BodyRole::Rider; 12]);
+        assert_eq!(roles[2..], [BodyRole::Rider; 7]);
         let names: Vec<&str> = bodies[2..].iter().map(|b| b.name.as_str()).collect();
         assert_eq!(
             names,
-            [
-                "torso",
-                "head",
-                "upper_arm_left",
-                "forearm_left",
-                "upper_arm_right",
-                "forearm_right",
-                "thigh_left",
-                "shank_left",
-                "foot_left",
-                "thigh_right",
-                "shank_right",
-                "foot_right"
-            ]
+            ["rider", "left_thigh", "left_shank", "left_foot", "right_thigh", "right_shank", "right_foot"]
         );
-        assert!(bodies[2..].iter().all(|b| !b.geoms.is_empty()), "every segment has a shape to draw");
+        assert!(bodies[2..].iter().all(|b| !b.geoms.is_empty()), "every body has a shape to draw");
         while host.time_s() < 1.0 {
             host.step(1.0 / 120.0);
         }
         let mut snap = Snapshot::default();
         host.snapshot(&mut snap);
-        assert_eq!(snap.bodies.len(), 14, "a pose per body");
-        let [wheel, shell, torso, head] = [0, 1, 2, 3].map(|i| snap.bodies[i].pos[2]);
-        println!("at 1 s: wheel z {wheel:.4} m, shell z {shell:.4} m, torso z {torso:.4} m, head z {head:.4} m");
+        assert_eq!(snap.bodies.len(), 9, "a pose per body");
+        let [wheel, shell, pelvis, left_foot] = [0, 1, 2, 5].map(|i| snap.bodies[i].pos[2]);
+        println!("at 1 s: wheel z {wheel:.4} m, shell z {shell:.4} m, pelvis z {pelvis:.4} m, foot z {left_foot:.4} m");
         assert!((wheel - 0.225).abs() < 0.005, "the wheel centre rides one rolling radius up: {wheel}");
         assert!((0.0..0.02).contains(&(wheel - shell)), "the shell sits the sag below the axle: {shell}");
-        assert!(torso > wheel + 0.5 && head > torso, "the rider stands above the axle: {torso}, {head}");
+        assert!(pelvis > wheel + 0.5 && left_foot < pelvis, "the rider stands above the axle: {pelvis}, {left_foot}");
+        // The foot's origin is the ankle: the deck top (12 mm above the axle at full extension in
+        // plant.toml) plus the rider's 80 mm ankle height, on the welded pedal.
+        let ankle = shell + 0.012 + 0.08;
+        assert!((left_foot - ankle).abs() < 0.005, "the left ankle stands on its pedal: {left_foot} against {ankle}");
     }
 
     /// The whole ride, as the studio steps it: the scenario's checks pass.

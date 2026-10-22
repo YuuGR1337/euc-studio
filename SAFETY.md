@@ -28,6 +28,31 @@ repository.
    firmware cuts the motor 10 ms later and wheel and rider fall, while the clean firmware answers `SERVICE:DENIED`
    and keeps balancing ([docs/findings/stock-firmware.md](docs/findings/stock-firmware.md)).
 
+## Flasher rules
+
+The OTA flasher ([docs/spec/flasher.md](docs/spec/flasher.md)) keeps these rules in the simulator and on any real link.
+
+1. **No real flash from this build.** `euc flash` flashes only the simulated wheel. The BLE transport is behind the
+   `central` feature of `euc-ble` and the `ble` feature of `euc-flasher`. No default build and no shipped binary
+   enables them.
+2. **Listen-only by default.** Even with those features, every write to a real wheel is refused unless
+   `EUC_BLE_REAL_WRITES` is `swd-backup-done:` followed by that wheel's BLE identifier. Set it only when a full SWD
+   backup of that wheel exists and its owner approved that run. The maintainer's wheel gets no real flash before its
+   SWD backup, and none without the owner's explicit go-ahead for that run.
+3. **Every gate, every time.** Image, provenance, simulator dry-run, recovery image, first flash = stock, identity,
+   wheel state (still for 5 s, no alarms, at least 118 V, board below 60 °C, a stable link), the typed confirmation,
+   and the wheel state again. A failed gate stops the flash. Today gates 2 and 3 refuse every real flash: our images
+   have no signature yet, and the 30 s emulator ride of gate 3 does not exist yet.
+4. **The guard judges every byte.** Never `+` `-` `c` `y`. `!` `@` only once armed, while the application's frames
+   prove it runs, with the required gap. YMODEM only to a bootloader that proved itself since the link came up, and
+   only as whole, valid packets.
+5. **Stock first, stock to recover.** The first flash of a wheel is its pinned stock image. A failure after the
+   bootloader request restores the stock image; the flasher never tries other image variants. After two failed
+   restores it stops and points to SWD.
+6. **Keep the log.** A real flash writes every byte, gate and step to a JSONL log.
+7. **The model is not the wheel.** The emulated bootloader is an assumption. The fault campaign proves the flasher's
+   logic against that model, not against the vendor bootloader.
+
 ## Reporting a safety problem
 
 If you find a behavior in this project's firmware, simulator or flasher that could hurt a rider, report it privately

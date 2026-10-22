@@ -84,7 +84,7 @@ describe("PlaybackEngine visual pose interpolation", () => {
     expect(playback.outputs?.display_grid).toEqual([2]);
     expect(playback.outputs?.buzzer_hz).toBe(0);
   });
-  it.each(["rigid_ankle_v1", "articulated_sagittal_v1"] as const)(
+  it.each(["rigid_ankle_v1", "articulated_sagittal_v1", "articulated_contact_v1"] as const)(
     "describes the saved %s model in free-ride playback",
     (rider_model) => {
       const source = recording();
@@ -112,9 +112,12 @@ describe("PlaybackEngine visual pose interpolation", () => {
       const entry = new PlaybackEngine(source).scenarios()[0];
       expect(entry?.label).toBe("Recorded free ride");
       expect(entry?.detail).toBe(
-        rider_model === "rigid_ankle_v1"
-          ? "Rigid baseline with recorded external aids"
-          : "Articulated (experimental) with recorded external aids",
+        {
+          rigid_ankle_v1: "Rigid baseline with recorded external aids",
+          articulated_sagittal_v1: "Articulated with recorded external aids",
+          articulated_contact_v1:
+            "Articulated, foot contact (experimental) with recorded external aids",
+        }[rider_model],
       );
     },
   );
