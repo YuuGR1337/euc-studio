@@ -589,6 +589,7 @@ name = "euc-physics"
 version = "0.1.0"
 dependencies = [
  "euc-telemetry",
+ "euc-world",
  "mujoco-rs",
  "serde",
  "thiserror",
@@ -640,6 +641,7 @@ dependencies = [
  "euc-stm32f1",
  "euc-telemetry",
  "euc-unicorn",
+ "euc-world",
  "libloading",
  "object",
  "serde",

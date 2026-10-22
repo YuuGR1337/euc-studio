@@ -228,6 +228,31 @@ describe("LiveEngine", () => {
     ]);
   });
 
+  it("takes the run's streaming world and drops one that is not a valid frame", async () => {
+    const e = new LiveEngine();
+    await vi.waitFor(() => expect(channels.messages).toBeDefined());
+    const m = channels.messages;
+    if (!m) throw new Error("no message channel");
+    const frame = {
+      spec: {
+        seed: 42,
+        revision: 2,
+        biome: "city",
+        densities: { potholes: 1.5 },
+      },
+      start_xy_m: [70, 3.05],
+      start_heading_rad: 0,
+      origin_z_m: 0.4,
+    };
+    m.onmessage({ type: "world", frame });
+    expect(e.liveWorld).toEqual(frame);
+    m.onmessage({ type: "world", frame: { ...frame, spec: { ...frame.spec, revision: 1 } } });
+    expect(e.liveWorld).toBeNull();
+    m.onmessage({ type: "world", frame });
+    m.onmessage({ type: "world", frame: null });
+    expect(e.liveWorld).toBeNull();
+  });
+
   it("sends controls to the backend", async () => {
     const e = new LiveEngine();
     await vi.waitFor(() => expect(channels.stream).toBeDefined());

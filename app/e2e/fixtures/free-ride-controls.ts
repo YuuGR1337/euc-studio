@@ -18,6 +18,7 @@ const status: FreeRideStatus = {
   path_length_m: 0,
   yaw_aid_work_j: 0,
   roll_aid_work_j: 0,
+  ground: "map",
 };
 const inputs: FreeRideInput[] = [];
 const starts: FreeRideSpec[] = [];

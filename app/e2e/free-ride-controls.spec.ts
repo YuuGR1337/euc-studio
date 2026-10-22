@@ -177,13 +177,13 @@ test("lost input replies pause instead of retaining motion", async ({ page }) =>
 test("map editing pauses and sends a new run specification", async ({ page }) => {
   await open(page);
   await arm(page);
-  await page.getByRole("tab", { name: "Map", exact: true }).click();
+  await page.getByRole("tab", { name: "World", exact: true }).click();
   await expect.poll(() => page.evaluate(() => window.freeRideFixture.status.armed)).toBe(false);
   await select(page, "Map preset", "Gentle slope");
   await page.getByRole("button", { name: "Apply map and reset", exact: true }).click();
   await expect.poll(() => page.evaluate(() => window.freeRideFixture.starts.length)).toBe(1);
   const spec = await page.evaluate(() => window.freeRideFixture.starts[0]);
-  expect(spec?.map.grade_pct).toEqual([5, 0]);
+  expect(spec?.map?.grade_pct).toEqual([5, 0]);
   expect(spec?.rider_model).toBe("rigid_ankle_v1");
   await expect.poll(() => page.evaluate(() => window.freeRideFixture.status.epoch)).toBe(2);
   await expect(page.getByRole("button", { name: "Arm and ride", exact: true })).toBeVisible();
@@ -211,7 +211,7 @@ test("pointer release outside the slider track sends neutral and keeps the ride 
 test("native map rejection retains the current epoch and reports the error", async ({ page }) => {
   await open(page);
   await page.evaluate(() => window.freeRideFixture.rejectMap(true));
-  await page.getByRole("tab", { name: "Map", exact: true }).click();
+  await page.getByRole("tab", { name: "World", exact: true }).click();
   await select(page, "Map preset", "Gentle slope");
   await page.getByRole("button", { name: "Apply map and reset", exact: true }).click();
   await expect(page.getByRole("alert")).toHaveText("Fixture native terrain rejection.");

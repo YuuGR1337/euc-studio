@@ -162,6 +162,15 @@ impl Session {
         rider.set_turn_rate(manual.map_or(0.0, |m| m.steer * MANUAL_TURN_RAD_S));
     }
 
+    /// Points the rider's heading at `rad` (left positive from the physics frame's +x), unless
+    /// under manual control. A scenario's `[world]` route steers with it.
+    pub fn set_heading_target(&mut self, rad: f64) {
+        if self.manual.is_none() {
+            // A finite angle always passes; the route computes one from finite positions.
+            let _ = self.live_mut().physics_mut().set_heading_target(rad);
+        }
+    }
+
     /// Manual control, if it is on.
     pub const fn manual(&self) -> Option<Manual> {
         self.manual

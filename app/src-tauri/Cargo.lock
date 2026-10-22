@@ -936,6 +936,7 @@ name = "euc-physics"
 version = "0.1.0"
 dependencies = [
  "euc-telemetry",
+ "euc-world",
  "mujoco-rs",
  "serde",
  "thiserror 2.0.21",
@@ -984,6 +985,7 @@ dependencies = [
  "euc-stm32f1",
  "euc-telemetry",
  "euc-unicorn",
+ "euc-world",
  "libloading 0.8.9",
  "object",
  "serde",
@@ -1016,6 +1018,7 @@ dependencies = [
  "euc-sim",
  "euc-stm32f1",
  "euc-telemetry",
+ "euc-world",
  "serde",
  "serde_json",
  "tauri",
@@ -1041,6 +1044,13 @@ dependencies = [
  "euc-core",
  "thiserror 2.0.21",
  "unicorn-engine",
+]
+
+[[package]]
+name = "euc-world"
+version = "0.1.0"
+dependencies = [
+ "serde",
 ]
 
 [[package]]

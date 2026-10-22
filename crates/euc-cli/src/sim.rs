@@ -203,7 +203,7 @@ pub(crate) fn run(ctx: &Context, command: Command) -> anyhow::Result<Verdict> {
     };
     let firmware_out = FirmwareOut { label, sha256, bytes: image.len(), quirks: fw.quirks() };
     if let Some(scenario) = scenario {
-        let live = files.live_on(scenario.rider, scenario.assist, scenario.terrain.clone())?;
+        let live = files.live_for(&scenario)?;
         let machine = Machine::new_live(&config, &euc_sim::registry(), fw.factory(cpu, timing)?, live)?;
         let session = Session::new(machine, fw.map.as_ref(), args.sample_hz);
         return ride(ctx, &args, &source, &files, &scenario, session, firmware_out, cpu, timing);

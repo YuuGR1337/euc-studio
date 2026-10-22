@@ -128,16 +128,23 @@ pub(crate) fn mjcf(setup: &Setup) -> String {
         r#"  <option timestep="{TIMESTEP_S}" gravity="0 0 {}" integrator="implicitfast" cone="pyramidal"/>"#,
         -setup.gravity
     ));
-    if let Some(map) = &setup.height_map {
+    if setup.world.is_some() {
+        x.line(crate::world::WorldGround::asset());
+    } else if let Some(map) = &setup.height_map {
         x.line(map.asset().expect("Setup validates the height map before MJCF generation"));
     } else if let Some(asset) = setup.terrain.asset() {
         x.line(asset);
     }
     x.line("  <worldbody>");
-    x.line(setup.height_map.as_ref().map_or_else(
-        || setup.terrain.ground(),
-        |map| map.ground().expect("Setup validates the height map before MJCF generation"),
-    ));
+    if setup.world.is_some() {
+        // The window and the box pool: mocap bodies the run moves between steps.
+        x.line(crate::world::WorldGround::bodies());
+    } else {
+        x.line(setup.height_map.as_ref().map_or_else(
+            || setup.terrain.ground(),
+            |map| map.ground().expect("Setup validates the height map before MJCF generation"),
+        ));
+    }
     // The shell starts where the rider's weight holds it: the axle on the tire, the suspension at
     // its sag.
     x.line(format!(r#"    <body name="{}" pos="0 0 {}">"#, names::SHELL, setup.wheel.tire.radius_m - sag_m(setup)));

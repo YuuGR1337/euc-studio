@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { engine } from "../../engine/index.ts";
 import type { CameraMode } from "../../state/ui.ts";
-import { sampleMap, type HeightMapView } from "./mapSurface.ts";
+import { type GroundView, sampleGround } from "./ground.ts";
 import { visualFrame, visualShellHeading, visualWheelPosition } from "./poses.ts";
 import { slopeAt } from "./terrain.ts";
 
@@ -49,14 +49,14 @@ export class ChaseCamera {
   framedRider: boolean | null = null;
   initialized = false;
 
-  groundHeight(x: number, z: number, map?: HeightMapView | null): number | null {
-    if (map) return sampleMap(map, x, -z)?.height_m ?? null;
+  groundHeight(x: number, z: number, map?: GroundView | null): number | null {
+    if (map) return sampleGround(map, x, -z)?.height_m ?? null;
     if (engine.kind === "playback" && !engine.terrain) return null;
     if (engine.status.runMode === "free_ride" && !engine.terrain) return null;
     return slopeAt(engine.terrain, x, this.slope).z;
   }
 
-  target(map?: HeightMapView | null): boolean {
+  target(map?: GroundView | null): boolean {
     const rider = engine.bodies.some((body) => body.role === "rider");
     if (engine.kind === "demo" || !visualWheelPosition(this.wheel)) {
       this.anchor.set(0.02, 0.34, 0);
@@ -71,7 +71,7 @@ export class ChaseCamera {
     return rider;
   }
 
-  follow(camera: THREE.Camera, dt: number, reduce: boolean, map?: HeightMapView | null): boolean {
+  follow(camera: THREE.Camera, dt: number, reduce: boolean, map?: GroundView | null): boolean {
     const rider = this.target(map);
     const frame = visualFrame();
     const reset =

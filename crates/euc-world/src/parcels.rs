@@ -98,6 +98,9 @@ pub struct Plaza {
     pub tread_m: f64,
     /// Stairs from `u` to `u`, metres.
     pub stairs_u_m: [f64; 2],
+    /// `v` of the first riser: the apron in front of the stairs keeps the platform edge at least
+    /// the ramp's width (plus 0.3 m) from the front, metres.
+    pub stairs_v_m: f64,
     /// Ramp from `u` to the parcel's far end, metres.
     pub ramp_u0_m: f64,
     /// Ramp width (toward the street from the platform edge), metres.
@@ -176,8 +179,9 @@ impl Parcel {
         match self.kind {
             ParcelKind::Plaza(z) => {
                 let (w, d) = (self.width_m, self.depth_m);
-                if pu >= z.stairs_u_m[0] + inset && pu <= z.stairs_u_m[1] - inset && pv <= d - inset {
-                    let k = if pv >= inset { ((pv - inset) / z.tread_m).floor() as i64 + 1 } else { 0 };
+                let from = z.stairs_v_m + inset;
+                if pu >= z.stairs_u_m[0] + inset && pu <= z.stairs_u_m[1] - inset && pv >= from && pv <= d - inset {
+                    let k = ((pv - from) / z.tread_m).floor() as i64 + 1;
                     return ground.max(z.base_m + k.min(z.steps) as f64 * z.riser_m);
                 }
                 if pv >= z.platform_v_m + inset && pu >= inset && pu <= w - inset && pv <= d - inset {
@@ -215,7 +219,8 @@ impl Parcel {
                 if in_rows && !(0.05..=2.45).contains(&bay) { Material::Paint } else { Material::Asphalt }
             }
             ParcelKind::Plaza(z) => {
-                let stairs = pu >= z.stairs_u_m[0] && pu <= z.stairs_u_m[1] && pv < z.platform_v_m;
+                let stairs =
+                    pu >= z.stairs_u_m[0] && pu <= z.stairs_u_m[1] && pv >= z.stairs_v_m && pv < z.platform_v_m;
                 let ramp = pu >= z.ramp_u0_m && pv >= z.platform_v_m - z.ramp_width_m && pv < z.platform_v_m;
                 if stairs || ramp { Material::Concrete } else { Material::PavingStones }
             }
@@ -244,7 +249,7 @@ impl Parcel {
             ParcelKind::Plaza(z) => {
                 let mut solids = Vec::new();
                 for k in 1..z.steps {
-                    let (v0, v1) = ((k - 1) as f64 * z.tread_m, k as f64 * z.tread_m);
+                    let (v0, v1) = (z.stairs_v_m + (k - 1) as f64 * z.tread_m, z.stairs_v_m + k as f64 * z.tread_m);
                     let top = z.base_m + k as f64 * z.riser_m;
                     solids.push(Solid::upright(
                         id(10 + k as u64),
@@ -424,9 +429,11 @@ fn plaza(ctx: &Ctx, s: &mut Stream, front: V2, u: V2, v: V2) -> Option<(ParcelKi
     let ramp_u0 = STAIRS_U0_M + stairs_width + RAMP_GAP_M;
     let origin = det::sub(front, det::scale(u, ramp_u0 + 2.0));
     let at = |pu: f64, pv: f64| det::add(origin, det::add(det::scale(u, pu), det::scale(v, pv)));
-    let base = fields::lot_height(ctx.seed, at(STAIRS_U0_M + stairs_width / 2.0, 0.0));
     for steps in first..=PLAZA_STEPS[1] {
-        let platform_v = (steps - 1) as f64 * tread;
+        // An apron in front of short stairs keeps the ramp strip inside the parcel.
+        let apron = (RAMP_WIDTH_M + 0.3 - (steps - 1) as f64 * tread).max(0.0);
+        let base = fields::lot_height(ctx.seed, at(STAIRS_U0_M + stairs_width / 2.0, apron));
+        let platform_v = apron + (steps - 1) as f64 * tread;
         let top = base + steps as f64 * riser;
         let ramp_base = fields::lot_height(ctx.seed, at(ramp_u0, platform_v - RAMP_WIDTH_M / 2.0));
         if top - ramp_base < 0.3 {
@@ -441,7 +448,7 @@ fn plaza(ctx: &Ctx, s: &mut Stream, front: V2, u: V2, v: V2) -> Option<(ParcelKi
         let mut fits = true;
         for [pu, pv] in footprint_samples(width, depth) {
             let ground = fields::lot_height(ctx.seed, at(pu, pv));
-            let on_stairs = pu >= STAIRS_U0_M && pu <= STAIRS_U0_M + stairs_width && pv < platform_v;
+            let on_stairs = pu >= STAIRS_U0_M && pu <= STAIRS_U0_M + stairs_width && pv >= apron && pv < platform_v;
             let limit = if pv >= platform_v {
                 top - riser
             } else if on_stairs {
@@ -462,6 +469,7 @@ fn plaza(ctx: &Ctx, s: &mut Stream, front: V2, u: V2, v: V2) -> Option<(ParcelKi
             riser_m: riser,
             tread_m: tread,
             stairs_u_m: [STAIRS_U0_M, STAIRS_U0_M + stairs_width],
+            stairs_v_m: apron,
             ramp_u0_m: ramp_u0,
             ramp_width_m: RAMP_WIDTH_M,
             platform_v_m: platform_v,

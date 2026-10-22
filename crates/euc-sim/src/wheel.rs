@@ -54,6 +54,9 @@ pub enum LiveError {
     /// The body physics.
     #[error(transparent)]
     Physics(#[from] PhysicsError),
+    /// The scenario's `[world]`.
+    #[error("world: {0}")]
+    World(String),
 }
 
 impl WheelFiles {
@@ -112,6 +115,29 @@ impl WheelFiles {
     pub fn live_on(&self, rider: Rider, assist: Assist, terrain: Terrain) -> Result<Live, LiveError> {
         let electrical = ElectricalPlant::new(self.electrical.clone(), self.hclk())?;
         let physics = Physics::new(Setup { rider, assist, terrain, ..Setup::new(self.body.clone()) })?;
+        Ok(Live::new(electrical, physics, self.hclk()))
+    }
+
+    /// A live plant for `scenario`: on its `[world]` when it has one, else on its `[terrain]`.
+    pub fn live_for(&self, scenario: &crate::scenario::Scenario) -> Result<Live, LiveError> {
+        match &scenario.world {
+            Some(world) => {
+                let ground = world.ground().map_err(LiveError::World)?;
+                self.live_on_world(scenario.rider, scenario.assist, ground)
+            }
+            None => self.live_on(scenario.rider, scenario.assist, scenario.terrain.clone()),
+        }
+    }
+
+    /// A live plant on a streaming world (`docs/models/world.md`).
+    pub fn live_on_world(
+        &self,
+        rider: Rider,
+        assist: Assist,
+        ground: euc_physics::WorldGround,
+    ) -> Result<Live, LiveError> {
+        let electrical = ElectricalPlant::new(self.electrical.clone(), self.hclk())?;
+        let physics = Physics::new(Setup { rider, assist, world: Some(ground), ..Setup::new(self.body.clone()) })?;
         Ok(Live::new(electrical, physics, self.hclk()))
     }
 

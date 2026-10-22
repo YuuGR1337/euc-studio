@@ -75,6 +75,9 @@ pub struct Scenario {
     /// The ground: a slope, bumps, potholes (`euc_physics::Terrain`); flat by default.
     #[serde(default)]
     pub terrain: Terrain,
+    /// A streaming world instead of `[terrain]` (`docs/models/world.md`).
+    #[serde(default)]
+    pub world: Option<WorldScenario>,
     /// When the rider steps off the pedals, seconds (the wheel goes on alone).
     #[serde(default)]
     pub step_off_s: Option<f64>,
@@ -93,6 +96,74 @@ pub struct Scenario {
     /// Faults to inject, from `[[timeline]]`.
     #[serde(skip)]
     pub faults: Vec<TimedFault>,
+}
+
+/// `[world]`: ride a generated world instead of a terrain strip.
+///
+/// ```toml
+/// [world]
+/// seed = 12345
+/// revision = 2                 # the generator's; a scenario written for another one is refused
+/// biome = "city"               # default
+/// start = { x_m = 0.0, y_m = 0.0, heading_deg = 0.0 }   # default: the world's spawn
+///
+/// [world.densities]            # optional, per euc_world::Densities
+/// potholes = 3.0
+/// ```
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorldScenario {
+    /// Seed.
+    pub seed: u64,
+    /// Generator revision the scenario was written for.
+    pub revision: u32,
+    /// Biome.
+    #[serde(default = "city")]
+    pub biome: euc_world::Biome,
+    /// Feature densities.
+    #[serde(default)]
+    pub densities: euc_world::Densities,
+    /// Where the wheel starts; the world's spawn when absent.
+    #[serde(default)]
+    pub start: Option<WorldStartToml>,
+    /// Waypoints to steer through after release, world coordinates `[x, y]`, metres. The rider
+    /// heads for the next one and moves on within 1 m of it; after the last, it holds its heading.
+    #[serde(default)]
+    pub route: Vec<[f64; 2]>,
+}
+
+/// A start pose in world coordinates.
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorldStartToml {
+    /// Ground point under the wheel, metres.
+    pub x_m: f64,
+    /// Ground point under the wheel, metres.
+    pub y_m: f64,
+    /// Heading, degrees, left positive from world +x.
+    pub heading_deg: f64,
+}
+
+const fn city() -> euc_world::Biome {
+    euc_world::Biome::City
+}
+
+impl WorldScenario {
+    /// The world's specification.
+    pub fn spec(&self) -> euc_world::WorldSpec {
+        euc_world::WorldSpec { seed: self.seed, revision: self.revision, biome: self.biome, densities: self.densities }
+    }
+
+    /// The ground for physics.
+    pub fn ground(&self) -> Result<euc_physics::WorldGround, String> {
+        match self.start {
+            None => euc_physics::WorldGround::at_spawn(self.spec()),
+            Some(s) => euc_physics::WorldGround::new(
+                self.spec(),
+                euc_physics::WorldStart { xy_m: [s.x_m, s.y_m], heading_rad: s.heading_deg.to_radians() },
+            ),
+        }
+    }
 }
 
 /// A rider lean command with a measured-speed gate, never a velocity or motor torque override.
@@ -483,6 +554,15 @@ impl Scenario {
             let fault =
                 timed_fault(table).map_err(|why| ScenarioError::Invalid(format!("timeline entry {}: {why}", i + 1)))?;
             scenario.faults.push(fault);
+        }
+        if let Some(world) = &scenario.world {
+            if !scenario.terrain.is_flat() {
+                return bad("a scenario has either [terrain] or [world], not both".into());
+            }
+            if world.route.len() > 256 || world.route.iter().flatten().any(|v| !v.is_finite()) {
+                return bad("[world] route takes at most 256 finite [x, y] waypoints".into());
+            }
+            world.ground().map_err(|why| ScenarioError::Invalid(format!("[world]: {why}")))?;
         }
         Ok(scenario)
     }
@@ -1111,6 +1191,8 @@ pub struct Ride {
     announced: Vec<(bool, bool)>,
     distance_m: f64,
     phases: PhaseRun,
+    /// The next `[world]` route waypoint.
+    waypoint: usize,
 }
 
 impl Ride {
@@ -1145,7 +1227,31 @@ impl Ride {
             announced: vec![(false, false); scenario.faults.len()],
             distance_m: 0.0,
             phases: PhaseRun::new(&scenario.phases),
+            waypoint: 0,
         })
+    }
+
+    /// Steers toward the next `[world]` route waypoint, moving on within 1 m of it.
+    fn steer(&mut self, scenario: &Scenario, session: &mut Session) {
+        let Some(world) = &scenario.world else { return };
+        if self.waypoint >= world.route.len() {
+            return;
+        }
+        let Some(physics) = session.machine().plant().live_part().map(crate::plant::Live::physics) else { return };
+        let Some(ground) = physics.world_ground() else { return };
+        let p = physics.position_m();
+        let route: Vec<[f64; 2]> = world.route[self.waypoint..].iter().map(|w| ground.to_physics(*w)).collect();
+        let mut reached = 0;
+        while route.get(reached).is_some_and(|t| (t[0] - p[0]).hypot(t[1] - p[1]) < 1.0) {
+            reached += 1;
+        }
+        for _ in 0..reached {
+            self.waypoint += 1;
+            session.note(format!("waypoint {} reached", self.waypoint));
+        }
+        if let Some(target) = route.get(reached) {
+            session.set_heading_target((target[1] - p[1]).atan2(target[0] - p[0]));
+        }
     }
 
     /// The declared duration ended, or the machine halted before completion.
@@ -1184,6 +1290,9 @@ impl Ride {
         self.last_target = target;
         let intent = phase_intent.unwrap_or(Intent::Speed(target / 3.6));
         session.set_intent(intent);
+        if t >= scenario.release_s {
+            self.steer(scenario, session);
+        }
         if scenario.step_off_s.is_some_and(|at| t >= at) {
             session.step_off();
         }
@@ -1359,6 +1468,36 @@ max_abs_deg = 10.0
 check = "speed_reached"
 kmh = 19.0
 "#;
+
+    #[test]
+    fn world_scenarios_parse_and_refuse_terrain_bad_routes_and_another_generator() {
+        let with = |table: &str| Scenario::from_toml(&format!("{RIDE}\n{table}"));
+        let spawn = with("[world]\nseed = 42\nrevision = 2\n").unwrap();
+        let world = spawn.world.as_ref().unwrap();
+        assert_eq!(world.spec(), euc_world::WorldSpec::city(42));
+        assert_eq!(world.ground().unwrap().start().xy_m, [0.0, 0.0], "the world's spawn");
+        let placed = with(
+            "[world]\nseed = 42\nrevision = 2\nstart = { x_m = 70.0, y_m = 3.05, heading_deg = 90.0 }\n\
+             route = [[70.0, 20.0]]\n",
+        )
+        .unwrap();
+        let ground = placed.world.as_ref().unwrap().ground().unwrap();
+        assert_eq!(ground.start().xy_m, [70.0, 3.05]);
+        // Heading 90°: the physics frame's +x runs along world +y.
+        let ahead = ground.to_world([1.0, 0.0]);
+        assert!((ahead[0] - 70.0).abs() < 1e-12 && (ahead[1] - 4.05).abs() < 1e-12, "{ahead:?}");
+        let long = format!("[world]\nseed = 1\nrevision = 2\nroute = [{}]\n", ["[1.0, 2.0]"; 257].join(", "));
+        for (what, table) in [
+            ("terrain as well", "[world]\nseed = 1\nrevision = 2\n[terrain]\nslope_pct = 2.0\n"),
+            ("another generator", "[world]\nseed = 1\nrevision = 1\n"),
+            ("unknown field", "[world]\nseed = 1\nrevision = 2\nsize = 3\n"),
+            ("route not finite", "[world]\nseed = 1\nrevision = 2\nroute = [[0.0, nan]]\n"),
+            ("route too long", &long),
+            ("density out of range", "[world]\nseed = 1\nrevision = 2\n[world.densities]\npotholes = 99.0\n"),
+        ] {
+            assert!(with(table).is_err(), "{what} must fail");
+        }
+    }
 
     #[test]
     fn measured_speed_phases_parse_without_changing_static_profiles() {

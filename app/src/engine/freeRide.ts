@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { validFrame, worldProblem, type WorldChoice, type WorldFrame } from "./world.ts";
 
 export type FreeRideSource = "keyboard_slider" | "gamepad";
 export type RiderModel = "articulated_sagittal_v1" | "articulated_contact_v1" | "rigid_ankle_v1";
@@ -24,11 +25,16 @@ export interface GeneratedMapSpec {
   grade_pct: [number, number];
   features: MapFeature[];
 }
+/** What a free ride rides on: a streaming world (the default) or the 32 m test pad. */
+export type GroundChoice = { world: WorldChoice } | { map: GeneratedMapSpec };
+export const isWorldChoice = (ground: GroundChoice): ground is { world: WorldChoice } =>
+  "world" in ground;
 export interface FreeRideSpec {
   wheel: "begode-extreme";
   settings: "blank";
   rider_model: RiderModel;
-  map: GeneratedMapSpec;
+  map?: GeneratedMapSpec;
+  world?: WorldChoice;
 }
 export interface HeightMap {
   revision: number;
@@ -54,6 +60,8 @@ export interface FreeRideStatus {
   path_length_m: number | null;
   yaw_aid_work_j: number | null;
   roll_aid_work_j: number | null;
+  /** The ground of this run. */
+  ground: "map" | "world" | "none";
 }
 export interface FreeRideInput {
   run_epoch: number;
@@ -118,15 +126,15 @@ function epochCheck(epoch: number) {
   if (!Number.isSafeInteger(epoch) || epoch < 0) throw new Error("Invalid run epoch.");
 }
 export const freeRideApi = {
-  async start(map: GeneratedMapSpec, riderModel: RiderModel = DEFAULT_RIDER_MODEL): Promise<void> {
-    const error = mapProblem(map);
+  async start(ground: GroundChoice, riderModel: RiderModel = DEFAULT_RIDER_MODEL): Promise<void> {
+    const error = isWorldChoice(ground) ? worldProblem(ground.world) : mapProblem(ground.map);
     if (error) throw new Error(error);
     if (!isRiderModel(riderModel)) throw new Error("Select a supported rider model.");
     const spec: FreeRideSpec = {
       wheel: "begode-extreme",
       settings: "blank",
       rider_model: riderModel,
-      map,
+      ...ground,
     };
     await invoke("free_ride_start", { spec });
   },
@@ -139,7 +147,10 @@ export const freeRideApi = {
       typeof status.armed !== "boolean" ||
       typeof status.reason !== "string" ||
       !isRiderModel(status.rider_model) ||
-      (status.source !== null && status.source !== "keyboard_slider" && status.source !== "gamepad")
+      (status.source !== null &&
+        status.source !== "keyboard_slider" &&
+        status.source !== "gamepad") ||
+      (status.ground !== "map" && status.ground !== "world" && status.ground !== "none")
     ) {
       throw new Error("Invalid free ride status.");
     }
@@ -177,6 +188,12 @@ export const freeRideApi = {
       throw new Error("Invalid native height map.");
     }
     return map;
+  },
+  async world(epoch: number): Promise<WorldFrame> {
+    epochCheck(epoch);
+    const frame = await invoke<WorldFrame>("free_ride_world", { epoch });
+    if (!validFrame(frame)) throw new Error("Invalid native world frame.");
+    return frame;
   },
   async arm(epoch: number, source: FreeRideSource): Promise<void> {
     epochCheck(epoch);

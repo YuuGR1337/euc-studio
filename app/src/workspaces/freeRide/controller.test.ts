@@ -67,6 +67,7 @@ beforeEach(async () => {
     path_length_m: 0,
     yaw_aid_work_j: 0,
     roll_aid_work_j: 0,
+    ground: "map",
   };
   const listeners = new Set<() => void>();
   let playing = true;
@@ -132,8 +133,8 @@ describe("rider model run boundary", () => {
   it("captures the draft model and waits for a newer native epoch", async () => {
     controller.setRiderModel("articulated_sagittal_v1");
     const map = flatMap(7);
-    await controller.start(map);
-    expect(freeRideApi.start).toHaveBeenCalledWith(map, "articulated_sagittal_v1");
+    await controller.start({ map });
+    expect(freeRideApi.start).toHaveBeenCalledWith({ map }, "articulated_sagittal_v1");
     controller.setRiderModel("rigid_ankle_v1");
     expect(controller.getSnapshot().riderModel).toBe("articulated_sagittal_v1");
     await vi.advanceTimersByTimeAsync(300);
@@ -146,13 +147,13 @@ describe("rider model run boundary", () => {
     await vi.advanceTimersByTimeAsync(300);
     expect(controller.getSnapshot()).toMatchObject({
       starting: false,
-      applied: map,
+      applied: { map },
       status: { epoch: native.epoch, rider_model: "articulated_sagittal_v1" },
     });
   });
   it("does not label a different native model as the requested run", async () => {
     controller.setRiderModel("articulated_sagittal_v1");
-    await controller.start(flatMap());
+    await controller.start({ map: flatMap() });
     native = { ...native, epoch: native.epoch + 1 };
     await vi.advanceTimersByTimeAsync(300);
     expect(controller.getSnapshot()).toMatchObject({
@@ -167,7 +168,7 @@ describe("rider model run boundary", () => {
   it("keeps actual status on a failed start", async () => {
     controller.setRiderModel("articulated_sagittal_v1");
     vi.mocked(freeRideApi.start).mockRejectedValueOnce(new Error("Build failed"));
-    await controller.start(flatMap());
+    await controller.start({ map: flatMap() });
     expect(controller.getSnapshot()).toMatchObject({
       starting: false,
       error: "Build failed",
@@ -176,7 +177,7 @@ describe("rider model run boundary", () => {
   });
   it("follows an external reset after the selected model has been applied", async () => {
     controller.setRiderModel("articulated_sagittal_v1");
-    await controller.start(flatMap());
+    await controller.start({ map: flatMap() });
     native = { ...native, epoch: native.epoch + 1, rider_model: "articulated_sagittal_v1" };
     await vi.advanceTimersByTimeAsync(300);
     native = { ...native, epoch: native.epoch + 1, rider_model: "rigid_ankle_v1" };
@@ -203,7 +204,7 @@ describe("rider model run boundary", () => {
         accepted = resolve;
       }),
     );
-    const start = controller.start(flatMap());
+    const start = controller.start({ map: flatMap() });
     close();
     close = () => {};
     native = { ...native, epoch: native.epoch + 1, rider_model: "articulated_sagittal_v1" };

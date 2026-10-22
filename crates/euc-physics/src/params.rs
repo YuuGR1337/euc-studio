@@ -601,6 +601,8 @@ pub struct Setup {
     pub terrain: crate::Terrain,
     /// Optional finite free ride surface. Model generation selects it before scenario terrain.
     pub height_map: Option<crate::map::HeightMap>,
+    /// Optional streaming world (`docs/models/world.md`); excludes `height_map` and non-flat terrain.
+    pub world: Option<crate::world::WorldGround>,
 }
 
 impl Setup {
@@ -614,6 +616,7 @@ impl Setup {
             gravity: 9.81,
             terrain: crate::Terrain::flat(),
             height_map: None,
+            world: None,
         }
     }
 
@@ -700,6 +703,9 @@ impl Setup {
         self.terrain.validate().map_err(ParamError)?;
         if let Some(map) = &self.height_map {
             map.validate().map_err(ParamError)?;
+        }
+        if self.world.is_some() && (self.height_map.is_some() || !self.terrain.is_flat()) {
+            return Err(ParamError("a streaming world replaces the map and the terrain; set only one ground".into()));
         }
         Ok(())
     }

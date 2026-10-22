@@ -47,6 +47,7 @@ euc-proto-begode = { path = "../../crates/euc-proto-begode" }
 euc-sim = { path = "../../crates/euc-sim" }
 euc-stm32f1 = { path = "../../crates/euc-stm32f1" }
 euc-telemetry = { path = "../../crates/euc-telemetry" }
+euc-world = { path = "../../crates/euc-world" }
 
 [profile.release]
 codegen-units = 1

@@ -1,13 +1,37 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_RIDER_MODEL, flatMap, freeRideApi, RIDER_MODELS } from "./freeRide.ts";
+import { DEFAULT_DENSITIES } from "./world.ts";
 const ipc = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: ipc.invoke }));
 beforeEach(() => {
   ipc.invoke.mockReset();
 });
+describe("world IPC", () => {
+  it("sends a world choice instead of a map", async () => {
+    const world = { seed: 7, densities: { ...DEFAULT_DENSITIES } };
+    await freeRideApi.start({ world });
+    expect(ipc.invoke).toHaveBeenCalledExactlyOnceWith("free_ride_start", {
+      spec: {
+        wheel: "begode-extreme",
+        settings: "blank",
+        rider_model: "articulated_sagittal_v1",
+        world,
+      },
+    });
+  });
+  it("refuses a seed or a density out of range before the engine sees it", async () => {
+    await expect(
+      freeRideApi.start({ world: { seed: -1, densities: { ...DEFAULT_DENSITIES } } }),
+    ).rejects.toThrow(/Seed/);
+    await expect(
+      freeRideApi.start({ world: { seed: 1, densities: { ...DEFAULT_DENSITIES, potholes: 99 } } }),
+    ).rejects.toThrow(/potholes/);
+    expect(ipc.invoke).not.toHaveBeenCalled();
+  });
+});
 describe("rider model IPC", () => {
   it.each(RIDER_MODELS)("sends $value only with a new run", async ({ value }) => {
-    await freeRideApi.start(flatMap(), value);
+    await freeRideApi.start({ map: flatMap() }, value);
     expect(ipc.invoke).toHaveBeenCalledExactlyOnceWith("free_ride_start", {
       spec: { wheel: "begode-extreme", settings: "blank", rider_model: value, map: flatMap() },
     });
@@ -15,7 +39,7 @@ describe("rider model IPC", () => {
   it("starts the articulated rider unless another model is chosen", async () => {
     expect(DEFAULT_RIDER_MODEL).toBe("articulated_sagittal_v1");
     expect(RIDER_MODELS[0].value).toBe(DEFAULT_RIDER_MODEL);
-    await freeRideApi.start(flatMap());
+    await freeRideApi.start({ map: flatMap() });
     expect(ipc.invoke).toHaveBeenCalledExactlyOnceWith("free_ride_start", {
       spec: {
         wheel: "begode-extreme",
@@ -47,6 +71,7 @@ describe("rider model IPC", () => {
       path_length_m: null,
       yaw_aid_work_j: null,
       roll_aid_work_j: null,
+      ground: "none",
     });
     if (rider_model === "unknown" || rider_model === undefined)
       await expect(freeRideApi.status()).rejects.toThrow("Invalid free ride status");

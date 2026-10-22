@@ -23,6 +23,7 @@ euc-profile.workspace = true
 euc-proto-begode.workspace = true
 euc-stm32f1.workspace = true
 euc-telemetry.workspace = true
+euc-world.workspace = true
 euc-unicorn = { workspace = true, optional = true }
 libloading.workspace = true
 object.workspace = true

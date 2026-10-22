@@ -39,7 +39,7 @@ pub const MAX_CONTEXT_BYTES: usize = euc_physics::map::MAX_MAP_METADATA_BYTES;
 pub enum RunMode {
     /// A scripted scenario.
     Scenario,
-    /// A manual run on a finite generated map.
+    /// A manual run on a generated map or a streaming world.
     FreeRide,
 }
 
@@ -134,12 +134,85 @@ pub struct RecordingContext {
     pub run_mode: RunMode,
     /// The physical rider model.
     pub rider_model: RiderModel,
-    /// Finite ground, required for a free ride. Absent for a scenario's own ground. The saved
-    /// grid is the ground of a free ride's playback; it is never regenerated from a seed.
+    /// Finite ground of a free ride on the 32 m map. Absent for a scenario's own ground. The saved
+    /// grid is the ground of that free ride's playback; it is never regenerated from a seed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub height_map: Option<euc_physics::HeightMap>,
+    /// The streaming world of a free ride or a `[world]` scenario: its specification and start,
+    /// never its meshes. Playback regenerates it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub world: Option<WorldRecord>,
     /// External aid strengths.
     pub model_aids: ModelAids,
+}
+
+/// A streaming world as a recording names it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorldRecord {
+    /// Seed, generator revision, biome and densities.
+    pub spec: euc_world::WorldSpec,
+    /// Ground point under the wheel at the start, world coordinates, metres.
+    pub start_xy_m: [f64; 2],
+    /// Heading at the start, radians, left positive from world +x.
+    pub start_heading_rad: f64,
+    /// Digest of the 3 × 3 chunks around the start ([`euc_world::Chunk::digest`] folded): playback
+    /// checks that this build regenerates the same world.
+    pub digest: u64,
+}
+
+impl WorldRecord {
+    /// The record of `ground`.
+    pub fn of(ground: &euc_physics::WorldGround) -> Self {
+        let start = ground.start();
+        Self {
+            spec: *ground.spec(),
+            start_xy_m: start.xy_m,
+            start_heading_rad: start.heading_rad,
+            digest: start_digest(ground.world(), start.xy_m),
+        }
+    }
+
+    /// Checks the record against this build's generator; `Err` says why playback cannot rebuild it.
+    pub fn check(&self) -> Result<(), String> {
+        if self.spec.revision != euc_world::GENERATOR_REVISION {
+            return Err(format!(
+                "this run used world generator revision {}; this build has revision {}",
+                self.spec.revision,
+                euc_world::GENERATOR_REVISION
+            ));
+        }
+        self.spec.validate()?;
+        if !self.start_xy_m.iter().all(|v| v.is_finite()) || !self.start_heading_rad.is_finite() {
+            return Err("world start must be finite".into());
+        }
+        let world = euc_world::World::new(self.spec)?;
+        if start_digest(&world, self.start_xy_m) != self.digest {
+            return Err("this build generates a different world for the recorded seed".into());
+        }
+        Ok(())
+    }
+
+    /// The ground for physics.
+    pub fn ground(&self) -> Result<euc_physics::WorldGround, String> {
+        euc_physics::WorldGround::new(
+            self.spec,
+            euc_physics::WorldStart { xy_m: self.start_xy_m, heading_rad: self.start_heading_rad },
+        )
+    }
+}
+
+/// The folded digest of the 3 × 3 chunks around `xy`.
+fn start_digest(world: &euc_world::World, xy: [f64; 2]) -> u64 {
+    let centre = euc_world::ChunkKey::of(xy);
+    let mut folded = 0xcbf2_9ce4_8422_2325u64;
+    for cy in centre.cy - 1..=centre.cy + 1 {
+        for cx in centre.cx - 1..=centre.cx + 1 {
+            folded =
+                (folded ^ world.chunk(euc_world::ChunkKey { cx, cy }).digest()).wrapping_mul(0x0000_0100_0000_01b3);
+        }
+    }
+    folded
 }
 
 const fn context_schema() -> u32 {
@@ -163,11 +236,17 @@ impl RecordingContext {
         if self.schema != CONTEXT_SCHEMA {
             return Err(format!("unsupported recording context schema {}", self.schema));
         }
-        if self.run_mode == RunMode::FreeRide && self.height_map.is_none() {
-            return Err("a free ride recording context needs a height_map".into());
+        if self.run_mode == RunMode::FreeRide && self.height_map.is_none() && self.world.is_none() {
+            return Err("a free ride recording context needs a height_map or a world".into());
+        }
+        if self.height_map.is_some() && self.world.is_some() {
+            return Err("a recording context has a height_map or a world, not both".into());
         }
         if let Some(map) = &self.height_map {
             map.validate().map_err(|e| format!("invalid recording map: {e}"))?;
+        }
+        if let Some(world) = &self.world {
+            world.check().map_err(|e| format!("recording world: {e}"))?;
         }
         let aids = self.model_aids;
         if [
@@ -215,6 +294,7 @@ impl RecordingContext {
             run_mode: RunMode::Scenario,
             rider_model: setup.rider.model.into(),
             height_map: None,
+            world: setup.world.as_ref().map(WorldRecord::of),
             model_aids: ModelAids::of(&setup.rider, &setup.assist),
         }
     }
@@ -528,6 +608,33 @@ mod tests {
         for (what, json) in bad {
             assert!(RecordingContext::from_json(&json).is_err(), "{what} must fail");
         }
+    }
+
+    #[test]
+    fn a_world_context_round_trips_and_refuses_another_generator_or_world() {
+        let ground = euc_physics::WorldGround::at_spawn(euc_world::WorldSpec::city(42)).unwrap();
+        let record = WorldRecord::of(&ground);
+        let valid = serde_json::json!({
+            "schema": 1, "run_mode": "free_ride", "rider_model": "rigid_ankle_v1",
+            "world": serde_json::to_value(&record).unwrap(), "model_aids": aids(),
+        });
+        let context = RecordingContext::from_json(&valid).unwrap();
+        assert_eq!(context.world.as_ref(), Some(&record));
+        assert_eq!(context.to_json(), valid, "no meshes, no grids, nothing else");
+        assert_eq!(context.world.unwrap().ground().unwrap().start(), ground.start());
+
+        let mut v = valid.clone();
+        v["world"]["spec"]["revision"] = 1.into();
+        assert!(RecordingContext::from_json(&v).unwrap_err().contains("revision 1"));
+        let mut v = valid.clone();
+        v["world"]["digest"] = (record.digest ^ 1).into();
+        assert!(RecordingContext::from_json(&v).unwrap_err().contains("different world"));
+        let mut v = valid.clone();
+        v["height_map"] = flat_map();
+        assert!(RecordingContext::from_json(&v).is_err(), "a map and a world");
+        let mut v = valid;
+        v["world"]["spec"]["densities"]["potholes"] = 99.0.into();
+        assert!(RecordingContext::from_json(&v).is_err(), "densities out of range");
     }
 
     #[test]

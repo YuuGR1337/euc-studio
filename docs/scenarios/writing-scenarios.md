@@ -59,6 +59,7 @@ Record the timing settings with each result. See [CPU timing](../models/cpu-timi
 | `[rider]`, `[rider.control]` | no | The rider, below. |
 | `[assist]` | no | The roll aid, below. |
 | `[terrain]` | no | The ground, below; flat without it. |
+| `[world]` | no | A generated city instead of `[terrain]`, below. |
 | `[[timeline]]` | no | Faults, below. |
 | `[[inject]]` | no | BLE commands, below. |
 | `[[expect]]` | no | Checks, below. |
@@ -268,6 +269,27 @@ or height between 0 and 1 m. Features add to the slope. The path runs along worl
 3 m wide strip sampled every 2 cm (flat ground is an infinite plane). The wheel starts at x = 0, so a
 feature at `at_m` is reached after that distance: at 20 km/h about 5.6 m per second, after the
 speed-up.
+
+### The ground: `[world]`
+
+A scenario can ride the generated city of [models/world.md](../models/world.md) instead of a
+terrain strip: streets, curbs, crosswalks, potholes, stairs, ramps and their surfaces. A scenario
+has either a non-flat `[terrain]` or `[world]`, never both.
+
+| Field | Default | Meaning |
+|---|---|---|
+| `seed` | required | The world's seed. The same seed always builds the same world. |
+| `revision` | required | The generator revision the scenario was written for: `2`. Another revision is refused, because the world would not be the one the scenario describes. |
+| `biome` | `"city"` | The only biome. |
+| `start` | the spawn | `{ x_m, y_m, heading_deg }`: the ground point under the wheel and its heading, world coordinates (heading 0 is world +x, left positive). |
+| `route` | none | Waypoints `[[x, y], ...]` in world metres, at most 256. After release the rider steers for the next one and moves on within 1 m of it; after the last it holds its heading. |
+| `[world.densities]` | the defaults | How often things occur (`potholes`, `manholes`, `cracks`, `rough_patches`, `wet_patches`, `speed_bumps`, `crosswalks`, `driveways`, `plazas`, `props`); see models/world.md. |
+
+`euc-world-preview --seed <n> --print` (models/world.md, "Preview") draws a world and lists its
+plazas, which helps to pick a start and a route. The acceptance runs in `scenarios/world/` are
+examples: a curb up straight on and at 30°, a curb down, a pothole, stairs down and a ramp up.
+`sim compare` and the studio run them like any scenario; the studio draws the world around the
+wheel.
 
 ### Faults: `[[timeline]]`
 

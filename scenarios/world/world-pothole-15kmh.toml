@@ -1,0 +1,63 @@
+# World acceptance (W1b, docs/models/world.md): ride through a generated pothole. Seed 42, generator
+# revision 2: a 7.2 cm deep, 1.2 m wide pothole holding water at (88.0, 3.05) on the spawn arterial,
+# met along the street at 15 km/h. Unlike the scenario strip's square-edged hole, its outline is
+# irregular and its walls are 4 cm wide; the height field carries it (no box).
+#
+# PRELIMINARY: no measured ride through a pothole backs this run. `record` checks always pass;
+# `upright` and `no_cutoff` are the safety verdict.
+schema = 1
+name = "world-pothole-15kmh"
+description = "Hit a 7 cm deep, 1.2 m wide pothole at 15 km/h on the city world (seed 42)."
+wheel = "begode-extreme"
+seconds = 16.0
+release_s = 2.5
+speed_kmh = [[0, 0], [5, 0], [9, 15], [12.5, 15], [15, 0]]
+settings = "tarik-2026-10-15"
+
+[world]
+seed = 42
+revision = 2
+start = { x_m = 70.0, y_m = 3.05, heading_deg = 0.0 }
+
+[[expect]]
+check = "record"
+signal = "distance_m"
+stat = "first_above"
+threshold = 17.5
+
+[[expect]]
+check = "record"
+signal = "pitch_deg"
+stat = "min"
+from_s = 9.5
+by_s = 13.0
+
+[[expect]]
+check = "record"
+signal = "speed_kmh"
+stat = "min"
+from_s = 10.0
+by_s = 12.5
+
+[[expect]]
+check = "record"
+signal = "iq_a"
+stat = "max"
+from_s = 9.5
+by_s = 13.0
+
+[[expect]]
+check = "record"
+signal = "suspension_mm"
+stat = "max"
+from_s = 9.5
+
+[[expect]]
+check = "upright"
+
+[[expect]]
+check = "speed_reached"
+kmh = 14.0
+
+[[expect]]
+check = "no_cutoff"

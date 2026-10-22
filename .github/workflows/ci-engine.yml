@@ -81,6 +81,26 @@ jobs:
         if: runner.os != 'Windows'
         run: cargo test -p euc-sim --lib --locked sil::tests -- --include-ignored
 
+  world-golden:
+    # The generated world must be bit-identical everywhere: recordings and [world] scenarios keep
+    # only the seed, the generator revision and a digest, and rebuild the ground on replay. The
+    # test job runs this in debug on all three systems; this job adds optimised builds, which the
+    # studio and the CLI use. No MuJoCo: euc-world needs none.
+    name: world golden digest (${{ matrix.os }}, ${{ matrix.profile }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        profile: [dev, release]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: world-${{ matrix.profile }}
+      - run: cargo test -p euc-world --locked --profile ${{ matrix.profile }}
+
   deny:
     name: cargo-deny
     runs-on: ubuntu-latest

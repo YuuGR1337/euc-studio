@@ -1,0 +1,51 @@
+# World acceptance (W1b, docs/models/world.md): ride up a plaza's ramp. Seed 42, generator revision 2:
+# plaza 526731184849724626 near (127, -54); its ramp (1.5 m wide, 11.4 %) runs along the platform's
+# front from beside the stairs. The rider starts on the sidewalk, crosses the apron onto the ramp
+# near its foot and steers up it along a [world] route, then stops on the ramp below the top.
+#
+# PRELIMINARY: no measured ride up a ramp backs this run. `record` checks always pass; `upright`
+# and `no_cutoff` are the safety verdict.
+schema = 1
+name = "world-ramp-up-7kmh"
+description = "Ride up an 11 % plaza ramp at 7 km/h on the city world (seed 42)."
+wheel = "begode-extreme"
+seconds = 16.0
+release_s = 2.5
+speed_kmh = [[0, 0], [5, 0], [6.5, 7], [12, 7], [13.5, 0]]
+settings = "tarik-2026-10-15"
+
+[world]
+seed = 42
+revision = 2
+start = { x_m = 117.90, y_m = -55.75, heading_deg = 8.86 }
+route = [[127.59, -54.24], [133.01, -54.60]]
+
+[[expect]]
+check = "record"
+signal = "pitch_deg"
+stat = "max"
+from_s = 8.0
+
+[[expect]]
+check = "record"
+signal = "pitch_deg"
+stat = "min"
+from_s = 8.0
+
+[[expect]]
+check = "record"
+signal = "iq_a"
+stat = "max"
+from_s = 8.0
+
+[[expect]]
+check = "record"
+signal = "roll_deg"
+stat = "max"
+from_s = 8.0
+
+[[expect]]
+check = "upright"
+
+[[expect]]
+check = "no_cutoff"

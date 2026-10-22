@@ -1,4 +1,5 @@
 import { RingBuffer } from "../lib/ring.ts";
+import type { RecordedWorld } from "./recording.ts";
 import type { Tone } from "./buzzerAudio.ts";
 import { RIDER_MODELS, type HeightMap } from "./freeRide.ts";
 import { interpolatePoseFrames } from "./poseHistory.ts";
@@ -70,6 +71,7 @@ export class PlaybackEngine implements PlaybackClient {
   readonly suspension: EngineClient["suspension"];
   readonly terrain: EngineClient["terrain"];
   readonly recordedMap?: HeightMap;
+  readonly recordedWorld?: RecordedWorld;
   readonly beeps = 0;
   readonly firmware: FirmwareId = "stock";
   readonly quirks = null;
@@ -96,6 +98,7 @@ export class PlaybackEngine implements PlaybackClient {
     this.suspension = recording.suspension ?? null;
     this.terrain = recording.terrain ?? null;
     this.recordedMap = recording.header.context?.height_map ?? undefined;
+    this.recordedWorld = recording.header.context?.world ?? undefined;
     const capacity = Math.min(
       RECORDING_RING_LIMIT,
       Math.max(1, Math.ceil(recording.header.sample_hz * HISTORY_SECONDS)),
@@ -379,7 +382,8 @@ export class PlaybackEngine implements PlaybackClient {
   }
   private playbackMessage(playing: boolean): string {
     const state = playing ? "Recording playback is active." : "Playback is paused.";
-    const ground = this.recordedMap ? "" : " The map is unavailable in this recording.";
+    const ground =
+      this.recordedMap || this.recordedWorld ? "" : " The map is unavailable in this recording.";
     return `${state}${ground} Firmware commands are unavailable.`;
   }
   private emit(): void {

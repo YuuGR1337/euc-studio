@@ -198,7 +198,7 @@ impl Run {
             max_quantum: args.max_quantum,
             marker_window_s: 4.0,
         };
-        let live = files.live_on(scenario.rider, scenario.assist, scenario.terrain.clone())?;
+        let live = files.live_for(scenario)?;
         let machine = Machine::new_live(&config, &euc_sim::registry(), cpu, live)?;
         let mut session = Session::new(machine, map.as_ref(), args.sample_hz);
         // Checks that read firmware variables need names this firmware's map has; skip the others,

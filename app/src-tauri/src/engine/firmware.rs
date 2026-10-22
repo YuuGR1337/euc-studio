@@ -24,11 +24,30 @@ pub(super) fn build_free_host(
     progress: &mut dyn FnMut(&str),
 ) -> Result<Built, String> {
     spec.validate()?;
-    progress("Generating the physical map");
-    let revision = u32::try_from(epoch).map_err(|_| "Restart the app before the run epoch exceeds its map limit")?;
-    let map = std::sync::Arc::new(spec.map.generate(revision)?);
     let rider = spec.rider()?;
-    controls.begin(epoch, Some(std::sync::Arc::clone(&map)), rider);
+    let (map, world) = match (&spec.map, &spec.world) {
+        (Some(map), _) => {
+            progress("Generating the physical map");
+            let revision =
+                u32::try_from(epoch).map_err(|_| "Restart the app before the run epoch exceeds its map limit")?;
+            let map = std::sync::Arc::new(map.generate(revision)?);
+            controls.begin(epoch, Some(std::sync::Arc::clone(&map)), rider);
+            (Some(map), None)
+        }
+        (None, Some(choice)) => {
+            progress("Preparing the world around the spawn");
+            let world = super::world::shared(choice.spec())?;
+            let spawn = world.spawn();
+            let start = euc_physics::WorldStart {
+                xy_m: [spawn.position[0], spawn.position[1]],
+                heading_rad: spawn.heading[1].atan2(spawn.heading[0]),
+            };
+            let ground = euc_physics::WorldGround::with_world(world, start)?;
+            controls.begin_world(epoch, ground.clone(), rider);
+            (None, Some(ground))
+        }
+        (None, None) => return Err("Choose either the test pad or a world".into()),
+    };
     let source = ProfileSource::Builtin;
     let files = WheelFiles::load(&source, &spec.wheel).map_err(|error| error.to_string())?;
     let wheel = &files.profile;
@@ -48,9 +67,12 @@ pub(super) fn build_free_host(
         })
     });
     let loaded = super::images::load(&files, firmware, progress)?;
-    let live = files
-        .live_on_map(rider, Default::default(), map.as_ref().clone())
-        .map_err(|error| format!("Invalid free ride physical model: {error}"))?;
+    let live = match (&map, &world) {
+        (Some(map), _) => files.live_on_map(rider, Default::default(), map.as_ref().clone()),
+        (None, Some(ground)) => files.live_on_world(rider, Default::default(), ground.clone()),
+        (None, None) => unreachable!("the ground was chosen above"),
+    }
+    .map_err(|error| format!("Invalid free ride physical model: {error}"))?;
     let config = MachineConfig {
         board: &board,
         stockmap: loaded.map.as_ref(),
@@ -68,6 +90,7 @@ pub(super) fn build_free_host(
     progress("Starting firmware with the rider on the stand");
     let machine =
         Machine::new_live(&config, &euc_sim::registry(), loaded.factory()?, live).map_err(|error| error.to_string())?;
+    let frame = world.as_ref().map(super::world::WorldFrame::of);
     let session = Session::new(machine, loaded.map.as_ref(), SAMPLE_HZ);
     let mut header = euc_sim::recording::header(
         concat!("EUC Studio ", env!("CARGO_PKG_VERSION")),
@@ -87,13 +110,22 @@ pub(super) fn build_free_host(
         host: Box::new(super::free_ride::FreeRideHost::new(session, controls, epoch, map)),
         label: format!("{} firmware · free ride", firmware_name(firmware)),
         build: loaded.label,
-        note: Some(format!(
-            "Experimental {} rider. Pedal welds and external yaw/roll aids remain active. Map resolution is 0.25 m",
-            rider.model.id()
-        )),
+        note: Some(match &world {
+            Some(ground) => format!(
+                "Experimental {} rider. Pedal welds and external yaw/roll aids remain active. World seed {}: \
+                 3.1 cm ground around the wheel, curbs and steps as boxes",
+                rider.model.id(),
+                ground.spec().seed
+            ),
+            None => format!(
+                "Experimental {} rider. Pedal welds and external yaw/roll aids remain active. Map resolution is 0.25 m",
+                rider.model.id()
+            ),
+        }),
         display,
         lights,
         terrain: None,
+        world: frame,
         suspension,
     })
 }
@@ -153,11 +185,14 @@ pub fn build_host(id: &str, firmware: &str, progress: &mut dyn FnMut(&str)) -> R
         marker_window_s: 4.0,
     };
     let terrain = terrain_profile(&scenario);
-    let live = files
-        .live_on(scenario.rider, scenario.assist, scenario.terrain.clone())
-        .map_err(|e| format!("Invalid physical model: {e}"))?;
+    let live = files.live_for(&scenario).map_err(|e| format!("Invalid physical model: {e}"))?;
     let machine = Machine::new_live(&config, &euc_sim::registry(), factory, live).map_err(|e| e.to_string())?;
     let session = Session::new(machine, map, SAMPLE_HZ);
+    let world = session
+        .machine()
+        .plant()
+        .live_part()
+        .and_then(|live| live.physics().setup().world.as_ref().map(super::world::WorldFrame::of));
     let sha256 = Sha256::digest(image);
     let toml = scenarios::text(id);
     let mut header = euc_sim::recording::header(
@@ -185,6 +220,7 @@ pub fn build_host(id: &str, firmware: &str, progress: &mut dyn FnMut(&str)) -> R
         display,
         lights,
         terrain,
+        world,
         suspension,
     })
 }
@@ -307,6 +343,22 @@ roll_damping = 45.0
         assert_eq!(context.model_aids.roll_stiffness, 123.0);
         assert_eq!(context.model_aids.roll_damping, 45.0);
         assert!(context.height_map.is_none());
+    }
+
+    #[test]
+    #[ignore = "requires verified cached stock firmware; creates a physical model without running it"]
+    fn a_world_scenario_tells_the_view_its_world_and_records_it() {
+        let imported =
+            scenarios::import(include_str!("../../../../scenarios/world/world-pothole-15kmh.toml").into()).unwrap();
+        let built = build_host(&imported.id, "stock", &mut |_| {}).unwrap();
+        let frame = built.world.expect("the view draws the scenario's world");
+        assert_eq!(frame.spec.seed, 42);
+        assert_eq!(frame.start_xy_m, [70.0, 3.05]);
+        assert_eq!(frame.start_heading_rad, 0.0);
+        assert!(built.terrain.is_none(), "no 1-D strip under a world");
+        let context = euc_sim::recording::RecordingContext::of(&built.header.unwrap()).unwrap().unwrap();
+        let world = context.world.expect("the recording keeps the world");
+        assert_eq!((world.spec, world.start_xy_m), (frame.spec, frame.start_xy_m));
     }
 
     #[test]

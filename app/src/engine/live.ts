@@ -8,6 +8,7 @@ import { RingBuffer } from "../lib/ring.ts";
 import { readStored } from "../lib/storage.ts";
 import { readBatch } from "./batch.ts";
 import type { Tone } from "./buzzerAudio.ts";
+import { validFrame, type WorldFrame } from "./world.ts";
 import { POSE_MAX_BODIES, PoseHistory } from "./poseHistory.ts";
 import {
   customFirmware,
@@ -75,6 +76,7 @@ export type Message =
   | { type: "lights"; layout: LightsLayout | null }
   | { type: "buzzer"; tones: Tone[] }
   | { type: "terrain"; profile: TerrainProfile | null }
+  | { type: "world"; frame: WorldFrame | null }
   | { type: "suspension"; info: EngineClient["suspension"] }
   | { type: "events"; events: TelemetryEvent[] }
   | { type: "frames"; frames: PhoneFrame[] }
@@ -161,6 +163,7 @@ export class LiveEngine implements EngineClient {
   display: DisplayLayout | null = null;
   lights: LightsLayout | null = null;
   terrain: TerrainProfile | null = null;
+  liveWorld: WorldFrame | null = null;
   suspension: EngineClient["suspension"] = null;
   beeps = 0;
   audio?: NativeAudioStatus;
@@ -380,6 +383,9 @@ export class LiveEngine implements EngineClient {
         break;
       case "terrain":
         this.terrain = m.profile;
+        break;
+      case "world":
+        this.liveWorld = validFrame(m.frame) ? m.frame : null;
         break;
       case "suspension":
         this.suspension = m.info;

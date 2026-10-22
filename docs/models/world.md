@@ -1,10 +1,11 @@
 # Procedural world (W1)
 
-Status: W1a, 2026-10-22. Design, the `euc-world` generator (city biome), a PNG preview and a MuJoCo feasibility spike.
-Not integrated yet: Free Ride still uses the finite 32 m map of [generated-map-implementation.md](generated-map-implementation.md) until W1b.
+Status: W1b, 2026-10-22. The world is integrated: MuJoCo ground in `euc-physics`, `[world]` scenarios, recordings and replay, the studio's 3D view, and Free Ride's default ground.
+W1a (same day) built the design, the `euc-world` generator (city biome), a PNG preview and a MuJoCo feasibility spike.
+The finite 32 m map of [generated-map-implementation.md](generated-map-implementation.md) stays in Free Ride as "Test pad 32 m".
 
 The owner asked for a more realistic map with roadside objects, generated progressively like Minecraft, with roads, potholes and stairs.
-This document is the design for that world, what W1a built, what the spike measured, and the W1b integration plan.
+This document is the design for that world, what W1a and W1b built, and what the spike and the acceptance runs measured.
 
 ## Goals
 
@@ -100,34 +101,36 @@ Guarantees (test `the_spawn_is_level_clear_and_on_a_straight_road`, 12 seeds): a
 `Densities` sets every rate: potholes 1.5, manholes 0.6, cracks 12, rough patches 0.8 and wet patches 1.0 per 1000 m² of their zone; 35 % of local edges with a bump; 70 % of intersection ends with a crosswalk; 1.5 driveways per 100 m of street side; plaza weight 0.15 among parcels; props 0.8 of their slots.
 Realised pothole density lands at 50–110 % of nominal (sites near the gutter and the spawn are refused) and doubles when the parameter doubles (test `densities_follow_their_parameters`).
 
-## Physics plan (W1b)
+## Physics (built in W1b)
+
+`crates/euc-physics/src/world.rs`. `Setup::world` takes a `WorldGround` (a shared `World` and a `WorldStart`); it excludes `height_map` and a non-flat `[terrain]`.
+The physics frame is the world moved so that the start lies at the origin, heading +x: `world = start + R(heading) · physics`, `z_world = z_physics + origin_z`, where `origin_z` is the world height under the start.
 
 ### Height-field window
 
-- One MuJoCo `hfield` of 385 × 385 samples at 1/32 m (3.125 cm): a 12 m square, elevation range 4 m, base 0.5 m.
+- One MuJoCo `hfield` of 385 × 385 samples at 1/32 m (3.125 cm): a 12 m square, elevation range 8 m, base 0.5 m.
 - Its geom sits in a **mocap body**. Recentring writes `mocap_pos` and the hfield data. A geom in the world body does not move when `geom_pos` changes at run time in MuJoCo 3.9 (spike A1, B): the wheel falls through.
-- The window recentres when the wheel is more than 1 m from its centre, by whole lattice cells, so the wheel always stays at least 5 m from its edge.
-- Exactness: heights are quantized to 2⁻¹⁶ m, the window base sits on a whole metre and the range is a power of two, so `pos.z + f32(data) × range` reproduces every stored height exactly. A recentre therefore changes nothing under the wheel: ray heights at 2000 fixed points moved by at most 1.8 × 10⁻¹⁵ m over four recentres (spike E).
-- The window samples `ground_at(…, inset = 1.5 cells)`: each curb, step and plaza wall steps up just behind its box's face, inside the box, so the height field never shows a slope in front of a box.
-- If the local relief ever exceeds the 4 m range, the base moves by whole metres and the window refills.
+- The window recentres when the shell is more than 1 m from its centre (per axis), by whole lattice cells, so the wheel always stays at least 5 m from its edge. A recentre keeps the overlap and samples only the new strips.
+- Exactness: heights are quantized to 2⁻¹⁶ m, the window's z sits on a whole metre below its lowest sample and the range is a power of two, so `pos.z + f32(data) × range` reproduces every stored height exactly. A recentre therefore changes nothing under the wheel: ray heights at 2000 fixed points moved by at most 1.8 × 10⁻¹⁵ m over four recentres (spike E).
+- The window samples `World::fill_points(…, inset = 1.5 cells)`: each curb, step and plaza wall steps up just behind its box's face, inside the box, so the height field never shows a slope in front of a box.
 
 ### Box pool
 
 - 128 mocap bodies with one box geom each, parked 1000 m below when unused.
-- Every refresh, `solids_in` a 16 m square around the wheel; a solid keeps its slot while it stays in range (assignment by solid identity), new ones take free slots.
+- Every tick, `solids_in` around the shell; the solids within 6 m (nearest first, then by identity) fill the pool. A solid keeps its slot while it stays in reach; new ones take free slots.
 - Moving a box is `mocap_pos` and `mocap_quat`. Changing its size also needs `geom_size`, `geom_rbound` and `geom_aabb` written: with stale bounds MuJoCo misses contacts (spike B).
-- Pool boxes use the floor's contact settings (`conaffinity="3"`), so wheel, shell and rider all touch them.
+- Window and boxes use `friction="0 0 0" condim="3" conaffinity="3"`, so wheel, shell and rider all touch them.
 
 ### Ground friction
 
-The window geom gets `priority="1"`, so its friction wins over the tire's.
-Before each step, the friction and rolling resistance under the wheel's contact point come from `surface_at`. MuJoCo applies a run-time change of `geom_friction` from the next step (spike F).
-Rider limbs on the ground share that value; it is a single surface per step.
+World geoms have no friction of their own. MuJoCo takes the larger friction of the two geoms in a contact, so the tire's friction decides on every surface.
+Every tick, the surface under the shell (`surface_at`) scales the tire geoms' friction: sliding μ = tire μ × surface μ / asphalt μ, rolling = tire rolling × surface rolling resistance / asphalt rolling resistance. MuJoCo applies a run-time change of `geom_friction` from the next step (spike F).
+Rider limbs and the shell keep their own friction on every surface.
 
 ### Scheduling
 
-Recentres and pool refreshes run between steps, at a fixed cadence (every 50 steps) and on state alone, so a replay repeats them exactly.
-New strips and chunks are prefetched on a worker thread; the step blocks if they are not ready, so timing never changes results.
+The world ticks before every 20th step: a recentre if the shell drifted, the pool refresh, and the friction under the wheel. It runs on state alone, so a replay repeats it exactly.
+A prefetch thread keeps the `World`'s chunk cache warm within 40 m of where the wheel will be in 1.5 s. The cache never changes a value, only how soon it is ready, so timing never changes results. The strip samples themselves are taken on the step thread at a recentre.
 
 ### Spike results
 
@@ -153,44 +156,78 @@ Conclusions: the mocap window and the mocap box pool work. Use 1/32 m cells: 1/6
 ### Budgets
 
 - Physics: at most 30 µs per step on average for ground contact and world upkeep together (2 kHz, about 6 % of real time).
-- On the step thread, a recentre is a data copy: at most 0.5 ms. Strips and chunks come from the worker.
 - Chunk generation: at most 2 ms amortized (0.94 ms measured), off the step thread.
 
-## Rendering plan
+Measured in W1b (this Mac, Apple silicon), whole runs with the stock firmware on the project's own Cortex-M3 core:
 
-- The engine sends chunk payloads, not meshes from the UI thread: per chunk and level of detail, a height grid (f32, relative to a chunk base), a material grid (u8 codes), and lists of props, solids and paint.
-- Meshes are built in a Web Worker into `BufferGeometry` (positions, normals, material attribute) and handed over as transferable buffers.
-- Rings around the wheel: ring 0 (2 chunks, 0.125 m grid plus the solids' vertical faces as quads), ring 1 (to 160 m, 0.5 m grid), ring 2 (to 600 m, 2 m grid from `terrain_at` and a street mask), then fog. Skirts hide cracks between rings.
-- Props and buildings are `InstancedMesh` per kind: lamp posts, trees (trunk plus canopy), benches, bins, hydrants, bollards; buildings as instanced boxes with a facade shader.
-- Materials: physically based standard materials per `Material` with small tiling textures generated at start-up, within the [studio design system](../../app/DESIGN.md) (black background, dark UI). Wet patches darken and gain gloss.
-- A floating origin: the scene origin follows the wheel in 256 m steps, so f32 positions keep millimetre precision far from the spawn.
-- Reduced-quality mode (CPU rasterizer) drops to ring 0 and ring 1 at half resolution, without textures.
+| Run | Result |
+| --- | --- |
+| `euc sim run` on the six `scenarios/world` runs, release build | real-time factor 1.75–1.99 on an idle Mac; 1.47–1.91 with the dev studio running |
+| Studio Free Ride host alone, world seed 42, 30 s at about 6.5 km/h, articulated rider (`stock_articulated_rides_the_streaming_world`) | 4.70 ms of wall time per 1/120 s sample: 56 % of the 8.33 ms budget, real-time factor 1.77 |
+| The same, rigid rider | 4.54 ms per sample (54 %), real-time factor 1.84 |
+
+The studio's engine crates build at `opt-level = 3` in development too, so the second and third rows are what the dev studio's run thread does. Drawing runs on other threads.
+
+## Studio (built in W1b)
+
+- **Payloads.** `euc_world::render` encodes chunks for drawing: per chunk and level of detail, a height grid (f32, world z), a material grid (u8 codes, bit 7 wet), the solids as oriented boxes, and the props. The layout is in the module's documentation; `world_chunks` (Tauri, binary IPC, at most 64 chunks per request) sends it. Level 0: 129² heights and 256² material texels per chunk (12.5 cm and 6.25 cm), faces inset 15 cm behind their boxes, every solid and prop. Level 1: 33² and 32², buildings and props. Level 2 (9², 8²) exists but the stream does not use it yet.
+- **Worker.** `worldWorker.ts` decodes payloads and builds the ground mesh (positions, normals, a material texture) and one box mesh per chunk off the UI thread, as transferable buffers.
+- **Rings.** `WorldStream` keeps level 0 within 30 m of the wheel and level 1 within 104 m (high quality), or 18 m and 56 m (low quality), refreshes the wanted set every 0.25 s, asks for the nearest chunks first (4 per level-0 request, 24 per level-1 request), and drops what falls out of range. Props are one `InstancedMesh` per part and kind (lamp posts, trees, benches, bins, hydrants, bollards).
+- **Frame.** The world group sits in the physics frame like the live bodies. Chunk meshes carry chunk-local vertices, so f32 stays precise far from the spawn without a floating origin.
+- **View.** On a world the fog runs from 18 m to 110 m and the camera sees 300 m. `WorldView` samples the loaded level-0 and level-1 heights for the floor light, the contact shadow and the grade readout.
+- **Errors.** When the engine refuses chunks, the view keeps what it drew, asks again, and shows a "World view incomplete" pill whose tooltip gives the reason. The physics does not depend on the view.
+- **Where it shows.** Free Ride on a world, a live `[world]` scenario (the run sends its `WorldFrame` with the bodies), and the playback of a recording with a world (the studio regenerates it from the recorded seed).
+- **Not built:** ring 2 and skirts, a facade shader, wet gloss, a minimap.
+
+## Free Ride
+
+The Free Ride panel's "World" tab chooses the ground: "City world" (the default) or "Test pad 32 m" (the finite map, with its editor and its edge pause).
+For a world: a seed field, "New world" (a random seed, ridden at once), the main density sliders and "More densities", "Ride this world", and "Default densities".
+The run starts at the world's spawn. There is no edge: the ground follows the wheel. The status names the ground (`ground: "world"`), and `free_ride_world` gives the view its frame.
 
 ## Recordings and replay
 
-- The recording context stores the `WorldSpec` (seed, revision, biome, densities), the route if any, and the digests of the chunks the run visited. It never stores meshes or height grids.
-- Replay regenerates the world. A revision other than the running generator's is refused with a clear message; a chunk digest mismatch is reported as world drift.
-- Recordings stay small: the context grows by a few hundred bytes plus 8 bytes per visited chunk.
+- The recording context (`euc_sim::recording::RecordingContext`) has `world` or `height_map`, never both. `world` is a `WorldRecord`: the `WorldSpec` (seed, revision, biome, densities), the start point and heading, and a digest of the 3 × 3 chunks around the start. It never stores meshes or height grids: a world recording's context is a few hundred bytes.
+- Free Ride on a world and every `[world]` scenario record it.
+- Import and playback check it: a revision other than this build's generator is refused with a clear message, and a different digest says that this build generates a different world for the recorded seed.
+- Recordings with the old `generated_heightmap_v1` map keep their `height_map` and replay as before.
 
 ## Scenario format
 
 ```toml
 [world]
-seed = 12345
-biome = "city"
-revision = 1               # must match the generator; recorded runs keep theirs
-route = [[0.0, 0.0], [120.0, 0.0], [120.0, 64.0]]   # optional waypoints for the autopilot
+seed = 42
+revision = 2               # must match the generator (euc_world::GENERATOR_REVISION)
+biome = "city"             # optional; the only biome
+start = { x_m = 70.0, y_m = 3.05, heading_deg = 0.0 }   # optional; the world's spawn without it
+route = [[127.59, -54.24], [133.01, -54.60]]            # optional waypoints, world metres
 
 [world.densities]          # optional; defaults as above
 potholes = 3.0
 plazas = 0.3
 ```
 
-A scenario has either `[terrain]` (today's 1-D strip) or `[world]`, never both.
+A scenario has either a non-flat `[terrain]` (the 1-D strip) or `[world]`, never both. A route has at most 256 finite points. After release the rider heads for the next waypoint and moves on within 1 m of it; after the last one it holds its heading. [scenarios/writing-scenarios.md](../scenarios/writing-scenarios.md) has the field table.
+
+## W1b acceptance
+
+`scenarios/world/` (seed 42, revision 2, settings `tarik-2026-10-15`, release at 2.5 s), stock firmware GW1825007, quanta 4000, 3000 and 2000:
+
+| Scenario | What it rides | Result |
+| --- | --- | --- |
+| `world-curb-up-90deg` | a 13.5 cm curb up, straight on | falls at 11.32 s at all three quanta: the tire stops at a curb of 60 % of its radius |
+| `world-curb-up-30deg` | the same curb at 30° | falls at 11.86 s |
+| `world-curb-down-90deg` | a curb down, straight on | passes: pitch −2°, 87 A, suspension 76 mm |
+| `world-pothole-15kmh` | a 7.2 cm deep, 1.18 m wide generated pothole at 15 km/h | passes: pitch −1.7°, 36 A, suspension 54 mm |
+| `world-stairs-down-5kmh` | 5 steps of 16.7 cm down a plaza's stairs at walking speed | passes: suspension 94 mm, 151–168 A |
+| `world-ramp-up-7kmh` | a plaza ramp up, steered by a route | passes: pitch at most 2° |
+
+Quanta 4000 and 2000 give identical results; 3000 differs slightly.
+The two curb-up runs fail their `upright` check: the wheel stops dead at the curb and the rider falls. A curb of 60 % of the tire's radius taken at 9 km/h without unweighting is expected to stop the wheel, so Claude reads this as the ground working, not a ground fault. PRELIMINARY: no measured ride over a curb backs these runs, and their `record` checks only report.
 
 ## Cross-platform determinism
 
-- Generation is bit-identical on macOS, Linux and Windows by construction (the arithmetic rules above). The golden digest checks it on every platform that runs the tests.
+- Generation is bit-identical on macOS, Linux and Windows by construction (the arithmetic rules above). The golden digest checks it: the engine CI's test job runs `euc-world`'s tests in debug on Linux, macOS and Windows, and its `world-golden` job runs them in debug and release on Linux and Windows.
 - f32 hfield values are exact (quantized heights, power-of-two range), so the physics receives the same ground everywhere.
 - MuJoCo itself is not guaranteed bit-identical across CPUs and compilers. That is today's situation too: a replay is bit-identical on the same build and platform; across platforms the world is identical and the physics can drift at round-off level.
 
@@ -227,7 +264,17 @@ The `preview` feature adds two small dependencies (`miniz_oxide` for deflate, `c
 - the spawn guarantees, over 12 seeds;
 - feature sizes within their limits (potholes, manholes, bumps, plaza steps, risers, treads, ramp slopes, curbs);
 - densities follow their parameters; the network is connected; hills stay under 12 %;
-- a golden digest of the chunks around the spawn.
+- solid tops match the drawn ground (two seeds);
+- a golden digest of the chunks around the spawn;
+- `render`: payloads are aligned and complete at every level, and neighbouring chunks share their border heights bit for bit.
+
+W1b added, elsewhere:
+
+- `euc-physics` (`tests/world.rs`): the window follows the wheel down the spawn street with the rigid and the articulated rider (ray heights match the world within 3 mm, no ground past the window); a curb box is climbed or stops the wheel, never passed through.
+- `euc-sim`: `[world]` scenarios parse, place their start, and refuse `[terrain]` as well, another generator revision, unknown fields, bad routes and densities out of range; a world recording context round-trips and refuses another revision, a different world, a map as well, and densities out of range.
+- Studio, Rust: the shared world cache; Free Ride status, spec and recording context with a world; ignored tests with the cached stock firmware: Free Ride rides 30 s on world seed 42 through the real factory with both riders (no edge pause, tire within 1 cm of the drawn ground, the step budget above), and a `[world]` scenario sends its frame to the view and records its world.
+- Studio, TypeScript: payload decoding, mesh winding and the view's sampling (`worldMesh.test.ts`), the world choice over IPC (`freeRide.test.ts`), the live engine's world message (`live.test.ts`).
+- Studio, browser (`app/e2e/world-view.spec.ts`, Chromium and WebKit): the real stream, worker, mesh builder and `WorldSurface` in WebGL on synthetic chunks: two rings of detail, chunks dropped behind and loaded ahead, errors reported while drawn chunks stay, and `WorldSurface` reporting a refused request to the view and clearing it once chunks arrive. With `WORLD_PAYLOAD_BIN` set to `euc-world`'s `payload` example, a fourth test draws real chunks and saves a screenshot.
 
 ## Known limits
 
@@ -236,13 +283,7 @@ The `preview` feature adds two small dependencies (`miniz_oxide` for deflate, `c
 - Plazas face their anchor's nearest street; on a strongly curved street the plaza sits at an angle to the curb.
 - Street paving changes at intersections along a line where the nearer street changes; an arterial wins inside the crossing itself.
 - Only the city biome exists.
-
-## W1b order of work
-
-1. `euc-physics`: a `Ground::World(WorldSpec)` variant; MJCF with the mocap window (385², 1/32 m, range 4 m, priority 1) and the 128-box mocap pool; a between-steps world tick (recentre, pool refresh, friction under the wheel) at a fixed cadence; acceptance tests on curbs (straight and oblique), potholes, stairs, ramps and the spawn.
-2. A prefetch worker for strips and chunks, with a blocking hand-off so timing never changes results; then check the 30 µs per step budget.
-3. `euc-sim` recordings: store the `WorldSpec`, revision, route and visited chunk digests; replay regenerates and refuses a revision mismatch.
-4. Scenario `[world]` table and `euc sim run` support; an `euc world preview` wrapper around the preview binary.
-5. Studio: chunk payloads over the engine channel, the worker mesh builder, LOD rings, instanced props and buildings, materials, floating origin, and the reduced-quality path.
-6. Free Ride: seed and density controls, a "new world" action, a minimap from the preview colours; remove the 32 m edge pause.
-7. CI: the golden digest on Linux and Windows runners, so cross-platform identity is checked, not only designed.
+- One surface per tick: the tire's friction follows the surface under the shell, not under each contact point.
+- Rider limbs and the shell keep their own friction on every surface.
+- The studio's compare view still draws the 1-D strip only; a `[world]` scenario compares correctly but shows a flat floor there.
+- Not built from the plan: an `euc world preview` wrapper (the `euc-world-preview` binary does the job), ring 2 and skirts, a facade shader, wet gloss, and a Free Ride minimap.

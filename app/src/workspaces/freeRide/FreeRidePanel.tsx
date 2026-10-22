@@ -1,23 +1,34 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { RIDER_MODELS, type GeneratedMapSpec, type HeightMap } from "../../engine/freeRide.ts";
+import {
+  RIDER_MODELS,
+  isWorldChoice,
+  type GroundChoice,
+  type HeightMap,
+} from "../../engine/freeRide.ts";
+import type { WorldFrame } from "../../engine/world.ts";
 import type { EngineClient } from "../../engine/types.ts";
 import { Button, IconButton } from "../../ui/Button.tsx";
 import { ChevronRight, Info, Keyboard, Pause, Play } from "../../ui/icons.tsx";
 import { Panel } from "../../ui/Panel.tsx";
 import { Pill } from "../../ui/Pill.tsx";
+import { SegmentedControl } from "../../ui/SegmentedControl.tsx";
 import { Select } from "../../ui/Select.tsx";
 import { Slider } from "../../ui/Slider.tsx";
 import { Tabs, TabPanel } from "../../ui/Tabs.tsx";
 import { Toggle } from "../../ui/Toggle.tsx";
 import { MapEditor } from "./MapEditor.tsx";
+import { WorldEditor } from "./WorldEditor.tsx";
 import { FreeRideController } from "./controller.ts";
 
 export interface FreeRidePanelProps {
   engine: EngineClient;
   /** Must become false on drawer close, route change, or engine source change. */
   active: boolean;
-  /** Authoritative native map only. Parent owns the viewport and map rendering. */
-  onMap?: (map: HeightMap | null, epoch: number | null) => void;
+  /** The run's authoritative ground: the native test pad grid or the world frame. Parent draws it. */
+  onGround?: (
+    ground: { map: HeightMap | null; world: WorldFrame | null } | null,
+    epoch: number | null,
+  ) => void;
   /** Optional parent action. It must select a scenario through engine.setScenario. */
   onExit?: () => void;
 }
@@ -28,10 +39,15 @@ const number = (value: number | null | undefined, unit: string) =>
 export function FreeRidePanel(props: FreeRidePanelProps) {
   return <FreeRideSession key={props.engine.kind} {...props} />;
 }
-function FreeRideSession({ engine, active, onMap, onExit }: FreeRidePanelProps) {
+function FreeRideSession({ engine, active, onGround, onExit }: FreeRidePanelProps) {
   const controller = useMemo(() => new FreeRideController(engine), [engine]);
   const state = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
   const [tab, setTab] = useState<"controls" | "map">("controls");
+  // The ground editor shows the current run's ground until a ground is chosen here.
+  const [chosenGround, setGroundKind] = useState<"world" | "map" | null>(null);
+  const groundKind =
+    chosenGround ??
+    (state.status?.mode === "free_ride" && state.status.ground === "map" ? "map" : "world");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
@@ -39,11 +55,11 @@ function FreeRideSession({ engine, active, onMap, onExit }: FreeRidePanelProps) 
     if (active && engine.kind === "live" && root.current) return controller.connect(root.current);
   }, [active, controller, engine]);
   useEffect(() => {
-    onMap?.(
-      active ? state.map : null,
+    onGround?.(
+      active ? { map: state.map, world: state.world } : null,
       active && state.status?.mode === "free_ride" ? state.status.epoch : null,
     );
-  }, [active, onMap, state.map, state.status?.epoch, state.status?.mode]);
+  }, [active, onGround, state.map, state.world, state.status?.epoch, state.status?.mode]);
   const backendError =
     state.error ??
     (engine.status.state === "error" || engine.status.state === "halted"
@@ -62,7 +78,7 @@ function FreeRideSession({ engine, active, onMap, onExit }: FreeRidePanelProps) 
       : state.starting
         ? "Starting free ride."
         : state.armed || state.arming || state.playing
-          ? "Pause before editing the map."
+          ? "Pause before changing the ground."
           : undefined);
   const hasRide = state.status?.mode === "free_ride";
   const booting = hasRide && !state.status?.ready;
@@ -129,9 +145,9 @@ function FreeRideSession({ engine, active, onMap, onExit }: FreeRidePanelProps) 
     }
     setTab(value);
   }
-  function apply(map: GeneratedMapSpec) {
+  function apply(ground: GroundChoice) {
     setTab("controls");
-    void controller.start(map);
+    void controller.start(ground);
   }
   const statusLine =
     locked ??
@@ -140,7 +156,7 @@ function FreeRideSession({ engine, active, onMap, onExit }: FreeRidePanelProps) 
       : state.arming
         ? "Waiting for native Arm."
         : !hasRide
-          ? "Choose a map to create a ride."
+          ? "Choose a world to create a ride."
           : booting
             ? state.status?.reason
             : state.armed
@@ -182,7 +198,7 @@ function FreeRideSession({ engine, active, onMap, onExit }: FreeRidePanelProps) 
           className="flex flex-col px-16"
           tabs={[
             { value: "controls", label: "Controls" },
-            { value: "map", label: "Map" },
+            { value: "map", label: "World" },
           ]}
         >
           <div className="border-b border-hairline py-8">
@@ -233,7 +249,7 @@ function FreeRideSession({ engine, active, onMap, onExit }: FreeRidePanelProps) 
                 disabledReason={modelLocked}
                 onClick={() => (state.applied ? apply(state.applied) : changeTab("map"))}
               >
-                {state.applied ? "Start new run" : "Choose map for new run"}
+                {state.applied ? "Start new run" : "Choose a world for the new run"}
               </Button>
             )}
           </fieldset>
@@ -515,18 +531,45 @@ function FreeRideSession({ engine, active, onMap, onExit }: FreeRidePanelProps) 
             hidden={tab !== "map"}
             className="py-16 data-[state=inactive]:hidden"
           >
-            <MapEditor
-              key={`${state.status?.epoch ?? "none"}:${state.applied ? "applied" : "unknown"}`}
-              applied={state.applied}
-              map={state.map}
-              disabledReason={editorLocked}
-              onApply={apply}
-              onPause={
-                active && engine.kind === "live" && (state.armed || state.arming || state.playing)
-                  ? pauseForEdit
-                  : undefined
-              }
-            />
+            <div className="flex flex-col gap-16">
+              <SegmentedControl
+                aria-label="Ground"
+                value={groundKind}
+                onValueChange={setGroundKind}
+                options={[
+                  { value: "world", label: "City world" },
+                  { value: "map", label: "Test pad 32 m" },
+                ]}
+              />
+              {groundKind === "world" ? (
+                <WorldEditor
+                  key={`${state.status?.epoch ?? "none"}:${state.applied ? "applied" : "unknown"}`}
+                  applied={
+                    state.applied && isWorldChoice(state.applied) ? state.applied.world : null
+                  }
+                  current={state.world}
+                  disabledReason={editorLocked}
+                  onApply={(world) => apply({ world })}
+                />
+              ) : (
+                <MapEditor
+                  key={`${state.status?.epoch ?? "none"}:${state.applied ? "applied" : "unknown"}`}
+                  applied={
+                    state.applied && !isWorldChoice(state.applied) ? state.applied.map : null
+                  }
+                  map={state.map}
+                  disabledReason={editorLocked}
+                  onApply={(map) => apply({ map })}
+                  onPause={
+                    active &&
+                    engine.kind === "live" &&
+                    (state.armed || state.arming || state.playing)
+                      ? pauseForEdit
+                      : undefined
+                  }
+                />
+              )}
+            </div>
           </TabPanel>
         </Tabs>
       </div>
