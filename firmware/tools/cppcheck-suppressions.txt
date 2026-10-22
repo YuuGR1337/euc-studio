@@ -47,6 +47,8 @@ misra-c2012-2.5:*/core/include/euc/math/fixed.h
 # inverse square root) is reproduced; C11 defines type punning through a union.
 misra-c2012-19.2:*/core/include/euc/math/float_ops.h
 misra-c2012-19.2:*/core/math/libm.c
+# The same for the target's soft-float entry points, which pass a double or float on as its bit pattern.
+misra-c2012-19.2:*/core/math/soft_float.c
 
 # libm.c is derived from fdlibm and kept close to it, so the two can be read side by side:
 #   8.9 (advisory): constants stay at file scope, as in fdlibm.
@@ -58,6 +60,9 @@ misra-c2012-10.8:*/core/math/libm.c
 
 # 8.7 (advisory): the balance steps are public so a lock-step harness can compare each with its stock function.
 misra-c2012-8.7:*/core/balance/*
+# 8.7 (advisory): the soft-float routines are public so the host unit tests can check them; on the target only
+# the --wrap entry points in the same file call them.
+misra-c2012-8.7:*/core/math/soft_float.c
 
 # Attitude. 8.7 (advisory): the gyro range and calibration-offset helpers are called by the app only.
 misra-c2012-8.7:*/core/attitude/*

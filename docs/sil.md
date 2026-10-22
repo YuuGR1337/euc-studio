@@ -156,9 +156,22 @@ RMS 6 A, torque RMS 5 N·m. Every scenario check passes on both sides. The hall-
 the tolerance file sets it for compat against stock. The text replies are identical, except 6 bytes between frames
 in compat balance-60s. The SIL sends up to 15 more frames in 63 s; on compat, these are the missed ticks above.
 
-A first check against a compat image with the soft-double speed-up in progress (not yet accepted) gives a speed
-difference of 0.24, 0.37 and 0.075 km/h on the same three scenarios, all within. Repeat the table when the
-speed-up is accepted, because it changes the compat image's timing.
+The firmware speed-up ([SOC50 study](models/soc50-full-run-equivalence.md#the-speed-up-2026-10-22-not-yet-sufficient):
+faster soft-float routines, less strip and FOC work, the strip rendered in the main loop) changes both images'
+timing. The same six compares on base `0575f14` with it:
+
+| A (image) | B (SIL) | Scenario | speed max | pitch max | Iq RMS | torque RMS | frames A / B | Result |
+|---|---|---|---|---|---|---|---|---|
+| compat | `ours-sil:compat` | balance-60s | 0.240 km/h | 0.91° | 3.59 A | 3.09 N·m | 1005 / 1015 | within |
+| compat | `ours-sil:compat` | ride-20kmh-stop | 0.571 km/h | 0.77° | 3.13 A | 2.69 N·m | 630 / 635 | within |
+| compat | `ours-sil:compat` | hall-loss-while-riding | 0.075 km/h | 0.17° | 0.89 A | 0.77 N·m | 221 / 225 | within (to 15 s) |
+| clean | `ours-sil:clean` | balance-60s | 0.132 km/h | 0.16° | 0.49 A | 0.43 N·m | 1014 / 1015 | within |
+| clean | `ours-sil:clean` | ride-20kmh-stop | 0.191 km/h | 0.40° | 1.22 A | 1.05 N·m | 635 / 635 | within |
+| clean | `ours-sil:clean` | hall-loss-while-riding | 0.052 km/h | 0.14° | 0.53 A | 0.46 N·m | 225 / 225 | within (to 15 s) |
+
+Every check gives the same verdict on both sides. The SIL library itself rides the same before and after the
+speed-up: every channel, firmware value and BLE frame is identical, and only the strip state is sampled a moment
+earlier, before the main loop renders it.
 
 The largest differences come at a push or at the stop, where the latency difference above shows, and they move
 with a few cycles of timing: the clean image itself differs by 0.373 km/h at the balance-60s push between its fixed

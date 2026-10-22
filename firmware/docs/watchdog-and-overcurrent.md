@@ -12,10 +12,10 @@ reasons and what is still open on the bench.
 | TIM8 update interrupt | 2 x fPWM (20 or 24 kHz) | hall sensors, light PWM |
 | ADC interrupt | fPWM (10 or 12 kHz) | FOC: currents, angle, PI, SVPWM |
 | RTC tick interrupt | 496 Hz | IMU, balance, cut-offs, commands, alarms, lights, storage decisions |
-| Main loop | as fast as it runs | telemetry, BMS link, deferred flash writes, power-off, bootloader hand-off |
+| Main loop | as fast as it runs | telemetry, BMS link, LED strip rendering, deferred flash writes, power-off, bootloader hand-off |
 
 The balance and the FOC run in interrupts, so they do not need the main loop. A main loop that hangs while
-the interrupts run still balances the wheel; it only loses telemetry, the BMS link and saving.
+the interrupts run still balances the wheel; it only loses telemetry, the BMS link, the LED strip and saving.
 
 ## Watchdog
 
@@ -111,3 +111,17 @@ Target builds also use LTO to keep interrupt cost within the 12 kHz mode's CPU b
 CI runs clean's balance, ride, and pothole scenarios with the shipped timing.
 The pothole scenario requires at least 19 km/h, so an early limp does not count as a valid approach.
 CI also checks the compat-versus-stock comparisons.
+
+## LED strip in the main loop (both profiles)
+
+The stock firmware renders its LED strip in the main loop. Ours did it at the end of every RTC tick, which made
+the compat tick about 1,950 instructions longer than stock's (docs/models/soc50-full-run-equivalence.md). Both
+profiles now render it in the main loop: the tick queues its strip inputs (`struct app_strip_job`: the tick
+part's inputs at the start of the tick, the render's where the tick rendered before), and the main loop runs the
+queued ticks in order. The strip state goes through the same sequence and the pixels get the same values; only
+the time they are computed changes. A tick that finds the 32-job queue full is counted (`strip_jobs_dropped`, a
+simulator probe) and must never happen; `strip_jobs_most_waiting` shows the margin.
+
+Clean makes the same move because it does not weaken the supervisor rule. The balance, the cut-offs, the alarms
+and the supervisor stay in the tick. A hung main loop with a live tick still balances, latches limp mode and
+beeps, as above; the strip then freezes on its last pixels, like telemetry and saving stop.

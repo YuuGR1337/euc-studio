@@ -14,7 +14,10 @@
  * is preserved.
  * ====================================================
  *
- * euc_sqrt is our own: digit-by-digit integer square root of the mantissa, rounded to nearest even.
+ * euc_sqrt is our own: the exact integer square root of the scaled mantissa (a reciprocal-square-root
+ * estimate refined to two corrected digits), rounded to nearest even. It replaced a digit-by-digit loop of
+ * about 600 instructions; a target harness compared the two bit for bit on the simulator's Cortex-M3 core,
+ * together with euc_asin over a dense sweep of [-1, 1] (docs/models/soc50-full-run-equivalence.md).
  */
 #include "euc/math/libm.h"
 
@@ -71,17 +74,62 @@ static double f64_quiet_nan(void)
 
 /* sqrt ------------------------------------------------------------------------------------------------- */
 
-/* One digit of the binary square root: brings in the next two radicand bits. */
-static void sqrt_step(uint64_t *remainder, uint64_t *root, uint64_t next_two_bits)
+/*
+ * 1 / sqrt(x) in Q1.15 at the middle of each 1/128 step of x in [0.25, 1):
+ * round(2^15 / sqrt((i + 32.5) / 128)) for i = 0 .. 95.
+ */
+static const uint16_t rsqrt_start[96] = {
+    65030U, 64052U, 63117U, 62222U, 61363U, 60540U, 59748U, 58987U, 58254U, 57548U, 56867U, 56210U,
+    55574U, 54960U, 54366U, 53791U, 53233U, 52693U, 52169U, 51660U, 51165U, 50685U, 50218U, 49763U,
+    49321U, 48890U, 48470U, 48061U, 47663U, 47273U, 46894U, 46523U, 46161U, 45807U, 45462U, 45124U,
+    44793U, 44470U, 44153U, 43843U, 43540U, 43243U, 42951U, 42666U, 42386U, 42112U, 41843U, 41579U,
+    41320U, 41065U, 40816U, 40571U, 40330U, 40093U, 39861U, 39632U, 39408U, 39187U, 38970U, 38756U,
+    38546U, 38340U, 38136U, 37936U, 37739U, 37545U, 37354U, 37166U, 36980U, 36798U, 36618U, 36441U,
+    36266U, 36093U, 35924U, 35756U, 35591U, 35428U, 35267U, 35109U, 34953U, 34798U, 34646U, 34496U,
+    34347U, 34201U, 34056U, 33913U, 33772U, 33633U, 33496U, 33360U, 33225U, 33093U, 32962U, 32832U,
+};
+
+/*
+ * root = floor(sqrt(m * 2^56)) for m in [2^52, 2^54), exactly; returns true when m * 2^56 - root^2 is not
+ * zero. A table and two Newton steps give 1 / sqrt(m) to about 26 bits; the root then comes as two digits,
+ * floor(sqrt(m)) and the 28 bits below it, each estimated with that reciprocal and corrected with the exact
+ * remainder (computed modulo 2^64 because its true value is small).
+ */
+static bool sqrt_root(uint64_t m, uint64_t *root_out)
 {
-    const uint64_t trial = (*root << 2U) | 1U;
-    *remainder = (*remainder << 2U) | next_two_bits;
-    if (*remainder >= trial) {
-        *remainder -= trial;
-        *root = (*root << 1U) | 1U;
-    } else {
-        *root <<= 1U;
+    const uint32_t x = (uint32_t)(m >> 22U);                     /* m / 2^54 in Q0.32, in [2^30, 2^32) */
+    uint32_t r = (uint32_t)rsqrt_start[(x >> 25U) - 32U] << 15U; /* 1 / sqrt(x) in Q2.30 */
+    for (uint32_t step = 0U; step < 2U; step++) {
+        const uint64_t r_squared = ((uint64_t)r * r) >> 30U;                       /* R^2, Q.30 */
+        const uint32_t x_r_squared = (uint32_t)(((uint64_t)x * r_squared) >> 32U); /* X R^2, Q.30 */
+        r = (uint32_t)(((uint64_t)r * (0xC0000000U - x_r_squared)) >> 31U);        /* R (3 - X R^2) / 2 */
     }
+
+    /* floor(sqrt(m)) in [2^26, 2^27): sqrt(m) = x * r / 2^35. */
+    uint64_t high = ((uint64_t)x * r) >> 35U;
+    int64_t rem = (int64_t)(m - (high * high));
+    while (rem < 0) {
+        high--;
+        rem += (int64_t)((2U * high) + 1U);
+    }
+    while (rem > (int64_t)(2U * high)) {
+        rem -= (int64_t)((2U * high) + 1U);
+        high++;
+    }
+
+    /* The 28 bits below: about rem * 2^56 / (2 * high * 2^28) = rem * r / 2^30. */
+    uint64_t root = (high << 28U) + (((uint64_t)rem * r) >> 30U);
+    int64_t rem2 = (int64_t)((m << 56U) - (root * root));
+    while (rem2 < 0) {
+        root--;
+        rem2 += (int64_t)((2U * root) + 1U);
+    }
+    while (rem2 > (int64_t)(2U * root)) {
+        rem2 -= (int64_t)((2U * root) + 1U);
+        root++;
+    }
+    *root_out = root;
+    return rem2 != 0;
 }
 
 double euc_sqrt(double x)
@@ -118,19 +166,12 @@ double euc_sqrt(double x)
     }
 
     /* root = floor(sqrt(mantissa * 2^56)): 55 bits, the 53 of the result and two below it. */
-    uint64_t remainder = 0U;
-    uint64_t root = 0U;
-    for (int32_t pair = 26; pair >= 0; pair--) {
-        sqrt_step(&remainder, &root, (mantissa >> (2U * (uint32_t)pair)) & 3U);
-    }
-    for (uint32_t pair = 0U; pair < 28U; pair++) {
-        sqrt_step(&remainder, &root, 0U);
-    }
+    uint64_t root;
+    const bool inexact = sqrt_root(mantissa, &root);
 
     uint64_t result = root >> 2U;
     const uint64_t dropped_bits = root & 3U;
-    const bool round_up =
-        (dropped_bits > 2U) || ((dropped_bits == 2U) && ((remainder != 0U) || ((result & 1U) != 0U)));
+    const bool round_up = (dropped_bits > 2U) || ((dropped_bits == 2U) && (inexact || ((result & 1U) != 0U)));
     int32_t result_exponent = (power / 2) + 26 + F64_EXPONENT_BIAS;
     if (round_up) {
         result++;

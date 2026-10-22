@@ -18,7 +18,7 @@ See [the rider change](#rider-default-2026-10-22) below.
 | Recording context | Actual rider model, external aids, scenario text, and generated Free Ride map; CLI scenario recordings too | Complete parameter preset snapshots |
 | Python | Existing euc_studio API, typed Session, phase results, reset, recording save, and recording import | Linux and Windows package verification |
 | Engine | RTC correction, battery bounds, supply-state handling, output telemetry, image seal, flash simulation, and a selectable per-instruction flash timing model (fixed CPI 2.0 stays the default) | Complete OTA transport and recovery proof; exact MMIO timestamps inside a quantum |
-| Firmware | Earlier approved clean cutoff and headroom changes remain | Compat's RTC tick takes twice stock's cycles (soft-double library); make it as fast with bit-identical results, then recheck full-run equivalence |
+| Firmware | Earlier approved clean cutoff and headroom changes remain; a bit-identical speed-up and the LED strip rendered in the main loop, as stock does, cut compat's RTC tick from about 77,900 to 45,500 cycles and its interrupt load from about 95 % to 67 % (clean: 92 % to 68 %) | Compat's tick is still 1.2 times stock's, almost all before the command store (libgcc's double add, float comparison calls), and the SOC50 regime still differs |
 | Distribution | Local package tooling and development app | Final release packaging, public signing, and notarization |
 
 ## Checks completed
@@ -95,6 +95,18 @@ It stays voltage-limited longer at high speed and builds more PWM tiltback and p
 A private causal test that swaps only the tick cost swaps the two regimes, and also the SOC20 cutoff times.
 The SOC50 cutoff time itself is chaotic: numerical perturbations alone spread it by more than 2 s.
 No firmware image, tolerance or window changed; the speed-up is a firmware item for the lead.
+
+The [speed-up](models/soc50-full-run-equivalence.md#the-speed-up-2026-10-22-not-yet-sufficient) follows (base `0575f14`).
+An own double divide and float comparisons replace libgcc's through the linker's `--wrap`, and `euc_sqrt` becomes an exact integer root.
+The LED strip and the FOC step lose work that changes no output, and the strip renders in the main loop from a queue of tick inputs, as stock's does.
+Each change is checked bit for bit against the code it replaces: 1 M operand pairs per routine on the Cortex-M3 core, exhaustive checks where the input space allows, and 17.7 M strip calls.
+The strip queue dropped no tick in 72 runs, and the SIL library gives the same ride before and after.
+The full firmware gate, the CI compare loop and sil's six SIL compares pass.
+Compat's tick drops to about 45,500 cycles (stock 37,700) and the FOC handler to 632 cycles (stock 671).
+Over 29 runs per group the SOC50 regime still differs from stock (p = 0.001-0.005); at stock's tick cost it does not.
+SOC20's cutoffs now overlap stock's range, and SOC100 agrees at quanta 4000, 3000 and 2000 on macOS.
+Both comparison exceptions stay: SOC50's verdicts still differ at quantum 3000, and CI checks SOC100 on Linux when this lands.
+Before the speed-up both compat and clean ran at 90-98 % interrupt load, a real-hardware risk of main-loop starvation, not only a simulator effect.
 
 The [stage B timing model](models/cpu-timing.md#flash-timing-stage-b) is selectable with `--timing flash`.
 Against the owner's wheel it gives a 2.515 s breathing period (video 2.1 ± 0.2 s; fixed timing 2.234 s).

@@ -218,6 +218,102 @@ static void test_pattern_1_colour_wheel(void)
     TEST_ASSERT_EQUAL_UINT32(0U, euc_strip_take_changed(&state));
 }
 
+/* The stock rule for one wheel step, written out independently: a channel rises by 21 and saturates past 231,
+ * or falls by 21 and drops to 0 under 24; the corner colours pick which channel moves. */
+struct reference_wheel {
+    uint8_t red;
+    uint8_t green;
+    uint8_t blue;
+    uint8_t phase;
+};
+
+static uint8_t reference_up(uint8_t value)
+{
+    const uint8_t next = (uint8_t)(value + 21U);
+    return (next > 231U) ? 255U : next;
+}
+
+static uint8_t reference_down(uint8_t value)
+{
+    const uint8_t next = (uint8_t)(value - 21U);
+    return (next < 24U) ? 0U : next;
+}
+
+static void reference_step(struct reference_wheel *w)
+{
+    if ((w->green == 0U) && (w->blue == 0U)) {
+        w->phase = 1U;
+    } else if ((w->blue == 255U) && (w->red == 255U)) {
+        w->phase = 2U;
+    } else if ((w->red == 0U) && (w->green == 0U)) {
+        w->phase = 3U;
+    } else if ((w->green == 255U) && (w->blue == 255U)) {
+        w->phase = 4U;
+    } else if ((w->blue == 0U) && (w->red == 0U)) {
+        w->phase = 5U;
+    } else if ((w->red == 255U) && (w->green == 255U)) {
+        w->phase = 6U;
+    } else {
+        /* between corners */
+    }
+    switch (w->phase) {
+    case 1U:
+        w->blue = reference_up(w->blue);
+        break;
+    case 2U:
+        w->red = reference_down(w->red);
+        break;
+    case 3U:
+        w->green = reference_up(w->green);
+        break;
+    case 4U:
+        w->blue = reference_down(w->blue);
+        break;
+    case 5U:
+        w->red = reference_up(w->red);
+        break;
+    default:
+        w->green = reference_down(w->green);
+        break;
+    }
+}
+
+static uint8_t at_full_brightness(uint8_t colour)
+{
+    return (uint8_t)((100U * colour) / 255U);
+}
+
+static void test_pattern_1_matches_72_wheel_steps_at_every_ring_position(void)
+{
+    static const uint8_t side_a[12] = {8U, 9U, 10U, 11U, 12U, 1U, 2U, 3U, 4U, 5U, 6U, 7U};
+    for (int16_t ring = 0; ring <= 73; ring++) {
+        struct euc_strip_state state;
+        euc_strip_init(&state);
+        state.update = true;
+        state.ring = ring;
+        for (uint32_t render = 0U; render < 3U; render++) {
+            const struct euc_strip_render_in in = {(uint16_t)(10U + render), 15U, 0.0F, 1U};
+            euc_strip_render(&state, &in);
+            /* Step the reference wheel one full turn from red, as the stock render does. */
+            struct reference_wheel wheel = {255U, 0U, 0U, 0U};
+            for (uint32_t i = 0U; i < 72U; i++) {
+                reference_step(&wheel);
+                const uint32_t position = ((i + (uint32_t)ring) % 72U) + 1U;
+                if (position <= 12U) {
+                    assert_led(&state, side_a[position - 1U], at_full_brightness(wheel.red),
+                               at_full_brightness(wheel.green), at_full_brightness(wheel.blue));
+                    assert_led(&state, 25U - position, at_full_brightness(wheel.red),
+                               at_full_brightness(wheel.green), at_full_brightness(wheel.blue));
+                }
+            }
+            TEST_ASSERT_EQUAL_UINT8(wheel.red, state.wheel_red);
+            TEST_ASSERT_EQUAL_UINT8(wheel.green, state.wheel_green);
+            TEST_ASSERT_EQUAL_UINT8(wheel.blue, state.wheel_blue);
+            TEST_ASSERT_EQUAL_UINT8(wheel.phase, state.wheel_phase);
+        }
+    }
+}
+
 static void test_pattern_1_turn_flash_is_on_the_other_side(void)
 {
     struct euc_strip_state state;
@@ -242,6 +338,7 @@ int main(void)
     RUN_TEST(test_pattern_0_comets);
     RUN_TEST(test_pattern_0_turn_flash);
     RUN_TEST(test_pattern_1_colour_wheel);
+    RUN_TEST(test_pattern_1_matches_72_wheel_steps_at_every_ring_position);
     RUN_TEST(test_pattern_1_turn_flash_is_on_the_other_side);
     return UNITY_END();
 }

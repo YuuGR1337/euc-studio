@@ -300,7 +300,12 @@ static void gate_outputs(struct euc_motor_state *state, const struct euc_motor_f
 void euc_motor_foc_step(struct euc_motor_state *state, const struct euc_motor_foc_in *in,
                         struct euc_motor_foc_out *out)
 {
-    (void)memset(out, 0, sizeof(*out));
+    /* Field by field: a memset call here costs the 24 kHz interrupt more than the stores. */
+    out->duty = (struct euc_foc_duty){0U, 0U, 0U};
+    out->outputs_enabled = false;
+    out->start_balance = false;
+    out->stop_drive = false;
+    out->error_bits = 0U;
     if (in->hard_cut_request) {
         state->hard_cut = true;
     }

@@ -31,6 +31,19 @@
 #include "euc/service/service.h"
 #include "euc/settings/storage.h"
 
+/*
+ * One RTC tick's LED strip inputs. Stock renders its strip in the main loop; this firmware does too, one
+ * queued tick at a time and in tick order, so the strip state goes through the same sequence as if the tick
+ * rendered it. 32 ticks (64 ms) is far more than the main loop ever lags; a tick that finds the queue full is
+ * counted, not queued.
+ */
+#define APP_STRIP_JOBS 32U
+
+struct app_strip_job {
+    struct euc_strip_tick_in tick;     /* read at the start of the tick */
+    struct euc_strip_render_in render; /* read after the alarm task, where the tick rendered before */
+};
+
 struct app {
     struct euc_settings settings;
     struct euc_storage_state storage;
@@ -94,6 +107,13 @@ struct app {
     volatile bool stop_drive;
     volatile uint8_t motor_alerts;
     volatile uint16_t odometer_steps;
+
+    /* LED strip, tick -> main loop: a ring of jobs, written by the tick and taken by the main loop */
+    struct app_strip_job strip_jobs[APP_STRIP_JOBS];
+    volatile uint32_t strip_jobs_queued;       /* jobs written (tick) */
+    volatile uint32_t strip_jobs_done;         /* jobs rendered (main loop) */
+    volatile uint32_t strip_jobs_dropped;      /* ticks that found the queue full: must stay 0 */
+    volatile uint32_t strip_jobs_most_waiting; /* the most jobs ever waiting at once */
 };
 
 extern struct app app;

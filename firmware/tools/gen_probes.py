@@ -68,6 +68,10 @@ PROBES = [
     ("strip_brake_count", "strip.brake_count", "u8", None, "brake flash while 4 or more (40 after a 3 km/h drop)"),
     ("strip_standstill", "strip.standstill", "u8", None, "1 breathing (standing), 3 moving, 0 at power-on"),
     ("strip_breath", "strip.breath", "u8", None, "breathing brightness, 0..131"),
+    # The strip renders in the main loop from a queue of tick inputs (apps/begode-extreme/app.h).
+    ("strip_jobs_dropped", "strip_jobs_dropped", "u32", None, "ticks whose strip inputs found the queue full; 0"),
+    ("strip_jobs_most_waiting", "strip_jobs_most_waiting", "u32", None,
+     "the most ticks ever waiting for the main loop to render the strip (queue of 32)"),
 ]
 
 SIZES = {"u8": 1, "s8": 1, "u16": 2, "s16": 2, "u32": 4, "s32": 4, "f32": 4}

@@ -107,6 +107,7 @@ The later [SOC50 investigation](soc50-investigation.md) identifies the error det
 Its instruction observer preserves the accepted sample streams and outcomes.
 The [third SOC50 study](soc50-full-run-equivalence.md) explains the stock/compat trajectory difference before those cutoffs.
 Compat's RTC tick takes about twice stock's cycles, which changes how the wheel leaves voltage saturation at high speed.
+A bit-identical [speed-up](soc50-full-run-equivalence.md#the-speed-up-2026-10-22-not-yet-sufficient) brings the tick to about 1.2 times stock's; that is not yet enough for SOC50.
 The cutoff times themselves are chaotic: numerical perturbations alone spread them by more than 2 s.
 No compat behavior change follows from this matrix.
 

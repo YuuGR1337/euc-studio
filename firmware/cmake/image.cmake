@@ -38,11 +38,18 @@ function(euc_add_image name)
 
     # -nostdlib: no C library and no crt0; ports/stm32f1 provides the reset path and the few libc functions
     # the compiler may call. libgcc is linked back explicitly for soft-float and 64-bit division helpers.
+    # --wrap sends the compiler's double divides and float comparisons to core/math/soft_float.c: the same
+    # results as libgcc's helpers in a fraction of the instructions (euc/math/soft_float.h).
     target_link_options(${name} PRIVATE
         -nostdlib
         "LINKER:--gc-sections"
         "LINKER:-Map=${map}"
-        "LINKER:--fatal-warnings")
+        "LINKER:--fatal-warnings"
+        "LINKER:--wrap=__aeabi_ddiv"
+        "LINKER:--wrap=__aeabi_fcmplt"
+        "LINKER:--wrap=__aeabi_fcmple"
+        "LINKER:--wrap=__aeabi_fcmpge"
+        "LINKER:--wrap=__aeabi_fcmpgt")
     target_link_libraries(${name} PRIVATE gcc)
 
     add_custom_command(TARGET ${name} POST_BUILD

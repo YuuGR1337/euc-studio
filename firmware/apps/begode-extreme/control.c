@@ -228,19 +228,37 @@ static void display_tick(void)
     }
 }
 
-/* LED strip: the tick part reads the time base before this tick's alarm task, the render the one after. */
-static void strip_tick(void)
+/*
+ * LED strip. The tick queues its inputs: the tick part's time base is the one before this tick's alarm task,
+ * the render's the one after (struct app_strip_job). The main loop renders them (strip_render_queued).
+ */
+static struct euc_strip_tick_in strip_tick_inputs(void)
 {
     const struct euc_strip_tick_in in = {app.alarm_out.time_base, app.display_speed,
                                          app.balance.speed_mm_per_s};
-    euc_strip_tick(&app.strip, &in);
+    return in;
 }
 
-static void strip_render(void)
+static void strip_queue(const struct euc_strip_tick_in *tick)
 {
-    const struct euc_strip_render_in in = {app.alarm_out.time_base, app.display_speed,
-                                           app.balance_out.roll_deg, app.lights.strip_pattern};
-    euc_strip_render(&app.strip, &in);
+    const uint32_t queued = app.strip_jobs_queued;
+    if ((queued - app.strip_jobs_done) >= APP_STRIP_JOBS) {
+        app.strip_jobs_dropped++;
+        return;
+    }
+    struct app_strip_job *job = &app.strip_jobs[queued % APP_STRIP_JOBS];
+    job->tick = *tick;
+    job->render = (struct euc_strip_render_in){app.alarm_out.time_base, app.display_speed,
+                                               app.balance_out.roll_deg, app.lights.strip_pattern};
+    app.strip_jobs_queued = queued + 1U;
+    const uint32_t waiting = (queued + 1U) - app.strip_jobs_done;
+    if (waiting > app.strip_jobs_most_waiting) {
+        app.strip_jobs_most_waiting = waiting;
+    }
+}
+
+static void strip_send_changed(void)
+{
     const uint32_t changed = euc_strip_take_changed(&app.strip);
     for (uint32_t i = 0U; i < EUC_STRIP_LEDS; i++) {
         if (((changed >> i) & 1U) != 0U) {
@@ -472,7 +490,7 @@ static void supervise(void)
 void app_rtc_tick(void)
 {
     app.rtc_ticks++;
-    strip_tick();
+    const struct euc_strip_tick_in strip_in = strip_tick_inputs();
     euc_tlm_count_tick(&app.telemetry);
     euc_bms_tick(&app.bms);
     display_tick();
@@ -490,7 +508,7 @@ void app_rtc_tick(void)
     lights_and_buttons();
     storage();
     stm32f1_buzzer_set(app.alarms.beeper.compare);
-    strip_render();
+    strip_queue(&strip_in);
     supervise();
 }
 
@@ -625,6 +643,19 @@ static void storage_write(const struct euc_storage_write *write)
     }
 }
 
+/* Each queued tick in order: the strip state takes the same steps as when the tick rendered it. */
+static void strip_render_queued(void)
+{
+    while (app.strip_jobs_done != app.strip_jobs_queued) {
+        const uint32_t done = app.strip_jobs_done;
+        const struct app_strip_job *job = &app.strip_jobs[done % APP_STRIP_JOBS];
+        euc_strip_tick(&app.strip, &job->tick);
+        euc_strip_render(&app.strip, &job->render);
+        app.strip_jobs_done = done + 1U;
+        strip_send_changed();
+    }
+}
+
 void app_main_loop_pass(void)
 {
     app.main_loop_passes++;
@@ -634,6 +665,7 @@ void app_main_loop_pass(void)
     }
     bms_link();
     telemetry();
+    strip_render_queued();
 
     if (app.storage_write_pending) {
         storage_write(&app.storage_write);

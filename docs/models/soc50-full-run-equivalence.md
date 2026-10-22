@@ -7,7 +7,12 @@ This continues the [first](soc50-investigation.md) and [second](soc50-high-speed
 That later command publication systematically changes the high-speed regime of both full-effort cases that fail.
 A causal test that swaps only the tick cost swaps the regimes.
 On top of this, the final cutoff time is chaotic at the wheel's stability limit: numerical perturbations alone move it by 2-3 s.
-No tolerance, comparison window, scenario, physical input or firmware image changes in this study.
+No tolerance, comparison window, scenario or physical input changes in this study.
+
+**Speed-up.** Bit-identical firmware changes, and moving the LED strip rendering to the main loop as stock does, bring compat's tick from about 77,900 to 45,500 cycles (stock 37,700) and its interrupt load from about 95 % to 67 % (stock 64 %).
+That is not yet enough: over 29 runs per group the regime metrics still differ from stock (p = 0.001-0.005).
+The work before the command store is the part that is still slower than stock's; with the whole tick at stock's cost the metrics no longer differ.
+See [the speed-up](#the-speed-up-2026-10-22-not-yet-sufficient).
 
 Evidence tags as elsewhere: **OBSERVED** in the simulator, **INFERRED** from the code or the measurements.
 
@@ -165,12 +170,96 @@ The same swap decides the SOC20 cutoff (fixed timing, distinct runs over six qua
   Numerical perturbations alone spread them by more than 2 s in every group, including both modified groups.
   A single stock/compat comparison of the full ride therefore cannot pass or fail on its own.
 - The finding went to the lead as a firmware item.
-  The fix direction keeps compat's results bit-identical and makes the tick as fast as stock's:
-  a faster correctly rounded double divide and add, a faster bit-identical `euc_asin`, and a check that no non-balance work precedes the command publication.
-  Third-party soft-float code must be licence-compatible: GPL code such as qfplib cannot be used.
+  The fix direction keeps compat's results bit-identical and makes the tick as fast as stock's.
+  [The speed-up](#the-speed-up-2026-10-22-not-yet-sufficient) does that part of the way.
+  Stock also writes its display before its command store, so compat's work before the store matches stock's order.
 - The first studies' open questions 2 and 3 now have an answer: the systematic part is tick latency, and the rest is chaos.
   The startup difference between quanta (question 1) is a quantum effect of the shared engine, not of compat.
   It is a timestamp effect: MMIO accesses see the quantum's start time ([CPU timing, next steps](cpu-timing.md#next-steps)).
+
+## The speed-up (2026-10-22, not yet sufficient)
+
+The firmware changes below shorten compat's tick (and clean's) without changing any result.
+Each is checked against the code it replaces, bit for bit, or moves work in time only.
+
+| Change | Where | Check |
+|---|---|---|
+| Own double divide, reached through the linker's `--wrap` (about 105 instructions per call in the ride, libgcc 528) | `firmware/core/math/soft_float.c` | 1 M random and constructed operand pairs against libgcc's `__aeabi_ddiv` on our Cortex-M3 core, 0 differ; Unicorn spot runs and a table of 38 special pairs agree; host unit test against hardware division |
+| Own float comparisons `lt`, `le`, `ge`, `gt` (about 21 instructions, libgcc 36-41) | same | 1 M operand pairs each against libgcc, 0 differ |
+| Exact integer `euc_sqrt` (about 68 instructions, the old digit loop about 597) | `firmware/core/math/libm.c` | 1 M operands against HEAD's `libm.c`, 0 differ; `euc_asin`, `euc_atan2` and `euc_log` 1 M each, 0 differ, half of the asin operands uniform in [-1, 1]; 29 boundary inputs identical on both cores |
+| LED strip pattern 1 computes the 12 colour-wheel steps that reach an LED instead of stepping 72 times | `firmware/core/lights/strip.c` | HEAD's module against the new one on 17.7 M random tick and render calls, both profiles: state bytes and changed masks identical after every call; a unit test against an independent 72-step reference at all 74 ring positions |
+| `motor_wrap_i16` in a form GCC inlines | `firmware/core/motor/motor_internal.h` | all 4,294,934,528 inputs where the old form is defined, 0 differ |
+| No `memset` of the FOC output in the 24 kHz step | `firmware/core/motor/motor.c` | every field is set; the struct has no padding |
+| The LED strip renders in the main loop, as stock's does: the tick queues each tick's strip inputs, the main loop renders the queued ticks in order | `firmware/apps/begode-extreme/` (`app.h`, `control.c`); [firmware note](../../firmware/docs/watchdog-and-overcurrent.md#led-strip-in-the-main-loop-both-profiles) | no tick dropped in any run (below); HEAD's SIL library against the new one on three scenarios and both profiles: every channel, firmware value and BLE frame identical, and each of the 98 samples where the strip state differs is the same sequence seen before its next step |
+
+All routines were written for this project from the IEEE 754 rules; no library or vendor code was used.
+libgcc's double add, subtract and multiply stay: they are fast, and libgcc's subtraction rounds about 1 in 25,000 random effective subtractions with an exponent gap of 33 or 34 differently from IEEE (the same on our core and on Unicorn), so an IEEE replacement would change compat's results.
+An always-inline variant of the small float helpers in `float_ops.h` saved about 500 cycles per tick for 2,248 bytes and was dropped.
+
+The strip queue holds 32 ticks (64 ms). Two simulator probes watch it: `strip_jobs_dropped` (ticks that found it full) and `strip_jobs_most_waiting`.
+Over 72 runs (the 20 shipped scenarios on compat, four clean rides, six SIL runs, nine SOC compare runs, the 30-run SOC50 ensemble, SOC50 traces of compat and clean, and a balance-60s trace) no tick was dropped, and at most 7 ticks (14 ms) waited at once (clean); compat's largest backlog is 5 ticks, in the SOC50 trace once, at 4.24 s, just after the stand is released.
+The only longer main-loop waits are the 200 ms delays of the power-off and bootloader paths, after which the wheel turns off or resets.
+The tail-light breathing keeps its period: 2.130 s on balance-60s with HEAD's compat and with this one (video 2.1 ± 0.2 s).
+The full firmware gate passes; compat grows from 34,336 to 35,012 bytes and clean from 36,760 to 37,448 bytes (warning at 45,056); `probes.toml` and its layout id are regenerated for the two probes.
+
+SOC50, quantum 4000, fixed timing, 4.5-9 s (OBSERVED):
+
+| | Stock | Compat before | Compat now | Clean before | Clean now |
+|---|---:|---:|---:|---:|---:|
+| RTC tick, cycles per call | 37,651 | 77,888 | 45,491 | 72,872 | 40,677 |
+| ADC1_2 (FOC), cycles per call | 671 | 796 | 632 | 756 | 709 |
+| All interrupts, CPU share | 63.7 % | 94.6 % | 66.6 % | 92.3 % | 68.1 % |
+| RTC instructions, IMU read to command store, median | 16,470 | 29,587 | 20,569 | - | - |
+| RTC instructions per tick, median | 17,403 | 36,441 | 21,919 | - | - |
+
+The regime metrics over 25-30 distinct runs per group (17 quanta from 4000 to 100 and 13 more below 1250, where the trajectories part). "Before the strip move" is this build with the strip still rendered in the tick:
+
+| Run set | Distinct | Tiltback peak | Last saturated | Alarm samples | Saturated 11-15 s | Pitch RMS 15-17 s |
+|---|---:|---:|---:|---:|---:|---:|
+| Stock | 29 | 0.65° | 11.73 s | 25 | 5.0 % | 0.15° |
+| Compat before | 12 | 0.98° | 12.00 s | 41.5 | 7.3 % | 2.22° |
+| Compat now | 29 | 0.80° | 11.85 s | 33 | 6.0 % | 0.60° |
+| Compat, before the strip move | 25 | 0.82° | 11.85 s | 29 | 6.0 % | 0.67° |
+| the same, tick ×0.88 | 25 | 0.70° | 11.74 s | 27 | 5.0 % | 0.36° |
+| the same, tick ×0.75 | 26 | 0.69° | 11.75 s | 26.5 | 5.2 % | 0.11° |
+
+- Compat now still differs from stock: p = 0.001-0.005 on all five metrics. It also differs from compat before (p 0.025-0.07 on the first four metrics).
+- Moving the strip work out of the tick did not move the regime (0.80° against 0.82°): it shortened the tick after the command store, not before it.
+- At stock's tick cost (×0.75, private counterfactual engine, which scales the whole tick) no metric differs from stock (p 0.07-0.67); at ×0.88 it comes close (p 0.07-0.62), except the pitch oscillation (p = 0.047).
+- Publish latency alone at stock's level is not enough either.
+  On the first build of the speed-up, ×0.80 puts the command store at stock's 17.0 k instructions, while the tick stays at 22.4 k (stock 17.4 k).
+  Its tiltback peak still differs from stock's (0.78°, p = 0.018 over 10 runs).
+  So both the work before the command store and the whole tick have to come down to stock's.
+- With 12 runs per group the p-values swing: two builds with the same tick cost gave p = 0.10 and p = 0.003 for the tiltback peak. The larger groups above replace the 12-run comparison of the causal test for this purpose.
+
+What remains of compat's extra tick is almost all before the command store, about 4,100 instructions per tick:
+
+- About 1,900 instructions in libgcc's double add, slower than stock's library; replacing it would change results (above).
+- About 750 instructions in the float comparison calls; GCC calls a helper for each float comparison, where stock's image makes about a quarter as many comparison calls (INFERRED: its compiler compares many inline).
+- About 600 instructions in the out-of-line `euc_f32_flush` calls (the KEIL_FTZ flush), and about 350 in the divide, which is still slower than stock's.
+
+Both compat and clean ran at 90-98 % interrupt load before the speed-up.
+That is a real-hardware risk for those builds, not only a simulator effect: on a real STM32 the main loop gets 2-10 % of the CPU and may be starved, with late display, storage and BLE work (INFERRED; the flash timing model gives the same picture, 93.8 %).
+The speed-up brings compat to 66.6 % and clean to 68.1 %; stock runs at about 64 %.
+
+Stock against compat now, `euc sim compare`, fixed timing, macOS arm64, base `0575f14` (OBSERVED; gates: launch, build, accelerate, brake, settle):
+
+| Scenario | Quantum | Stock | Compat now | Verdicts | Shipped tolerances |
+|---|---:|---|---|---|---|
+| SOC100 | 4000 | all gates, 72.25 km/h | all gates, 72.31 km/h | agree | pass |
+| SOC100 | 3000 | all gates, 72.33 km/h | all gates, 72.28 km/h | agree | pass |
+| SOC100 | 2000 | all gates, 72.25 km/h | all gates, 72.31 km/h | agree | pass |
+| SOC50 | 4000 | cut 18.56 s | cut 18.77 s | agree | pass |
+| SOC50 | 3000 | accelerate gate, cut 19.87 s | cut 18.81 s | differ | fail: battery 0.542 V against 0.5 V before 9 s (HEAD's compat: 0.538 V) |
+| SOC50 | 2000 | cut 18.56 s | cut 19.61 s | agree | pass |
+| SOC20 | 4000 | cut 16.81 s | cut 16.66 s | agree | pass |
+| SOC20 | 3000 | cut 17.45 s | cut 16.54 s | agree | pass |
+| SOC20 | 2000 | cut 16.81 s | cut 17.13 s | agree | pass |
+
+- SOC20's cutoffs (16.54-17.13 s) now overlap stock's range (16.81-17.45 s); before the speed-up compat cut about 0.8 s earlier.
+- Over the whole ride both SOC100 and SOC50 exceed the default limits at every quantum (at SOC100 the battery voltage from 9.5 s, then a few km/h and up to about 30° of pitch while braking from 20.9 s), so the 9.0 s window stays.
+- Both exceptions in `scenarios/compare/compat-vs-stock.toml` stay. SOC50's verdicts still differ at quantum 3000. SOC100's agree at all three quanta here, but they already did on macOS before the speed-up; the platform-sensitive case is the Linux x86-64 runner, which CI runs when this lands.
+- The CI compare loop (20 scenarios, default quantum) passes, and so do sil's six SIL-against-image compares ([SIL](../sil.md#validation)).
 
 ## Evidence
 
@@ -178,3 +267,5 @@ The private evidence archive is `research/timing-proto/m5-20261022/m5-evidence.t
 Its `SHA256SUMS` and `README.md` list the content.
 It holds the scripts, the reports and 100 Hz traces of every run, the profiles, and the private engine hooks.
 The working copies are under `target/m5-scratch/` in the shared worktree, which git ignores.
+The speed-up's evidence is a second archive, `research/timing-proto/m5-speedup-20261022/m5-speedup-evidence.tar.gz`, with its own `README.md` and `SHA256SUMS`.
+It holds the target harness, the host checks, every measured build, the gate logs, the ensembles with traces and the compares.
