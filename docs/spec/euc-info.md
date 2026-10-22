@@ -32,9 +32,54 @@ they are identified by their pinned sha256 instead.
 ## Rules
 
 - The firmware build writes every field except `image_len`, `crc32` and `signature`, which stay zero.
-- `euc image seal` (a later milestone) fills `image_len`, `crc32` and optionally `signature`.
+- `euc image seal` fills only `image_len` and `crc32` for unsigned development BIN images.
+- Sealing preserves the development flag, metadata, zero signature, and all bytes outside those two fields.
 - `euc image validate` accepts an unsealed image (`image_len == 0`) as a dev image and says so; a sealed image must have
   a matching length and CRC.
+
+## Unsigned development sealing
+
+```sh
+euc image seal <input> --out <output> [--wheel <wheel-id>]
+euc --json image seal <input> --out <output> [--wheel <wheel-id>]
+```
+
+The command selects the wheel as `euc image validate` does. With one profile, `--wheel` is optional.
+With multiple profiles, the command requires `--wheel`. The global `--profiles` option selects another profile folder.
+
+The input must pass the selected wheel's image gate before sealing. It must contain our valid layout-1 `.euc_info` block.
+The input path must point to a regular file.
+The CLI rejects files larger than the selected application slot before loading their contents.
+It reads at most `max_size + 1` bytes and rejects growth beyond the slot limit.
+The development flag must be set. Every signature byte must be zero.
+The command refuses ELF inputs, pinned stock images, signed images, and images without the development flag.
+It does not convert ELF files or add an info block.
+
+Sealing writes the complete BIN length into `image_len` first. It then computes CRC-32/ISO-HDLC over the complete image.
+For this calculation, the `crc32` and `signature` fields count as zero. The calculation includes the new `image_len`.
+Sealing writes the CRC and validates the complete result against the same wheel.
+It changes no other bytes and adds no padding.
+
+An existing seal must pass its length and CRC checks before sealing. Sealing that image again produces the same bytes.
+The command refuses a damaged seal instead of replacing it.
+
+The output must name a new file. Existing files, directories, and symlinks are refused, including aliases of the input.
+The command writes and syncs an exclusively created temporary file in the output directory.
+It then creates the output through an atomic, exclusive hard link and removes the temporary link.
+If the filesystem does not support hard links, the command fails without replacing an existing path.
+An interrupted process can leave a temporary file. The command never reuses an existing temporary file.
+
+Successful JSON output includes `input`, output `file`, the output gate report, and `profiles_source`.
+A sealing refusal includes `input`, `out`, `error.kind`, and `profiles_source`.
+Gate refusals also include the full report in `error.report`. File errors use the CLI's existing error output.
+
+The pure Rust API is `euc_image::seal(image: &Image, wheel: &WheelProfile) -> Result<Image, SealError>`.
+It returns a new image and leaves the input unchanged. It performs no file or BLE operations.
+`SealError` reports format, input gate, stock pin, missing info, signature, development flag, or output gate failures.
+The gate error variants carry a boxed `Report`.
+
+Sealing provides length and CRC checks only. It does not prove cryptographic authenticity or verify signatures.
+This command creates no keys and implements no signing operation. It does not authorize hardware use.
 
 ## Image gate (what `euc image validate` checks for the Begode Extreme)
 

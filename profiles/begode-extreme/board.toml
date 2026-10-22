@@ -7,7 +7,8 @@
 #   SPI3 PB3/4/5, CS PA15 -> MPU-6500 IMU
 #   ADC1 injected: ch4 phase current, ch0 battery voltage, ch11 board NTC
 #   ADC2 injected: ch5 phase current, ch10 (meaning UNKNOWN)
-#   Halls PB7/PB6/PB8, power button PB15 (low = pressed), power latch PB14
+#   Halls PB7/PB6/PB8, power/light button PB15 and handle PA12 (low = pressed), power latch PB14
+#   Headlight PB12 software PWM; firmware/boards/begode-extreme/board.h and core/lights/lights.c
 #   TM1640-style display bit-banged on PC5 (CLK) / PC4 (DIN)
 #
 # Instance order matters: at a quantum boundary due events fire in this order (after SysTick),
@@ -427,6 +428,11 @@ to = "buzzer.pwm"
 from = "GPIOB.14"
 to = "board.latch"
 
+# Observe the actual software-PWM pin, independently of frame 04's requested light mode.
+[[wire]]
+from = "GPIOB.12"
+to = "board.headlight"
+
 [[wire]]
 from = "plant.hall_a"
 to = "GPIOB.7"
@@ -455,6 +461,11 @@ to = "plant.leg_c"
 [[wire]]
 from = "board.button"
 to = "GPIOB.15"
+
+# Released = high. An unwired floating PA12 would falsely read as a pressed handle.
+[[wire]]
+from = "board.handle"
+to = "GPIOA.12"
 
 # What each ADC channel measures. Channels not listed read mid-scale (2048).
 [[analog]]

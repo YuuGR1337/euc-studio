@@ -1,0 +1,5 @@
+/dist/
+# maturin develop puts the extension next to the package
+euc_studio/*.so
+euc_studio/*.pyd
+.pytest_cache/

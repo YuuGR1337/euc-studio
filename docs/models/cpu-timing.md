@@ -26,17 +26,33 @@ Reference tests explicitly use CPI 1.25 and `ExceptionTiming::REFERENCE`, with n
 For a historical CLI run, add `--cpi 1.25 --no-exception-timing`.
 Changing `--cpi` alone retains the normal exception costs.
 
-### Cadence check
+### RTC startup correction
+
+PRL and CNT writes now reload the RTC divider, as [RM0008 section 18.4.4](https://www.st.com/resource/en/reference_manual/rm0008-stm32f103xx-advanced-armbased-32bit-mcus-stmicroelectronics.pdf) requires.
+The previous model retained the reset divider until its first rollover.
+At 62.5 kHz, that reset period was 524.304 ms instead of the configured 2.016 ms.
+The nominal control period remains 2.016 ms.
+
+Release boot tests on both CPU backends measure the first RTC handler at 1177.753 ms and first telemetry at 1480.700 ms.
+Both produce 45 telemetry frames over six simulated seconds, with the existing `V` and `N` command pauses.
+These runs use stock `cbfb328c`, blank settings, CPI 1.25, no exception costs, and quantum size 4000.
+The boot tests retain their 10 ms telemetry tolerance, boot marker checks, and performance floors.
+
+The cadence and scenario measurements below precede this RTC correction.
+They describe the previous RTC model and require new runs before they establish current behavior.
+
+### Previous cadence check
 
 With the owner's mode-1 preset, a 30-second stock idle run gave these results:
 
-| Measurement | Current model | Real recording |
+| Measurement | Previous RTC model | Real recording |
 |---|---|---|
 | Light breathing period | mean 2.235 s; 2.18–2.28 s over nine periods | about 2.1 ±0.2 s, one video cycle |
 | BLE frame-group period | 307.44 ms | 309.6 ms |
 
 The light period is about 6% above the video estimate. The BLE period is about 0.7% below the capture.
-These checks support the fixed timing estimate. They do not establish exact instruction timing.
+These checks supported the fixed timing estimate under the previous RTC model.
+They do not establish exact instruction timing or current light cadence.
 
 ### Clean firmware scheduling
 
@@ -58,9 +74,9 @@ Evidence tags as elsewhere: **OBSERVED** = measured in the simulator or in a rea
 **INFERRED** = follows from the code or the measurements; **ESTIMATE** = a model or a figure from
 outside the project.
 
-## Scenario validation
+## Previous scenario validation
 
-These checks use CPI 2.0, exception costs, and the LTO target builds.
+These checks used the previous RTC model, CPI 2.0, exception costs, and the LTO target builds.
 The frozen image hashes start with `3fe25c10` (compat) and `fe83cb1d` (clean).
 The stock image stays `cbfb328c` (GW1825007). The plant, rider, and firmware safety deadlines retain their prior settings.
 

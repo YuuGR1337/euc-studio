@@ -109,4 +109,13 @@ export interface Outputs {
   leds: [number, number, number][];
   /** 0 when silent. */
   buzzer_hz: number;
+  /** Instantaneous simulated PB12 level; null when released or unavailable. */
+  headlight_pin_high?: boolean | null;
+  /** GPIO high-time fraction over up to 40 ms of simulated edges, 0..1. */
+  headlight_duty?: number | null;
+  headlight_source?: string | null;
+  /** PB14 latch drive, independent of the Power contact. */
+  power_latched?: boolean | null;
+  /** Effective modeled controller rail; absent for legacy or unavailable sources. */
+  controller_powered?: boolean | null;
 }

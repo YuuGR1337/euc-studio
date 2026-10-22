@@ -113,6 +113,11 @@ pub fn typescript() -> String {
     let _ = writeln!(w, "  geoms: Geom[];");
     let _ = writeln!(w, "}}");
     let _ = writeln!(w);
+    outputs_typescript(w);
+    ts
+}
+
+fn outputs_typescript(w: &mut String) {
     let _ = writeln!(w, "/** What the wheel shows and sounds, as the firmware drives it. */");
     let _ = writeln!(w, "export interface Outputs {{");
     let _ = writeln!(w, "  /** Display driver grid memory, one byte per grid, one bit per segment. */");
@@ -124,8 +129,16 @@ pub fn typescript() -> String {
     let _ = writeln!(w, "  leds: [number, number, number][];");
     let _ = writeln!(w, "  /** 0 when silent. */");
     let _ = writeln!(w, "  buzzer_hz: number;");
+    let _ = writeln!(w, "  /** Instantaneous simulated PB12 level; null when released or unavailable. */");
+    let _ = writeln!(w, "  headlight_pin_high?: boolean | null;");
+    let _ = writeln!(w, "  /** GPIO high-time fraction over up to 40 ms of simulated edges, 0..1. */");
+    let _ = writeln!(w, "  headlight_duty?: number | null;");
+    let _ = writeln!(w, "  headlight_source?: string | null;");
+    let _ = writeln!(w, "  /** PB14 latch drive, independent of the Power contact. */");
+    let _ = writeln!(w, "  power_latched?: boolean | null;");
+    let _ = writeln!(w, "  /** Effective modeled controller rail; absent for legacy or unavailable sources. */");
+    let _ = writeln!(w, "  controller_powered?: boolean | null;");
     let _ = writeln!(w, "}}");
-    ts
 }
 
 #[cfg(test)]

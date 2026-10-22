@@ -54,8 +54,8 @@ struct Config {
 ///
 /// `RSF` behaves as on hardware: software clears it, and it sets again two RTCCLK ticks later, so
 /// `RTC_WaitForSynchro` waits for a running clock. Writes complete at once (`RTOFF` reads 1).
-/// `PRL`, `CNT` and `ALR` take writes only in configuration mode (`CNF`); a new `PRL` applies from
-/// the next second. While a PWR instance is configured, writes need `PWR_CR.DBP`.
+/// `PRL`, `CNT` and `ALR` take writes only in configuration mode (`CNF`). PRL and CNT writes
+/// reload the divider (RM0008 §18.4.4). While a PWR instance is configured, writes need `PWR_CR.DBP`.
 ///
 /// Backup domain: a system reset clears `CRH`/`CRL` (and with them `RSF`) but the prescaler,
 /// counter and alarm run on; a power cycle resets everything unless `battery_backed`.
@@ -74,7 +74,7 @@ pub struct Rtc {
     clock: Option<(Rate, u64)>,
     /// RTCCLK ticks from the epoch to the start of the current second.
     second_start: u64,
-    /// `PRL` of the current second (a new value applies from the next one).
+    /// Reload value of the current divider period.
     prl_active: u32,
     seconds: u64,
 }
@@ -139,6 +139,14 @@ impl Rtc {
         if let Some((rate, epoch)) = self.clock {
             ctx.schedule(epoch + rate.cycles(self.second_start + u64::from(self.prl_active) + 1), TAG_SECOND);
         }
+    }
+
+    /// A successful PRL/CNT write restarts DIV at PRL, replacing the old second deadline.
+    /// Keep the RTCCLK epoch so a write between clock edges does not move the clock itself.
+    fn reload_divider(&mut self, ctx: &mut Ctx<'_>) {
+        self.prl_active = self.prl;
+        self.second_start = self.ticks(ctx.now()).unwrap_or(0);
+        self.schedule_second(ctx);
     }
 
     /// RTCCLK ticks since the epoch.
@@ -253,10 +261,16 @@ impl Peripheral for Rtc {
                     false,
                 );
             }
-            PRLH => self.prl = (half(self.prl >> 16) & 0xF) << 16 | self.prl & 0xFFFF,
-            PRLL => self.prl = self.prl & 0xF_0000 | half(self.prl),
-            CNTH => self.cnt = half(self.cnt >> 16) << 16 | self.cnt & 0xFFFF,
-            CNTL => self.cnt = self.cnt & 0xFFFF_0000 | half(self.cnt),
+            PRLH | PRLL | CNTH | CNTL => {
+                match off {
+                    PRLH => self.prl = (half(self.prl >> 16) & 0xF) << 16 | self.prl & 0xFFFF,
+                    PRLL => self.prl = self.prl & 0xF_0000 | half(self.prl),
+                    CNTH => self.cnt = half(self.cnt >> 16) << 16 | self.cnt & 0xFFFF,
+                    CNTL => self.cnt = self.cnt & 0xFFFF_0000 | half(self.cnt),
+                    _ => unreachable!(),
+                }
+                self.reload_divider(ctx);
+            }
             ALRH => self.alr = half(self.alr >> 16) << 16 | self.alr & 0xFFFF,
             ALRL => self.alr = self.alr & 0xFFFF_0000 | half(self.alr),
             _ => return,
@@ -349,9 +363,9 @@ mod tests {
     fn seconds_tick_at_496_hz() {
         let mut host = host();
         let mut rtc = extreme_rtc(&mut host);
-        // The first second still runs with the reset PRL (0x8000); then 126 ticks per second.
+        let configured_at = host.now;
         let first = fire(&mut rtc, &mut host, TAG_SECOND);
-        assert_eq!(first, Rate::new(72_000_000, 62_500).cycles(0x8001));
+        assert_eq!(first, configured_at + SECOND, "the new PRL reloads DIV before the first tick");
         assert!(host.irq(3));
         write(&mut rtc, &mut host, CRL, !SECF & 0xFFFF);
         assert!(!host.irq(3));
@@ -360,6 +374,85 @@ mod tests {
         assert_eq!(rtc.counter(), 3);
         host.now = first + 2 * SECOND + SECOND / 2;
         assert_eq!(read(&mut rtc, &mut host, DIVL), 125 - 63);
+    }
+
+    #[test]
+    fn prescaler_and_counter_writes_reload_divider_and_replace_pending_tick() {
+        for (register, value) in [(PRLH, 1), (PRLL, 249), (CNTH, 1), (CNTL, 9)] {
+            let mut host = host();
+            let mut rtc = extreme_rtc(&mut host);
+            let first = fire(&mut rtc, &mut host, TAG_SECOND);
+            host.now = first + SECOND / 2;
+            let old_deadline = host.scheduled[&TAG_SECOND];
+            write(&mut rtc, &mut host, CRL, CNF);
+            write(&mut rtc, &mut host, register, value);
+            write(&mut rtc, &mut host, CRL, 0);
+            let prescaler = match register {
+                PRLH => 0x1_007d,
+                PRLL => 249,
+                _ => 125,
+            };
+            let period = Rate::new(72_000_000, 62_500).cycles(u64::from(prescaler) + 1);
+            assert_eq!(read(&mut rtc, &mut host, DIVL), prescaler & 0xffff, "{register:#x}");
+            assert_eq!(read(&mut rtc, &mut host, DIVH), prescaler >> 16, "{register:#x}");
+            assert_ne!(host.scheduled[&TAG_SECOND], old_deadline, "{register:#x}");
+            assert_eq!(host.scheduled[&TAG_SECOND], host.now + period, "{register:#x}");
+            let count = rtc.counter();
+            fire(&mut rtc, &mut host, TAG_SECOND);
+            assert_eq!(rtc.counter(), count + 1, "{register:#x}");
+            assert_eq!(host.scheduled[&TAG_SECOND], host.now + period, "no old second deadline survives");
+        }
+    }
+
+    #[test]
+    fn alarm_and_rejected_counter_writes_do_not_reload_divider() {
+        let mut host = host();
+        let mut rtc = extreme_rtc(&mut host);
+        let first = fire(&mut rtc, &mut host, TAG_SECOND);
+        host.now = first + SECOND / 2;
+        let deadline = host.scheduled[&TAG_SECOND];
+        for register in [PRLH, PRLL, CNTH, CNTL] {
+            write(&mut rtc, &mut host, register, 9);
+            assert_eq!(host.scheduled[&TAG_SECOND], deadline);
+            assert_eq!(read(&mut rtc, &mut host, DIVL), 62);
+        }
+        write(&mut rtc, &mut host, CRL, CNF);
+        write(&mut rtc, &mut host, ALRH, 0);
+        write(&mut rtc, &mut host, ALRL, 9);
+        write(&mut rtc, &mut host, CRL, 0);
+        assert_eq!(host.scheduled[&TAG_SECOND], deadline);
+        assert_eq!(read(&mut rtc, &mut host, DIVL), 62);
+    }
+
+    #[test]
+    fn divider_reload_between_clock_edges_preserves_rtcclk_phase() {
+        let mut host = host();
+        let mut rtc = extreme_rtc(&mut host);
+        let edge = fire(&mut rtc, &mut host, TAG_SECOND);
+        host.now = edge + 1;
+        write(&mut rtc, &mut host, CRL, CNF);
+        write(&mut rtc, &mut host, PRLL, 249);
+        write(&mut rtc, &mut host, CRL, 0);
+        assert_eq!(read(&mut rtc, &mut host, DIVL), 249);
+        assert_eq!(host.scheduled[&TAG_SECOND], edge + Rate::new(72_000_000, 62_500).cycles(250));
+    }
+
+    #[test]
+    fn divider_configured_without_clock_uses_new_prescaler_when_clock_starts() {
+        let running_rcc = host().peers.remove(&RCC).unwrap();
+        let mut host = TestHost::new(72_000_000);
+        host.peers.insert(RCC, Box::new(Rcc::new(8_000_000, None)));
+        let mut rtc = Rtc::new(RCC, None, false, None);
+        write(&mut rtc, &mut host, CRL, CNF);
+        write(&mut rtc, &mut host, PRLL, 125);
+        write(&mut rtc, &mut host, CNTL, 9);
+        write(&mut rtc, &mut host, CRL, 0);
+        assert!(host.scheduled.is_empty());
+        host.peers.insert(RCC, running_rcc);
+        host.now = 5000;
+        assert_eq!(read(&mut rtc, &mut host, DIVL), 125);
+        assert_eq!(fire(&mut rtc, &mut host, TAG_SECOND), 5000 + SECOND);
+        assert_eq!(rtc.counter(), 10);
     }
 
     #[test]

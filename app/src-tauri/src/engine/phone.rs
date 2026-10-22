@@ -4,12 +4,10 @@
 //! Never-send commands (`c` `y`, `!` `@`, `+` `-`: they cut the motor and erase flash, enter the
 //! bootloader or power the wheel off) have no id here, so nothing in the studio can build them.
 
-use std::fmt::Write as _;
 use std::time::Duration;
 
 use euc_proto_begode::{
-    AlarmMode, Assembler, Command, LightMode, PedalMode, Reply, RollCutoff, SAFE_BYTE_GAP, Safety, Segment, Telemetry,
-    Units,
+    AlarmMode, Assembler, Command, LightMode, PedalMode, RollCutoff, SAFE_BYTE_GAP, Safety, Segment, Units, describe,
 };
 use serde::Serialize;
 
@@ -43,104 +41,17 @@ impl PhoneDecoder {
         self.assembler.push(&raw);
         while let Some(segment) = self.assembler.next_segment() {
             self.next_id += 1;
-            out.push(describe(self.next_id, t, &segment));
+            out.push(phone_frame(self.next_id, t, &segment));
         }
     }
 }
 
-fn hex(bytes: &[u8]) -> String {
-    let mut s = String::with_capacity(bytes.len() * 3);
-    for (i, b) in bytes.iter().enumerate() {
-        if i > 0 {
-            s.push(' ');
-        }
-        let _ = write!(s, "{b:02X}");
-    }
-    s
-}
-
-fn field(name: &str, value: impl Into<String>) -> (String, String) {
-    (name.to_owned(), value.into())
-}
-
-fn describe(id: u64, t: f64, segment: &Segment) -> PhoneFrame {
-    match segment {
-        Segment::Text(bytes) => {
-            let (reply, summary) = match Reply::parse(bytes) {
-                Reply::Version(v) => (true, format!("Version {v}")),
-                Reply::Name(n) => (true, format!("Name {n}")),
-                Reply::SpeedAlarms(r) => (true, format!("Speed alarms: {r:?}")),
-                Reply::ImuInit { ok } => (false, format!("IMU init {}", if ok { "ok" } else { "FAILED" })),
-                Reply::InitDone { boot_count } => (false, format!("Init done, boot {boot_count}")),
-                Reply::Text(text) => (false, text.trim().chars().take(80).collect()),
-            };
-            PhoneFrame { id, t, kind: "text", summary, fields: Vec::new(), hex: hex(bytes), reply }
-        }
-        Segment::Frame(frame) => {
-            let bytes = frame.as_bytes();
-            let (kind, summary, fields) = match Telemetry::decode(frame) {
-                Telemetry::Live(l) => (
-                    "live",
-                    format!("{:.1} km/h, {:.2} V, {:.2} A", l.speed_kmh(), l.voltage_v(), l.phase_current_a()),
-                    vec![
-                        field("Voltage", format!("{:.2} V", l.voltage_v())),
-                        field("Speed", format!("{:.2} km/h", l.speed_kmh())),
-                        field("Range", format!("{} km", l.range)),
-                        field("Trip", format!("{} m", l.trip)),
-                        field("Phase current", format!("{:.2} A", l.phase_current_a())),
-                        field("Board temp", format!("{:.1} °C", l.temperature_c())),
-                        field("Beeper volume", l.beeper_volume.to_string()),
-                    ],
-                ),
-                Telemetry::Bms(b) => (
-                    "bms",
-                    format!("BMS block {}: {:.2} V, {:.2} A", b.block, b.voltage_v(), b.current_a()),
-                    vec![
-                        field("Block", b.block.to_string()),
-                        field("Voltage", format!("{:.2} V", b.voltage_v())),
-                        field("Current", format!("{:.2} A", b.current_a())),
-                        field("Temp max", b.temp_max.to_string()),
-                        field("Temp min", b.temp_min.to_string()),
-                        field("PWM alarm", format!("{} %", b.pwm_alarm)),
-                    ],
-                ),
-                Telemetry::Cells(c) => {
-                    let first = c.first_cell();
-                    let cells: Vec<String> =
-                        c.millivolts.iter().map(|mv| format!("{:.3}", f64::from(*mv) / 1000.0)).collect();
-                    (
-                        "cells",
-                        format!("Pack {:?} cells {}-{}", c.pack, first + 1, first + c.millivolts.len()),
-                        vec![field("Cells (V)", cells.join(" "))],
-                    )
-                }
-                Telemetry::Status(s) => (
-                    "status",
-                    format!(
-                        "Odometer {:.1} km, tiltback {}",
-                        f64::from(s.odometer) / 1000.0,
-                        if s.tiltback >= 200 { "off".to_owned() } else { format!("{} km/h", s.tiltback) }
-                    ),
-                    vec![
-                        field("Odometer", format!("{} m", s.odometer)),
-                        field("Auto off", format!("{} s", s.auto_off)),
-                        field("Tiltback", format!("{} km/h", s.tiltback)),
-                        field("Light", s.light.to_string()),
-                    ],
-                ),
-                Telemetry::Power(p) => (
-                    "power",
-                    format!("PWM {} %, battery {:.2} A", p.pwm, p.battery_current_a()),
-                    vec![
-                        field("PWM", format!("{} %", p.pwm)),
-                        field("Battery current", format!("{:.2} A", p.battery_current_a())),
-                    ],
-                ),
-                Telemetry::Other(f) => ("other", format!("Frame {:02X}", f.kind()), Vec::new()),
-            };
-            PhoneFrame { id, t, kind, summary, fields, hex: hex(bytes), reply: false }
-        }
-    }
+/// The phone's line for a segment: the shared describer (`euc_proto_begode::describe`, which
+/// recordings use too), with the segment's id, time and bytes.
+fn phone_frame(id: u64, t: f64, segment: &Segment) -> PhoneFrame {
+    let d = describe::describe(segment);
+    let hex = describe::hex(describe::segment_bytes(segment));
+    PhoneFrame { id, t, kind: d.kind, summary: d.summary, fields: d.fields, hex, reply: d.reply }
 }
 
 /// A command the phone can send, for the UI.
@@ -328,5 +239,51 @@ mod tests {
         assert_eq!(out[0].summary, "Version GW1825020");
         assert_eq!(out[1].kind, "live");
         assert!(out[1].summary.contains("130.00 V"), "{}", out[1].summary);
+    }
+
+    /// The phone shows what it showed before it used the shared describer: the real idle capture
+    /// (tests/data/begode-extreme), after a version reply, line for line. Golden values from the
+    /// app's own describer, which matched the shared one on all 381 segments when it was removed.
+    #[test]
+    fn the_real_capture_reads_as_before() {
+        let capture = include_str!("../../../../tests/data/begode-extreme/idle-2026-10-15.hex");
+        let mut d = PhoneDecoder::default();
+        let mut out = Vec::new();
+        d.push(&b"GW1825020".map(|b| (1.0, b)), &mut out);
+        for line in capture.lines() {
+            let mut parts = line.split_whitespace();
+            let t: f64 = parts.next().unwrap().parse().unwrap();
+            let bytes: Vec<(f64, u8)> = parts.map(|h| (t, u8::from_str_radix(h, 16).unwrap())).collect();
+            d.push(&bytes, &mut out);
+        }
+        let count = |kind: &str| out.iter().filter(|f| f.kind == kind).count();
+        assert_eq!(out.len(), 381);
+        assert_eq!(["live", "bms", "cells", "status", "power", "text"].map(count), [76, 76, 76, 76, 76, 1]);
+        fn line(f: &PhoneFrame) -> (&str, &str, bool) {
+            (f.kind, &f.summary, f.reply)
+        }
+        let fields = |f: &PhoneFrame| f.fields.iter().map(|(k, v)| format!("{k}={v}")).collect::<Vec<_>>().join(", ");
+        assert_eq!(line(&out[0]), ("text", "Version GW1825020", true));
+        assert_eq!(out[0].hex, "47 57 31 38 32 35 30 32 30");
+        assert_eq!(line(&out[1]), ("live", "0.0 km/h, 129.70 V, 1.90 A", false));
+        assert_eq!(
+            fields(&out[1]),
+            "Voltage=129.70 V, Speed=0.00 km/h, Range=117 km, Trip=6 m, Phase current=1.90 A, \
+             Board temp=25.3 °C, Beeper volume=9"
+        );
+        assert_eq!(out[1].hex, "55 AA 19 55 00 00 00 75 00 06 00 BE F0 FA 14 A9 00 09 00 18 5A 5A 5A 5A");
+        assert_eq!(line(&out[2]), ("bms", "BMS block 0: 129.70 V, 0.00 A", false));
+        assert_eq!(
+            fields(&out[2]),
+            "Block=0, Voltage=129.70 V, Current=0.00 A, Temp max=23, Temp min=22, PWM alarm=80 %"
+        );
+        assert_eq!(line(&out[3]), ("cells", "Pack B cells 1-8", false));
+        assert_eq!(fields(&out[3]), "Cells (V)=4.074 4.074 4.075 4.075 4.075 4.075 4.074 4.075");
+        assert_eq!(line(&out[4]), ("status", "Odometer 1468.7 km, tiltback 69 km/h", false));
+        assert_eq!(fields(&out[4]), "Odometer=1468670 m, Auto off=7079 s, Tiltback=69 km/h, Light=0");
+        assert_eq!(line(&out[5]), ("power", "PWM -1 %, battery -1.53 A", false));
+        assert_eq!(fields(&out[5]), "PWM=-1 %, Battery current=-1.53 A");
+        assert_eq!(out[5].hex, "55 AA FF 67 00 00 00 00 FF FF 00 00 00 00 00 00 00 00 07 18 5A 5A 5A 5A");
+        assert_eq!((out[1].t, out[2].t, out[5].id), (1.673, 1.674, 6), "the time of each segment's last byte");
     }
 }

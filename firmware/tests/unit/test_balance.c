@@ -316,6 +316,41 @@ static void test_headroom_tiltback_in_clean(void)
     }
 }
 
+/* Clean: the driving part of Vd, low-passed over 0.3 s, above 35 % also starts the PWM tiltback, while the
+ * vector is still below 75 %; a braking (negative) Vd does not count (PWM_TILTBACK_VQ_ONLY). */
+static void test_headroom_tiltback_on_vd_in_clean(void)
+{
+    const uint32_t profiles[2] = {EUC_SIL_PROFILE_COMPAT, EUC_SIL_PROFILE_CLEAN};
+    for (size_t p = 0U; p < 2U; p++) {
+        euc_sil_quirk_set_mask(euc_sil_quirk_profile_mask(profiles[p]));
+        struct euc_balance_state state;
+        struct euc_balance_in in = level_input(); /* 'x': PWM tiltback off, no alarm */
+        euc_balance_init(&state);
+        state.speed_cm_per_s = 1100;
+        in.motor_voltage_sq = (12600U * 12600U) + (14000U * 14000U); /* |V| = 18835, 60 % */
+        in.motor_voltage_d = -12600;                                 /* braking, 40 % */
+        for (unsigned tick = 0U; tick < 496U; tick++) {
+            euc_balance_step_tiltbacks(&state, &in);
+        }
+        TEST_ASSERT_EQUAL_FLOAT(0.0F, state.tiltback_pwm_deg);
+        in.motor_voltage_d = 10400; /* driving, 33 % */
+        for (unsigned tick = 0U; tick < 496U; tick++) {
+            euc_balance_step_tiltbacks(&state, &in);
+        }
+        TEST_ASSERT_EQUAL_FLOAT(0.0F, state.tiltback_pwm_deg);
+        in.motor_voltage_d = 12600; /* driving, 40 %: the average passes 35 % about 0.15 s later */
+        for (unsigned tick = 0U; tick < 496U; tick++) {
+            euc_balance_step_tiltbacks(&state, &in);
+        }
+        if (profiles[p] == EUC_SIL_PROFILE_COMPAT) {
+            TEST_ASSERT_EQUAL_FLOAT(0.0F, state.tiltback_pwm_deg);
+        } else {
+            TEST_ASSERT_TRUE(state.tiltback_pwm_deg > 1.5F); /* 2.7 deg/s nose-up for about 0.85 s */
+            TEST_ASSERT_TRUE(state.tiltback_pwm_deg < 2.7F);
+        }
+    }
+}
+
 /* Clean: the battery tiltback stops at 8 deg and a 10 km/h speed limit takes over
  * (BATTERY_TILTBACK_UNBOUNDED). */
 static void test_battery_tiltback_capped_with_a_speed_limit_in_clean(void)
@@ -496,6 +531,47 @@ static void test_error_cutoff_beeps_once(void)
     TEST_ASSERT_FALSE(state.fallen); /* no automatic recovery from this one */
 }
 
+/* Clean: an error angle alone cuts after the pitch detector's 52 ticks; a roll cut-off (tipped) keeps the
+ * stock 11 ticks (ERROR_CUTOFF_22MS). */
+static void test_error_cutoff_waits_105_ms_in_clean(void)
+{
+    euc_sil_quirk_set_mask(euc_sil_quirk_profile_mask(EUC_SIL_PROFILE_CLEAN));
+    struct euc_balance_state state;
+    struct euc_balance_out out;
+    const struct euc_balance_in in = level_input();
+    euc_balance_init(&state);
+    state.error_deg = -41.0F; /* the attitude itself stays level: only the error detector counts */
+    unsigned beeps = 0U;
+    for (unsigned tick = 0U; tick < 60U; tick++) {
+        memset(&out, 0, sizeof(out));
+        euc_balance_step_cutoffs(&state, &in, &out);
+        beeps += out.beep_count;
+        TEST_ASSERT_EQUAL(tick >= 51U, state.motor_disabled);
+    }
+    TEST_ASSERT_EQUAL_UINT(1U, beeps);
+
+    /* 30 ticks past 40 deg, then the wheel tips: the stock 22 ms applies from there, and it beeps once. */
+    euc_balance_init(&state);
+    state.error_deg = -41.0F;
+    for (unsigned tick = 0U; tick < 30U; tick++) {
+        euc_balance_step_cutoffs(&state, &in, &out);
+    }
+    TEST_ASSERT_FALSE(state.motor_disabled);
+    state.tipped = true;
+    memset(&out, 0, sizeof(out));
+    euc_balance_step_cutoffs(&state, &in, &out);
+    TEST_ASSERT_TRUE(state.motor_disabled);
+    TEST_ASSERT_EQUAL_UINT8(1U, out.beep_count);
+
+    /* Tipped alone: 11 ticks, as in stock. */
+    euc_balance_init(&state);
+    state.tipped = true;
+    for (unsigned tick = 0U; tick < 11U; tick++) {
+        euc_balance_step_cutoffs(&state, &in, &out);
+        TEST_ASSERT_EQUAL(tick >= 10U, state.motor_disabled);
+    }
+}
+
 static void test_overload_cutoff_after_1_5_s(void)
 {
     struct euc_balance_state state;
@@ -627,6 +703,7 @@ int main(void)
     RUN_TEST(test_lost_hall_line_lowers_the_speed_tiltback);
     RUN_TEST(test_limp_tiltback_rate_is_bounded);
     RUN_TEST(test_headroom_tiltback_in_clean);
+    RUN_TEST(test_headroom_tiltback_on_vd_in_clean);
     RUN_TEST(test_battery_tiltback_capped_with_a_speed_limit_in_clean);
     RUN_TEST(test_battery_tiltback_window);
     RUN_TEST(test_pwm_tiltback_needs_the_setting_and_clamps);
@@ -635,6 +712,7 @@ int main(void)
     RUN_TEST(test_recovery_blocked_by_a_hard_fault);
     RUN_TEST(test_recovery_blocked_by_a_lost_hall_line);
     RUN_TEST(test_error_cutoff_beeps_once);
+    RUN_TEST(test_error_cutoff_waits_105_ms_in_clean);
     RUN_TEST(test_overload_cutoff_after_1_5_s);
     RUN_TEST(test_roll_cutoffs);
     RUN_TEST(test_handle_cut_and_restore);

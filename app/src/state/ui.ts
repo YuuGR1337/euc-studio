@@ -22,9 +22,10 @@ interface UiState {
   /** What the right dock shows in Ride. */
   rightTab: RightTab;
   shortcutsOpen: boolean;
+  recordingsOpen: boolean;
   /** Bumped to ask the dock layout to reset to defaults. */
   layoutEpoch: number;
-  /** Play the wheel's buzzer through the speakers (off by default). */
+  /** Play the wheel's buzzer through the speakers (on by default). */
   buzzerSound: boolean;
 
   navigate: (route: Route) => void;
@@ -35,6 +36,7 @@ interface UiState {
   setPaletteOpen: (open: boolean) => void;
   setRightTab: (tab: RightTab) => void;
   setShortcutsOpen: (open: boolean) => void;
+  setRecordingsOpen: (open: boolean) => void;
   setBuzzerSound: (on: boolean) => void;
 }
 
@@ -72,8 +74,9 @@ export const useUi = create<UiState>((set, get) => ({
   paletteOpen: false,
   rightTab: readStored<RightTab>("rightTab", "telemetry") === "phone" ? "phone" : "telemetry",
   shortcutsOpen: false,
+  recordingsOpen: false,
   layoutEpoch: 0,
-  buzzerSound: readStored<boolean>("buzzerSound", false) === true,
+  buzzerSound: readStored<boolean>("buzzerSound", true) !== false,
 
   navigate: (route) => {
     if (get().route === route) return;
@@ -109,6 +112,7 @@ export const useUi = create<UiState>((set, get) => ({
     set({ rightTab });
   },
   setShortcutsOpen: (shortcutsOpen) => set({ shortcutsOpen }),
+  setRecordingsOpen: (recordingsOpen) => set({ recordingsOpen }),
   setBuzzerSound: (buzzerSound) => {
     writeStored("buzzerSound", buzzerSound);
     set({ buzzerSound });

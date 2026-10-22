@@ -1,70 +1,139 @@
 import { useEffect, useState } from "react";
-import { BuzzerAudio } from "../../engine/buzzerAudio.ts";
-import { engine } from "../../engine/index.ts";
+import { BuzzerAudio, firmwareAudioHold, usesRendererAudio } from "../../engine/buzzerAudio.ts";
+import { engine, useEngineVersion, type EngineClient } from "../../engine/index.ts";
 import { useUi } from "../../state/ui.ts";
 
-/** Sound follows the simulation only near real time; outside this range it pauses. */
-const MIN_RTF = 0.8;
-const MAX_RTF = 1.25;
-
-/** Why the sound is held: a short label for the header and the full reason for its tooltip. */
 export interface SoundHold {
   label: string;
   detail: string;
+  blocked?: boolean;
+}
+function sourceReason(source: EngineClient): SoundHold | null {
+  if (source.kind === "playback")
+    return { label: "No audio", detail: "This recording contains no buzzer audio." };
+  if (source.kind !== "live")
+    return { label: "No audio", detail: "The demo does not run firmware buzzer outputs." };
+  return firmwareAudioHold(source);
 }
 
-/** Why the sound is held, or null while it plays. */
-function pauseReason(): SoundHold | null {
-  if (!engine.playing) return { label: "Sound paused", detail: "The simulation is paused." };
-  const rtf = engine.measuredRtf();
-  if (rtf > 0 && (rtf < MIN_RTF || rtf > MAX_RTF)) {
-    return {
-      label: "Sound paused",
-      detail: `The simulation runs at ×${rtf.toFixed(rtf < 1 ? 2 : 1)}. Sound plays only between ×${MIN_RTF} and ×${MAX_RTF}, so every beep keeps its real timing.`,
-    };
-  }
-  return null;
-}
-
-/**
- * Plays the wheel's buzzer while the user has turned the sound on. Returns why the sound is
- * paused (a run far from real time, or paused), or null.
- */
+/** Native audio owns desktop output. Only an explicit unsupported backend uses Web Audio. */
 export function useBuzzerSound(): SoundHold | null {
+  useEngineVersion();
+  const source = engine;
   const on = useUi((s) => s.buzzerSound);
-  const [reason, setReason] = useState<SoundHold | null>(null);
+  const rendererRoute = usesRendererAudio(source);
+  const [state, setState] = useState<{ source: EngineClient; reason: SoundHold | null } | null>(
+    null,
+  );
 
   useEffect(() => {
-    if (!on) return;
+    if (!on || source.kind !== "live" || !rendererRoute) return;
     const audio = new BuzzerAudio();
-    audio.start();
-    // A context opened without a gesture (the setting was on at launch) starts suspended.
+    let unavailable = false;
+    try {
+      audio.start();
+    } catch {
+      unavailable = true;
+      audio.stop();
+    }
     const resume = () => audio.resume();
     window.addEventListener("pointerdown", resume);
     window.addEventListener("keydown", resume);
-    let held: SoundHold | null = null;
+    let shown: string | undefined;
+    let timeVersion = source.time.version;
+    let epoch = source.status.runEpoch;
+    let scenario = source.scenarioId;
+    let firmware = source.firmware;
+    let simTime = source.latest.t;
+    // This is a truthful explanation, not a queue of old tones or an inferred boot beep.
+    let lateStart = source.latest.t > 0;
+    let firstReady = audio.audible;
     const check = () => {
-      const next = pauseReason();
-      if (next?.detail === held?.detail) return;
-      held = next;
-      if (next) audio.silence();
-      setReason(next);
+      if (!usesRendererAudio(source)) {
+        audio.stop();
+        return false;
+      }
+      const reset =
+        (source.time.length === 0 && source.time.version !== timeVersion) ||
+        source.latest.t < simTime ||
+        source.status.runEpoch !== epoch ||
+        source.scenarioId !== scenario ||
+        source.firmware !== firmware;
+      timeVersion = source.time.version;
+      simTime = source.latest.t;
+      epoch = source.status.runEpoch;
+      scenario = source.scenarioId;
+      firmware = source.firmware;
+      if (reset) {
+        lateStart = false;
+        firstReady = audio.audible;
+      }
+      if (!firstReady && source.latest.t > 0) lateStart = true;
+      if (audio.audible) firstReady = true;
+      if (reset || source !== engine || !useUi.getState().buzzerSound) audio.silence();
+      if (source !== engine || !useUi.getState().buzzerSound) return false;
+      const hold: SoundHold | null = unavailable
+        ? { label: "No audio", detail: "The browser cannot open Web Audio." }
+        : !audio.audible
+          ? {
+              label: "Enable audio",
+              detail:
+                "Web Audio is blocked until a user gesture. Enable audio to hear new firmware tones. Earlier tones are unavailable.",
+              blocked: true,
+            }
+          : sourceReason(source);
+      const reason = hold ?? {
+        label: "Sound on",
+        detail: lateStart
+          ? "Web Audio starts during this run. Earlier firmware tones are unavailable. New tones play at their firmware frequency."
+          : "Web Audio plays real firmware tones. Native audio capability is not active in this renderer route.",
+      };
+      if (hold) audio.silence();
+      if (shown !== reason.detail) {
+        shown = reason.detail;
+        setState({ source, reason });
+      }
+      return !hold;
     };
-    const offTones = engine.subscribeTones((tones) => {
-      check();
-      if (!held) audio.play(tones, engine.latest.t);
+    const offTones = source.subscribeTones((tones) => {
+      if (check()) audio.play(tones, source.latest.t);
     });
-    const offStatus = engine.subscribe(check);
+    const offStatus = source.subscribe(check);
+    const offAudio = audio.subscribeState(check);
     check();
     return () => {
       offTones();
       offStatus();
+      offAudio();
       window.removeEventListener("pointerdown", resume);
       window.removeEventListener("keydown", resume);
       audio.stop();
-      setReason(null);
     };
-  }, [on]);
+  }, [on, source, rendererRoute]);
 
-  return on ? reason : null;
+  if (source.kind !== "live") return sourceReason(source);
+  if (!source.audio)
+    return {
+      label: "Audio pending",
+      detail: "The simulator has not reported its audio capability.",
+    };
+  if (source.audio.backend === "native") {
+    const native = source.audio;
+    if (native.state === "error")
+      return {
+        label: "Audio error",
+        detail: native.error ?? "Native audio is unavailable. Web Audio remains off.",
+      };
+    if (!native.enabled || native.state === "muted")
+      return { label: "Sound off", detail: "Native firmware audio is muted." };
+    if (native.state !== "ready")
+      return { label: "No audio", detail: native.error ?? "Native audio is unavailable." };
+    const hold = sourceReason(source);
+    if (hold) return hold;
+    return {
+      label: "Sound on",
+      detail: "Native audio plays real firmware tones. Web Audio remains off.",
+    };
+  }
+  return on ? (state?.source === source ? state.reason : sourceReason(source)) : null;
 }

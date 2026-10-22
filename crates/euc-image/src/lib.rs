@@ -22,7 +22,9 @@ mod elf;
 mod gate;
 mod image;
 mod info;
+mod seal;
 
 pub use gate::{Check, Gate, Identity, Outcome, Problem, Report, validate};
 pub use image::{Format, Image, ImageError};
 pub use info::{BuildProfile, EucInfo, INFO_LEN, InfoError, Version, info_crc32};
+pub use seal::{SealError, seal};

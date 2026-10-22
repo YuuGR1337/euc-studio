@@ -2,6 +2,8 @@ import { useEffect, useEffectEvent, useState, useSyncExternalStore } from "react
 import { onFrame, onFrameEarly } from "../lib/frameloop.ts";
 import { DemoEngine } from "../sim/synthetic.ts";
 import { LiveEngine } from "./live.ts";
+import { PlaybackEngine } from "./playback.ts";
+import { EngineSwitch } from "./switch.ts";
 import type { EngineClient, Latest } from "./types.ts";
 
 const params = new URLSearchParams(typeof location !== "undefined" ? location.search : "");
@@ -18,8 +20,44 @@ function create(): EngineClient {
   return demo;
 }
 
-/** The engine the studio talks to. */
-export const engine: EngineClient = create();
+const live = create();
+const switcher = new EngineSwitch(live);
+
+/** The engine the studio talks to: the live run, or a recording while one plays. */
+export const engine: EngineClient = switcher.client;
+
+/** The live simulator (desktop app only): what "Record this run" drives. */
+export const liveEngine: LiveEngine | null = live instanceof LiveEngine ? live : null;
+
+/** The selected data source, including its identity for lifecycle guards. */
+export function currentEngine(): EngineClient {
+  return switcher.engine;
+}
+
+/** The recording that plays instead of the live run, if one does. */
+export function replaying(): PlaybackEngine | null {
+  return switcher.engine instanceof PlaybackEngine ? switcher.engine : null;
+}
+
+export function useReplay(): PlaybackEngine | null {
+  useEngineVersion();
+  return replaying();
+}
+
+/** Changes the view source after a recording has fully validated. */
+export function activatePlayback(playback: PlaybackEngine): void {
+  liveEngine?.setManual(null);
+  live.setPlaying(false);
+  switcher.swap(playback);
+}
+
+/** Returns to the paused live run. Playback never resumes physical inputs automatically. */
+export function closeRecording(): void {
+  const replay = replaying();
+  if (!replay) return;
+  replay.setPlaying(false);
+  switcher.swap(live);
+}
 
 onFrameEarly((now, dt) => {
   engine.advance(dt, now / 1000);
@@ -60,3 +98,4 @@ export function useLive(read: (l: Latest) => number, hz = 8, decimals = 1): numb
 }
 
 export * from "./types.ts";
+export type { PlaybackEngine } from "./playback.ts";

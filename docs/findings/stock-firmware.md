@@ -1,5 +1,13 @@
 # Stock firmware findings: Begode Extreme
 
+**Current clean source, 2026-10-21.** The clean profile now gives an error angle alone 52 calls above 40 degrees.
+The roll-triggered error path still uses 11 calls.
+Its PWM tiltback uses the existing 75% voltage-vector trigger and a filtered positive Vd trigger above 35%.
+The Vd filter uses a 0.3-second time constant.
+The detailed measurements and clean-profile descriptions below describe earlier builds.
+See [current cutoff decisions](../models/clean-cutoff-next.md) and [full-effort acceptance](../models/full-effort-acceptance.md) for later evidence.
+Neither a short comparison window nor the older measurements establish complete stock/compat equivalence.
+
 **Timing version.** The detailed measurements below use the former CPI 1.25 model, without exception overhead.
 The current default is CPI 2.0 with exception costs.
 See [current timing results](../models/cpu-timing.md#scenario-validation) for the new scenario checks.

@@ -36,7 +36,7 @@ pub use machine::{
 };
 pub use plant::{Live, Plant, PlantState};
 pub use report::Report;
-pub use session::Session;
+pub use session::{Manual, Session};
 pub use system::{Blocker, Diagnostics};
 pub use wheel::{LiveError, LoadError, WheelFiles, split_plant};
 

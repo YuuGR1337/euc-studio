@@ -84,8 +84,10 @@ Host builds retain their normal compiler settings. See [CPU timing](../docs/mode
 
 RAM: 20 KB assumed, `.data` + `.bss` from `0x20000000`, 2 KB main stack below `0x20005000`, no heap.
 
-The build writes every `.euc_info` field except `image_len`, `crc32` and `signature` (`euc image seal` fills
-those later). Version comes from `project(VERSION)` in `CMakeLists.txt`, the git sha from the source tree at
+The build leaves `image_len`, `crc32`, and `signature` at zero.
+`euc image seal` fills only length and CRC for unsigned development BIN images.
+It does not write or verify signatures.
+Version comes from `project(VERSION)` in `CMakeLists.txt`, the git sha from the source tree at
 configure time, the profile from the preset; the dev flag is set while images are unsigned.
 
 ## Profiles and quirks
@@ -114,8 +116,9 @@ covers the motor gates):
 
 - **Actuator boundary, both profiles.** The motor command the current loop reads (`motor_command`) is always
   finite and within the soft-start limit; a NaN or infinity is published as 0. This is a deliberate difference
-  from the stock firmware, also in compat. Finite commands pass unchanged, so normal-path lock-step stays
-  bit-exact; the lock-step harness reports NaN events separately instead of comparing them.
+  from the stock firmware, also in compat. Finite commands within the current soft-start limit pass this
+  balance boundary unchanged. The separate motor boundary below can still clamp them. The lock-step
+  harness reports NaN events separately instead of comparing them.
 - **Clean profile (quirk `NAN_FAIL_OPEN` off).** A NaN or infinity in the attitude filter, the law, the
   ramp-down or the output stage sets the command to 0 at once, resets the attitude filter, keeps the motor off
   until power-off (no automatic recovery) and latches `numeric_fault` for the alarm task and telemetry. The
@@ -127,6 +130,10 @@ covers the motor gates):
 - **Motor boundary, both profiles.** The drive checks the command again where it enters
   (`euc_motor_set_command()`: finite, within ±1050). A hall fault, the start-up current-sensor check or a
   system hard cut turns the bridge off until reset, as in the stock firmware.
+  Stock's soft-start limit alternates between 1050 and 1051. Its setter can forward that overshoot;
+  our motor boundary deliberately clamps it. Thus, finite commands are not universally bit-exact with
+  stock. The [SOC50 investigation](../docs/models/soc50-high-speed-investigation.md) tests this difference
+  separately and retains the boundary.
 - **Settings storage.** Clean records carry a CRC-16 in bits the stock firmware never uses, so a torn write
   is skipped, and either firmware can still read the other's journal. A field that no command can produce
   (a record from stock, the backup registers or a damaged slot) loads as its default
@@ -144,7 +151,14 @@ covers the motor gates):
   a false trip mid-ride is a fall).
 - **Voltage headroom.** The stock PWM alarm and tiltback read Vq before the circle limit, so at speed they read
   about 66 % while the voltage vector is already full, and the tiltback needs `e`. Clean also tilts back
-  whenever the vector \|Vd, Vq\| passes 75 %, whatever the settings (`PWM_TILTBACK_VQ_ONLY`).
+  whenever the vector \|Vd, Vq\| passes 75 %, or the driving Vd (the voltage the winding's inductance takes),
+  averaged over 0.3 s, passes 35 %, whatever the settings (`PWM_TILTBACK_VQ_ONLY`). The Vd trigger covers a
+  high-inductance motor, whose balance and current loops start to oscillate while the vector is still near 60 %
+  ([docs/cutoffs.md](docs/cutoffs.md), "Headroom tiltback with a high-inductance motor").
+- **Error cut-off.** Stock cuts the drive 22 ms after the error angle passes 40 deg, shorter than a deep pothole
+  dip that the balance is already recovering (5 cm at 20 km/h). Clean gives the error angle the pitch
+  detector's 105 ms; a roll cut-off still cuts after 22 ms (`ERROR_CUTOFF_22MS`). A rate clamp on the law was
+  tried and rejected: it removes the damping that stops the swing after a dip.
 - **Low battery and hot board.** Stock tilts the pedals back 2.4 deg/s without a limit (26 deg after a
   minute's climb, about 48 deg in the end). Clean stops that tiltback at 8 deg and applies the 10 km/h speed
   limit of limp mode instead (2.5 deg/s, at most 12 deg), until the voltage and temperature are back inside

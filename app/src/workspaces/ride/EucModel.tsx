@@ -6,17 +6,22 @@ import { series } from "../../design/tokens.ts";
 import { engine } from "../../engine/index.ts";
 import { DisplayDecal, DisplayOnScan } from "./DisplayDecal.tsx";
 import { TailLight3D } from "./TailLight3D.tsx";
+import { Headlight3D } from "./Headlight3D.tsx";
 import { type WheelModel, useWheelModel } from "./wheelModel.ts";
 
 // A stylized electric unicycle built from primitives, about the size of a Begode Extreme
 // (22 inch tire). Units are meters; the wheel rolls about z and travels along +x. The shell is
 // narrower than the tire so the tire shows in front, behind and below, like the real wheel.
 
-const TIRE_R = 0.28;
+export const TIRE_R = 0.28;
 const TIRE_TUBE = 0.05;
 const DEG = Math.PI / 180;
 const SHELL_W = 0.4; // fore-aft
 const SHELL_Z = 0.092; // side panel offset from the wheel plane
+
+function readHeadlightDuty(): number | null {
+  return engine.outputs?.headlight_duty ?? null;
+}
 
 function TreadBlocks() {
   const count = 44;
@@ -198,17 +203,10 @@ export function ShellVisual({ accent }: { accent: string }) {
       </mesh>
       <DisplayDecal />
       {engine.lights && <TailLight3D layout={engine.lights} />}
-      {/* Headlight on the front of the fairing; behind, a stand-in tail light for the demo (the
-          live engine draws the real one from lights.toml). */}
-      <mesh position={[(SHELL_W - 0.04) / 2 + 0.001, 0.335, 0]}>
-        <boxGeometry args={[0.004, 0.036, 0.1]} />
-        <meshStandardMaterial
-          color="#F2F2F7"
-          emissive="#F2F2F7"
-          emissiveIntensity={1.4}
-          toneMapped={false}
-        />
-      </mesh>
+      <Headlight3D
+        readDuty={readHeadlightDuty}
+        fallbackPosition={[(SHELL_W - 0.04) / 2 + 0.002, 0.335, 0]}
+      />
       {!engine.lights && (
         <mesh position={[-(SHELL_W - 0.04) / 2 - 0.001, 0.335, 0]}>
           <boxGeometry args={[0.004, 0.024, 0.08]} />
@@ -242,7 +240,7 @@ export function ShellVisual({ accent }: { accent: string }) {
 }
 
 /** Axle height of the scanned tire, unloaded. */
-const SCAN_AXLE_Y = 0.2296;
+export const SCAN_AXLE_Y = 0.2296;
 /**
  * Animating the rear shock waits for Tarik's press test (does the mount move with the axle?): until
  * then the shock and its mount stay as modelled, and the travel shows as the wheel moving against
@@ -325,6 +323,7 @@ export function BodyPart({ model, accent }: { model: WheelModel | null; accent: 
     <>
       <primitive object={scanned} />
       <DisplayOnScan body={scanned} />
+      <Headlight3D scan={scanned} readDuty={readHeadlightDuty} />
       {engine.lights && <TailLight3D layout={engine.lights} scan={scanned} />}
     </>
   );

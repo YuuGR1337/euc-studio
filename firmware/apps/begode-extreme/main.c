@@ -257,6 +257,7 @@ static void init(void)
     euc_tlm_init(&app.telemetry, 0U, false);
     euc_balance_init(&app.balance);
     euc_alarm_init(&app.alarms);
+    app.alarms.beeper.volume_compare = euc_beeper_volume_compare(app.settings.beeper_volume);
     euc_power_init(&app.power);
     euc_bms_init(&app.bms);
     euc_sensors_init(&app.sensors);

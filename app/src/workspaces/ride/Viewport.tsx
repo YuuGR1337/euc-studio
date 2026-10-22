@@ -14,9 +14,15 @@ import { SegmentedControl } from "../../ui/SegmentedControl.tsx";
 import { Tooltip } from "../../ui/Tooltip.tsx";
 import { Wait } from "../../ui/Wait.tsx";
 import { PitchProtractor } from "./PitchProtractor.tsx";
+import { ManualButton, ManualHud } from "./ManualHud.tsx";
+import { useManualRiding } from "./manual.ts";
 import { LOW_FPS, type Quality } from "./quality.ts";
 import { Scene } from "./Scene.tsx";
 import { WheelOutputs } from "./WheelOutputs.tsx";
+import { slopeAt } from "./terrain.ts";
+import { sampleMap, type HeightMapView } from "./mapSurface.ts";
+import { shellHeading, wheelPosition } from "./poses.ts";
+import { Vector3 } from "three";
 
 /** While the live engine starts or after it failed: what it is doing, or why it stopped. */
 function EngineOverlay() {
@@ -141,7 +147,11 @@ function Battery() {
   const tone = pct < 15 ? "bg-danger" : pct < 30 ? "bg-caution" : "bg-ok";
   return (
     <div className="flex min-w-[112px] flex-col px-16 pt-8 pb-16">
-      <span className="label">Battery</span>
+      <Tooltip content="Calculated charge from the battery model. Actual pack behavior needs measured cell data.">
+        <span className="label cursor-help" tabIndex={0}>
+          Model charge
+        </span>
+      </Tooltip>
       <span className="mt-4 flex items-baseline gap-2 text-20 font-medium text-fg">
         <RollingNumber value={pct} />
         <span className="text-13 font-semibold text-fg-2">%</span>
@@ -162,15 +172,67 @@ function Battery() {
   );
 }
 
+function Grade({ map, compact = false }: { map?: HeightMapView | null; compact?: boolean }) {
+  const grade = useLive(
+    (l) => {
+      if (map) {
+        const position = wheelPosition(new Vector3());
+        const sample = position && sampleMap(map, position.x, -position.z);
+        if (!sample) return Number.NaN;
+        const [x, y, z] = sample.normal_world;
+        const heading = shellHeading();
+        return (-100 * (x * Math.cos(heading) + y * Math.sin(heading))) / z;
+      }
+      return (engine.kind === "playback" || engine.status.runMode === "free_ride") &&
+        !engine.terrain
+        ? Number.NaN
+        : Math.tan(slopeAt(engine.terrain, l.poses?.[0] ?? l.distance, { z: 0, pitch: 0 }).pitch) *
+            100;
+    },
+    4,
+    1,
+  );
+  const degrees = (Math.atan(grade / 100) * 180) / Math.PI;
+  if (compact)
+    return (
+      <Tooltip
+        content={`Road grade along the wheel heading. ${Number.isFinite(degrees) ? degrees.toFixed(1) + "°" : "Ground unavailable"}`}
+      >
+        <span
+          tabIndex={0}
+          className="num inline-flex items-center gap-4 whitespace-nowrap rounded-pill border border-hairline bg-card/75 px-8 py-4 text-11 text-fg-2"
+        >
+          Grade{" "}
+          <span className="text-fg">{Number.isFinite(grade) ? grade.toFixed(0) + "%" : "–"}</span>
+        </span>
+      </Tooltip>
+    );
+  return (
+    <div className="flex min-w-[96px] flex-col px-16 pt-8 pb-16">
+      <span className="label">Grade</span>
+      <span className="num mt-4 text-20 font-medium text-fg">
+        {Number.isFinite(grade) ? grade.toFixed(0) : "–"}
+        <span className="ml-2 text-13 text-fg-2">%</span>
+      </span>
+      <span className="num mt-auto text-12 text-fg-2">
+        {Number.isFinite(degrees) ? degrees.toFixed(1) : "–"}°
+      </span>
+    </div>
+  );
+}
+
 function Pitch() {
   const pitch = useLive((l) => l.pitch, 8, 1);
   return (
-    <HudCard className="px-16 pt-8 pb-8">
-      <div className="flex items-center justify-between">
+    <HudCard className="px-16 pt-8 pb-8 @max-[760px]/viewport:py-4">
+      <div className="flex items-center justify-between gap-8">
         <span className="label">Pitch</span>
-        <span className="text-11 text-fg-2">nose up +</span>
+        <span className="text-11 text-fg-2 @max-[760px]/viewport:hidden">nose up +</span>
+        <span className="num hidden text-13 text-fg @max-[760px]/viewport:inline">
+          {Number.isFinite(pitch) ? `${pitch >= 0 ? "+" : ""}${pitch.toFixed(1)}°` : "–"}
+        </span>
       </div>
-      <PitchProtractor pitch={pitch} className="mt-4" />
+      <PitchProtractor pitch={pitch} className="mt-4 @max-[760px]/viewport:hidden" />
     </HudCard>
   );
 }
@@ -179,16 +241,27 @@ function Pitch() {
 const SCENE_OFF =
   typeof location !== "undefined" && new URLSearchParams(location.search).get("scene") === "off";
 
-export function Viewport({ active }: { active: boolean }) {
+export function Viewport({
+  active,
+  map,
+  freeControls,
+  onFreeControls,
+}: {
+  active: boolean;
+  map?: HeightMapView | null;
+  freeControls?: boolean;
+  onFreeControls?: () => void;
+}) {
   const camera = useUi((s) => s.camera);
   const setCamera = useUi((s) => s.setCamera);
   const [scene, setScene] = useState<{ quality: Quality; renderer: string } | null>(null);
   const [drawn, setDrawn] = useState(false);
   const ready = SCENE_OFF || scene !== null;
+  useManualRiding(active);
 
   return (
     <div
-      className="relative h-full overflow-hidden rounded-12 border border-hairline bg-bg"
+      className="[container-name:viewport] [container-type:size] relative h-full overflow-hidden rounded-12 border border-hairline bg-bg"
       data-testid="viewport"
       data-scene={SCENE_OFF ? "off" : drawn ? "ready" : "building"}
     >
@@ -196,7 +269,7 @@ export function Viewport({ active }: { active: boolean }) {
         {SCENE_OFF ? (
           <p className="grid h-full place-items-center text-12 text-fg-3">3D view off</p>
         ) : (
-          <Scene active={active} onReady={setScene} onFirstFrame={() => setDrawn(true)} />
+          <Scene active={active} map={map} onReady={setScene} onFirstFrame={() => setDrawn(true)} />
         )}
       </div>
 
@@ -215,8 +288,8 @@ export function Viewport({ active }: { active: boolean }) {
       </AnimatePresence>
 
       <div className="pointer-events-none absolute inset-0 flex flex-col justify-between p-16">
-        <div className="flex items-start justify-between">
-          <div className="pointer-events-auto">
+        <div className="relative flex items-start justify-between">
+          <div className="pointer-events-auto flex items-center gap-8">
             <SegmentedControl<CameraMode>
               aria-label="Camera"
               size="sm"
@@ -239,12 +312,24 @@ export function Viewport({ active }: { active: boolean }) {
                 },
               ]}
             />
+            <ManualButton />
+            {onFreeControls && (
+              <Button size="sm" onClick={onFreeControls}>
+                {freeControls ? "Telemetry" : "Free ride"}
+              </Button>
+            )}
+            <span className="hidden @max-[900px]/viewport:inline-flex">
+              <Grade map={map} compact />
+            </span>
+          </div>
+          <div className="absolute top-0 left-1/2 -translate-x-1/2">
+            <ManualHud />
           </div>
           <div className="pointer-events-auto">
             <Pitch />
           </div>
         </div>
-        <div className="flex items-end justify-between">
+        <div className="flex items-end justify-between gap-16 @max-[760px]/viewport:flex-col-reverse @max-[760px]/viewport:items-stretch @max-[760px]/viewport:gap-8">
           <HudCard
             testId="hud-ride"
             className="pointer-events-auto flex items-stretch divide-x divide-hairline"
@@ -252,6 +337,9 @@ export function Viewport({ active }: { active: boolean }) {
             <Speed />
             <Pwm />
             <Battery />
+            <div className="@max-[900px]/viewport:hidden">
+              <Grade map={map} />
+            </div>
           </HudCard>
           <div className="flex flex-col items-end gap-8">
             {scene?.quality === "low" && (
@@ -266,7 +354,7 @@ export function Viewport({ active }: { active: boolean }) {
                 </span>
               </Tooltip>
             )}
-            <WheelOutputs className="pointer-events-auto max-w-[360px]" />
+            <WheelOutputs className="pointer-events-auto" />
           </div>
         </div>
       </div>

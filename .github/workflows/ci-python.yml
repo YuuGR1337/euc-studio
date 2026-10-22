@@ -1,0 +1,116 @@
+name: ci-python
+
+# The Python bindings (crates/euc-python, python/euc_studio): lint the crate, build the abi3 wheel with
+# maturin, install it on the oldest supported Python and run the tests against our clean firmware
+# build (built here; the stock image is never needed).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - "python/**"
+      - "crates/**"
+      - "firmware/**"
+      - "profiles/**"
+      - "scenarios/**"
+      - "tools/fetch-mujoco/**"
+      - ".cargo/**"
+      - "Cargo.toml"
+      - "rust-toolchain.toml"
+      - "rustfmt.toml"
+      - "clippy.toml"
+      - ".github/workflows/ci-python.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-python-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  ARM_GNU_TOOLCHAIN_RELEASE: 15.3.rel2
+  # sha256 from the release's .sha256asc file for the x86_64 Linux arm-none-eabi archive
+  ARM_GNU_TOOLCHAIN_SHA256: 463df9665c246fa13bab2102115bbf83440661b6eb70b44f3dfd4712ca30037a
+
+jobs:
+  wheel:
+    name: Build the wheel and test it
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Ninja
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends ninja-build
+
+      - name: Cache Arm GNU Toolchain
+        id: toolchain-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/arm-gnu-toolchain
+          key: arm-gnu-toolchain-${{ env.ARM_GNU_TOOLCHAIN_RELEASE }}-${{ env.ARM_GNU_TOOLCHAIN_SHA256 }}
+
+      - name: Download Arm GNU Toolchain
+        if: steps.toolchain-cache.outputs.cache-hit != 'true'
+        working-directory: ${{ runner.temp }}
+        run: |
+          name="arm-gnu-toolchain-${ARM_GNU_TOOLCHAIN_RELEASE}-x86_64-arm-none-eabi.tar.xz"
+          base="https://gitlab.arm.com/api/v4/projects/tooling%2Fgnu-toolchains-for-arm/packages/generic/gnu-toolchain"
+          curl --fail --location --silent --show-error --output "$name" "$base/$ARM_GNU_TOOLCHAIN_RELEASE/$name"
+          echo "$ARM_GNU_TOOLCHAIN_SHA256  $name" | sha256sum --check
+          mkdir -p ~/arm-gnu-toolchain
+          tar -xJf "$name" -C ~/arm-gnu-toolchain --strip-components=1
+
+      - name: Select Arm GNU Toolchain
+        run: echo "ARM_GNU_TOOLCHAIN_DIR=$HOME/arm-gnu-toolchain" >> "$GITHUB_ENV"
+
+      - name: Our firmware, clean profile
+        working-directory: firmware
+        run: cmake --workflow --preset target-clean
+
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: crates/euc-python
+
+      # The oldest Python the abi3 wheel supports, so the test proves the floor.
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - name: Fetch MuJoCo
+        run: python tools/fetch-mujoco/fetch.py --github
+
+      - name: Build tools
+        run: python -m pip install "maturin==1.15.0" pytest
+
+      - name: Licenses of the bindings' dependency tree
+        uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          manifest-path: crates/euc-python/Cargo.toml
+          command: check licenses bans
+
+      - name: fmt + clippy (euc-python is its own cargo workspace)
+        run: |
+          cargo fmt --manifest-path crates/euc-python/Cargo.toml --check
+          cargo clippy --manifest-path crates/euc-python/Cargo.toml --all-targets --locked -- -D warnings
+
+      # MuJoCo is linked from this checkout (rpath), not bundled, so skip the manylinux repair.
+      - name: Build the wheel
+        working-directory: python
+        run: maturin build --release --locked --auditwheel skip --out dist
+
+      - name: Install the wheel
+        run: python -m pip install python/dist/*.whl
+
+      # From the repository root, so `import euc_studio` finds the installed wheel, not python/euc_studio.
+      - name: Tests (ride-20kmh-stop passes, a recording round trip)
+        env:
+          EUC_STUDIO_REQUIRE_FIRMWARE: "1"
+        run: python -m pytest python/tests -v

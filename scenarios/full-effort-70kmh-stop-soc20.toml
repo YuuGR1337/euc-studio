@@ -1,0 +1,91 @@
+# Full rider effort inside a speed-dependent lean envelope, then brake at measured 70 km/h.
+# Rider: generic 80 kg rigid ankle rider; 30 deg lean cap, 24 deg/s slew, 400 Nm ankle cap.
+# The rider reduces forward lean as motor voltage headroom falls with speed.
+# Braking uses -30 deg to 15 km/h, then -5 deg to avoid reversing through the stop.
+# These are bounded model commands, not a proven human maximum or a globally fastest trajectory.
+# All three SOC cases use the same commands, settings, thresholds, and rigid roll/yaw aids.
+# A cut, fall, halt, or timeout leaves the 70 km/h target or stop explicitly incomplete.
+# See docs/models/full-effort-acceptance.md for results, quantum sensitivity, and model limits.
+# PRELIMINARY: motor, tire, suspension, battery and regeneration/BMS parameters lack ride validation.
+schema = 1
+name = "full-effort-70kmh-stop-soc20"
+description = "Use bounded rider effort to reach measured 70 km/h, then brake, from 20% initial SOC."
+wheel = "begode-extreme"
+seconds = 103.0
+release_s = 4.0
+phase_start_s = 6.0
+speed_kmh = [[0, 0]]
+settings = "tarik-2026-10-15"
+
+[rider]
+mass_kg = 80.0
+
+[rider.control]
+lean_max_deg = 30.0
+lean_rate_deg_s = 24.0
+ankle_max_nm = 400.0
+
+[[timeline]]
+at_s = 0.0
+fault = "battery_soc"
+soc = 0.2
+
+[[phase]]
+name = "launch"
+lean_deg = 30.0
+until_speed_kmh = 35.0
+crossing = "above"
+timeout_s = 15.0
+
+[[phase]]
+name = "build"
+lean_deg = 20.0
+until_speed_kmh = 50.0
+crossing = "above"
+timeout_s = 10.0
+
+[[phase]]
+name = "accelerate"
+lean_deg = 15.0
+until_speed_kmh = 70.0
+crossing = "above"
+timeout_s = 40.0
+
+[[phase]]
+name = "brake"
+lean_deg = -30.0
+until_speed_kmh = 15.0
+crossing = "below"
+timeout_s = 15.0
+
+[[phase]]
+name = "settle"
+lean_deg = -5.0
+until_speed_kmh = 1.0
+crossing = "below"
+timeout_s = 15.0
+
+[[expect]]
+check = "upright"
+
+[[expect]]
+check = "no_cutoff"
+
+[[expect]]
+check = "stopped_at_end"
+max_abs_kmh = 1.0
+
+[[expect]]
+check = "record"
+signal = "soc_pct"
+stat = "min"
+
+[[expect]]
+check = "record"
+signal = "speed_kmh"
+stat = "at_cutoff"
+
+[[expect]]
+check = "record"
+signal = "speed_kmh"
+stat = "at_fall"

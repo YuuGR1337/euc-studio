@@ -43,6 +43,13 @@ pub(crate) struct CompareArgs {
     /// Samples per simulated second.
     #[arg(long, default_value_t = 100.0)]
     sample_hz: f64,
+    /// Most instructions per quantum, for both runs.
+    #[arg(long, default_value_t = 4000)]
+    max_quantum: u32,
+    /// Ride with this rider model instead of the scenario's (`rigid_ankle_v1` or
+    /// `articulated_sagittal_v1`).
+    #[arg(long, value_name = "MODEL", value_parser = crate::sim::rider_model)]
+    rider_model: Option<euc_physics::RiderModel>,
     /// Also write the JSON report (what `--json` prints) to this file.
     #[arg(long, value_name = "FILE")]
     out: Option<PathBuf>,
@@ -94,7 +101,10 @@ struct Run {
 }
 
 pub(crate) fn compare(ctx: &Context, args: &CompareArgs) -> anyhow::Result<Verdict> {
-    let scenario = load_scenario(&args.scenario)?;
+    let mut scenario = load_scenario(&args.scenario)?;
+    if let Some(model) = args.rider_model {
+        scenario.rider.model = model;
+    }
     let file = match &args.tolerance {
         Some(path) => {
             let text = fs::read_to_string(path).with_context(|| format!("cannot read {}", ui::path(path)))?;
@@ -106,8 +116,8 @@ pub(crate) fn compare(ctx: &Context, args: &CompareArgs) -> anyhow::Result<Verdi
     let tolerance_note = file.scenario.get(&scenario.name).and_then(|adj| adj.note.as_deref());
     let files = WheelFiles::load(&ctx.profiles(), &scenario.wheel)?;
     let settings = args.settings.as_deref().or(scenario.settings.as_deref());
-    let mut a = Run::new(ctx, &files, &scenario, &args.a, settings, args.sample_hz, args.cpu)?;
-    let mut b = Run::new(ctx, &files, &scenario, &args.b, settings, args.sample_hz, args.cpu)?;
+    let mut a = Run::new(ctx, &files, &scenario, &args.a, settings, args)?;
+    let mut b = Run::new(ctx, &files, &scenario, &args.b, settings, args)?;
     let started = Instant::now();
     while !a.ride.finished(&a.scenario, &a.session) {
         a.sample();
@@ -149,10 +159,9 @@ impl Run {
         scenario: &Scenario,
         spec: &str,
         settings: Option<&str>,
-        sample_hz: f64,
-        cpu: euc_sim::cpu::Backend,
+        args: &CompareArgs,
     ) -> anyhow::Result<Self> {
-        let cpu = cpu_factory(cpu)?;
+        let cpu = cpu_factory(args.cpu)?;
         let wheel = &files.profile;
         let fw = load_firmware(ctx, files, spec)?;
         let (image, label, sha256, stock, map) = (fw.image, fw.label, fw.sha256, fw.stock, fw.map);
@@ -173,12 +182,12 @@ impl Run {
             power_cycles: Vec::new(),
             cpi: euc_sim::DEFAULT_CPI,
             exception_timing: euc_sim::ExceptionTiming::default(),
-            max_quantum: 4000,
+            max_quantum: args.max_quantum,
             marker_window_s: 4.0,
         };
         let live = files.live_on(scenario.rider, scenario.assist, scenario.terrain.clone())?;
         let machine = Machine::new_live(&config, &euc_sim::registry(), cpu, live)?;
-        let mut session = Session::new(machine, map.as_ref(), sample_hz);
+        let mut session = Session::new(machine, map.as_ref(), args.sample_hz);
         // Checks that read firmware variables need names this firmware's map has; skip the others,
         // so a stock-specific check does not stop the comparison.
         let mut scenario = scenario.clone();

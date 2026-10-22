@@ -1,6 +1,6 @@
 import { AnimatePresence, motion } from "motion/react";
 import { Dialog } from "radix-ui";
-import type { ReactNode } from "react";
+import type { ReactNode, RefObject } from "react";
 import { smooth } from "../design/motion.ts";
 import { cx } from "../lib/cx.ts";
 
@@ -15,6 +15,10 @@ export interface SheetProps {
   className?: string;
   /** Distance from the top of the window. */
   top?: string;
+  /** Trigger outside Dialog.Root, such as a utility rail action. */
+  returnFocusRef?: RefObject<HTMLElement | null>;
+  /** First useful action when the sheet opens. */
+  initialFocusRef?: RefObject<HTMLElement | null>;
 }
 
 /** Modal sheet: dims the app and rises in with the smooth spring. */
@@ -27,6 +31,8 @@ export function Sheet({
   children,
   className,
   top = "14vh",
+  returnFocusRef,
+  initialFocusRef,
 }: SheetProps) {
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
@@ -42,7 +48,22 @@ export function Sheet({
                 transition={smooth}
               />
             </Dialog.Overlay>
-            <Dialog.Content asChild forceMount>
+            <Dialog.Content
+              asChild
+              forceMount
+              onOpenAutoFocus={(event) => {
+                if (initialFocusRef?.current) {
+                  event.preventDefault();
+                  initialFocusRef.current.focus({ preventScroll: true });
+                }
+              }}
+              onCloseAutoFocus={(event) => {
+                if (returnFocusRef?.current) {
+                  event.preventDefault();
+                  returnFocusRef.current.focus({ preventScroll: true });
+                }
+              }}
+            >
               <motion.div
                 style={{ top }}
                 className={cx(

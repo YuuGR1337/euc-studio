@@ -35,7 +35,7 @@ fn extreme_suspended() -> WheelBody {
             preload_mm: 2.0,
             stroke_mm: 55.0,
             eye_to_eye_mm: 200.0,
-            linkage_ratio: 1.2,
+            linkage_ratio: 1.7,
             ratio_curve: Vec::new(),
             damping_n_s_per_m: 2200.0,
         }),

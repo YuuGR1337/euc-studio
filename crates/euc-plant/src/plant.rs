@@ -5,7 +5,7 @@ use std::cmp::Ordering;
 use serde::Deserialize;
 use thiserror::Error;
 
-use crate::battery::{Battery, BatteryError, BatteryParams, PackReading};
+use crate::battery::{Battery, BatteryError, BatteryLimit, BatteryParams, PackReading};
 use crate::fault::{Faults, PlantFault, SocJump};
 use crate::halls::HallParams;
 use crate::inverter::{Circuit, InverterParams, LegDrive, high_side_share};
@@ -160,6 +160,8 @@ pub struct ElectricalPlant {
     legs: [LegDrive; 3],
     wheel: Wheel,
     battery: Battery,
+    /// A rejected battery step invalidates further integration in this run.
+    battery_limit: Option<BatteryLimit>,
     bus_a: f64,
     stage: Node,
     winding: Node,
@@ -191,6 +193,7 @@ impl ElectricalPlant {
             legs: [LegDrive::Off; 3],
             wheel: Wheel { at: 0, angle: 0.0, speed: 0.0 },
             battery,
+            battery_limit: None,
             bus_a: 0.0,
             stage: Node::new(params.thermal.stage, ambient),
             winding: Node::new(params.thermal.motor, ambient),
@@ -216,10 +219,27 @@ impl ElectricalPlant {
         self.time
     }
 
-    /// Integrates every whole grid step up to `now`.
+    /// Integrates whole grid steps up to `now`, or stops at a battery model boundary.
+    ///
+    /// Call [`battery_validity`](Self::battery_validity) before accepting simulation results.
+    /// A failed step preserves the last accepted state and time; it does not collapse the bus.
     pub fn advance(&mut self, now: u64) {
         while self.time + self.grid <= now {
-            self.step();
+            if self.battery_validity().is_err() || !self.step() {
+                break;
+            }
+        }
+    }
+
+    /// Battery model validity, separate from firmware safety flags and BMS cutoff behavior.
+    ///
+    /// A rejected step latches its limit for this run. An empty pack also invalidates discharge.
+    /// The engine must stop physics and firmware progress and reject ride success on an error.
+    /// `PlantState` and its downstream snapshot fields remain unchanged.
+    pub fn battery_validity(&self) -> Result<(), BatteryLimit> {
+        match self.battery_limit {
+            Some(limit) => Err(limit),
+            None => self.battery.discharge_validity(),
         }
     }
 
@@ -242,13 +262,17 @@ impl ElectricalPlant {
     /// Changes what drives the leg of `phase`, from `now` on.
     pub fn set_leg(&mut self, now: u64, phase: Phase, drive: LegDrive) {
         self.advance(now);
-        self.legs[phase.index()] = drive;
+        if self.battery_validity().is_ok() {
+            self.legs[phase.index()] = drive;
+        }
     }
 
     /// The wheel's angle (radians) and speed (rad/s) at `now`, forward positive, from physics.
     pub fn set_wheel(&mut self, now: u64, angle_rad: f64, speed_rad_s: f64) {
         self.advance(now);
-        self.wheel = Wheel { at: now, angle: angle_rad, speed: speed_rad_s };
+        if self.battery_validity().is_ok() {
+            self.wheel = Wheel { at: now, angle: angle_rad, speed: speed_rad_s };
+        }
     }
 
     /// Torque on the wheel now, newton-metre, positive forward.
@@ -277,7 +301,11 @@ impl ElectricalPlant {
     /// time, and asks again after every [`set_wheel`](Self::set_wheel). It also returns the
     /// grid point where a fault starts or ends, since a stuck or lost line changes the code too.
     /// Noise is left out: with it the code may change a little earlier or later.
+    /// A battery model validity error returns `None`; the engine must stop the invalid run.
     pub fn next_hall_edge(&self) -> Option<u64> {
+        if self.battery_validity().is_err() {
+            return None;
+        }
         let fault = self
             .faults
             .next_change()
@@ -314,7 +342,7 @@ impl ElectricalPlant {
         self.params.sensors.count(adc, channel, &measurands, &mut rng)
     }
 
-    /// Bus voltage, volt.
+    /// Bus voltage at the last accepted step, volt; not proof of battery model validity.
     pub const fn bus_v(&self) -> f64 {
         self.battery.voltage()
     }
@@ -372,8 +400,8 @@ impl ElectricalPlant {
         self.params.motor.electrical_angle(self.wheel.angle + self.wheel.speed * dt)
     }
 
-    /// One grid step.
-    fn step(&mut self) {
+    /// One grid step; false if the battery rejects the candidate state.
+    fn step(&mut self) -> bool {
         let h = self.h;
         let motor = self.params.motor;
         let inverter = self.params.inverter;
@@ -381,6 +409,8 @@ impl ElectricalPlant {
         let omega_e = motor.electrical_speed(self.wheel.speed);
         let vbus = self.battery.voltage();
         let r = motor.resistance_ohm + inverter.switch_resistance_ohm;
+        let mut next_motor = self.motor.clone();
+        let voltage_dq;
         let mut current = inverse_park(self.motor.current(), theta);
         let active: [Option<f64>; 3] = std::array::from_fn(|k| match self.legs[k] {
             LegDrive::Pwm { duty, period_s } => Some(inverter.pole_voltage(duty, period_s, current[k], vbus)),
@@ -388,21 +418,28 @@ impl ElectricalPlant {
         });
         let cut = self.faults.effects().cut;
         if let ([Some(a), Some(b), Some(c)], [false, false, false]) = (active, cut) {
-            self.voltage_dq = park([a, b, c], theta);
-            self.motor.step(self.voltage_dq, omega_e, r, h);
+            voltage_dq = park([a, b, c], theta);
+            next_motor.step(voltage_dq, omega_e, r, h);
         } else {
-            self.voltage_dq = Dq::default();
+            voltage_dq = Dq::default();
             let circuit = Circuit { inductance: f64::midpoint(motor.ld_h, motor.lq_h), resistance: r, dt: h };
             inverter.step_with_open_legs(&mut current, active, motor.back_emf(theta, omega_e), vbus, circuit, cut);
-            self.motor.set_current(park(current, theta));
+            next_motor.set_current(park(current, theta));
         }
-        self.time += self.grid;
-        let theta_end = self.electrical_angle(self.time);
-        self.phase_current = inverse_park(self.motor.current(), theta_end);
-        let share = high_side_share(&self.legs, &self.phase_current);
-        self.bus_a = (0..3).map(|k| share[k] * self.phase_current[k]).sum();
+        let theta_end = self.electrical_angle(self.time + self.grid);
+        let phase_current = inverse_park(next_motor.current(), theta_end);
+        let share = high_side_share(&self.legs, &phase_current);
+        let bus_a = (0..3).map(|k| share[k] * phase_current[k]).sum();
         let ambient = self.params.thermal.ambient_c;
-        self.battery.step(self.bus_a, ambient, h);
+        if let Err(limit) = self.battery.step(bus_a, ambient, h) {
+            self.battery_limit = Some(limit);
+            return false;
+        }
+        self.motor = next_motor;
+        self.voltage_dq = voltage_dq;
+        self.phase_current = phase_current;
+        self.bus_a = bus_a;
+        self.time += self.grid;
         let (stage_w, winding_w) = self.losses(vbus);
         self.stage.step(stage_w, ambient, h);
         self.winding.step(winding_w, ambient, h);
@@ -418,6 +455,7 @@ impl ElectricalPlant {
         self.torque_time += h;
         self.refresh_faults();
         self.halls = self.faults.effects().halls.code(theta_end, &mut self.rng);
+        true
     }
 
     /// Power-stage and winding losses, watt.
@@ -518,6 +556,105 @@ pub(crate) mod tests {
         assert_eq!(plant.time(), 720);
         plant.set_leg(MS, Phase::A, LegDrive::Off);
         assert_eq!(plant.time(), MS);
+    }
+
+    fn assert_rejected_state(plant: &ElectricalPlant, before: &ElectricalPlant) {
+        assert_eq!(plant.snapshot(), before.snapshot());
+        assert_eq!(plant.battery.packs(), before.battery.packs());
+        assert_eq!(plant.battery_readings(), before.battery_readings());
+        assert_eq!(plant.battery.conditions(), before.battery.conditions());
+        assert_eq!(plant.torque_sum, before.torque_sum);
+        assert_eq!(plant.torque_time, before.torque_time);
+        assert_eq!(plant.stage_extra_k, before.stage_extra_k);
+        assert_eq!(plant.legs, before.legs);
+        assert_eq!(
+            (plant.wheel.at, plant.wheel.angle, plant.wheel.speed),
+            (before.wheel.at, before.wheel.angle, before.wheel.speed)
+        );
+    }
+
+    fn run_to_battery_limit() -> (ElectricalPlant, ElectricalPlant) {
+        let mut plant = plant(|p| {
+            ideal_switches(p);
+            // A small synthetic capacity reaches the boundary within a bounded number of steps.
+            p.battery.capacity_ah = 1e-7;
+        });
+        plant.set_wheel(0, 0.0, 5.0);
+        all_legs(&mut plant, 0, [pwm(0.55), pwm(0.45), pwm(0.5)]);
+        for _ in 0..5000 {
+            let before = plant.clone();
+            assert_eq!(before.battery_validity(), Ok(()));
+            plant.advance(plant.time() + plant.grid);
+            if plant.battery_validity().is_err() {
+                assert!(before.time() > 0, "the plant accepts steps before it reaches the boundary");
+                assert!(before.torque_time > 0.0 && before.torque_sum.abs() > 0.0);
+                assert!(before.battery.packs().iter().all(|pack| pack.soc > 0.0));
+                return (plant, before);
+            }
+            assert_eq!(plant.time(), before.time() + plant.grid);
+        }
+        panic!("the synthetic battery did not reach its charge boundary");
+    }
+
+    #[test]
+    fn initially_empty_battery_cannot_advance_or_change_inputs() {
+        let mut plant = plant(|p| p.battery.soc = 0.0);
+        let before = plant.clone();
+        assert_eq!(plant.battery_validity(), Err(BatteryLimit::Exhausted { pack: 0 }));
+        assert!(plant.bus_v() > 0.0);
+        plant.advance(100 * MS);
+        plant.set_leg(100 * MS, Phase::A, pwm(0.8));
+        plant.set_wheel(100 * MS, 1.0, 170.0);
+        assert_rejected_state(&plant, &before);
+        assert_eq!(plant.time(), 0);
+        assert_eq!(plant.mean_torque_nm(), 0.0);
+        assert_eq!(plant.next_hall_edge(), None);
+    }
+
+    #[test]
+    fn rejected_discharge_keeps_last_time_motor_heat_and_torque() {
+        let (mut plant, mut before) = run_to_battery_limit();
+        assert_eq!(plant.battery_validity(), Err(BatteryLimit::Exhausted { pack: 0 }));
+        assert_rejected_state(&plant, &before);
+        assert!(plant.bus_v() > 0.0);
+        assert!(before.next_hall_edge().is_some());
+        assert_eq!(plant.next_hall_edge(), None);
+        for target in [plant.time() + plant.grid, 100 * MS, 1000 * MS] {
+            plant.advance(target);
+            assert_rejected_state(&plant, &before);
+        }
+        assert_eq!(plant.mean_torque_nm(), before.mean_torque_nm(), "no rejected torque enters the mean");
+        assert_eq!((plant.torque_sum, plant.torque_time), (0.0, 0.0));
+    }
+
+    #[test]
+    fn rejected_step_latches_despite_a_later_soc_recovery_fault() {
+        let (mut plant, _) = run_to_battery_limit();
+        let limit = BatteryLimit::Exhausted { pack: 0 };
+        plant.add_fault(plant.time(), None, PlantFault::BatterySoc { soc: 0.9 }).unwrap();
+        assert_eq!(plant.battery.discharge_validity(), Ok(()), "the fault restores charge only");
+        assert_eq!(plant.battery_validity(), Err(limit), "the run stays invalid");
+        let before = plant.clone();
+        all_legs(&mut plant, 100 * MS, [LegDrive::Off; 3]);
+        plant.set_wheel(100 * MS, 10.0, -170.0);
+        plant.advance(1000 * MS);
+        assert_rejected_state(&plant, &before);
+        assert_eq!(plant.battery_validity(), Err(limit));
+        assert_eq!(plant.next_hall_edge(), None);
+    }
+
+    #[test]
+    fn full_battery_rejects_rectification_without_a_motor_or_torque_update() {
+        let mut plant = plant(|p| p.battery.soc = 1.0);
+        plant.set_wheel(0, 0.0, 200.0);
+        let before = plant.clone();
+        // Back-EMF exceeds the bus, so open-leg diodes attempt to charge the full packs.
+        plant.advance(plant.grid);
+        assert_eq!(plant.battery_validity(), Err(BatteryLimit::ChargeSaturated { pack: 0 }));
+        assert_rejected_state(&plant, &before);
+        plant.advance(100 * MS);
+        assert_rejected_state(&plant, &before);
+        assert_eq!(plant.mean_torque_nm(), 0.0);
     }
 
     #[test]

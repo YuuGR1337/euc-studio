@@ -78,10 +78,17 @@ fn boots_answers_v_and_n_and_sends_telemetry() {
     assert!(report.blockers.is_empty(), "{:#?}", report.blockers);
     assert!((marker_ms(&report, "main") - 0.069).abs() < 0.005, "main at {} ms", marker_ms(&report, "main"));
     let first = report.ble.first_frame_ms.expect("telemetry frames");
-    assert!((first - 2000.0).abs() < 10.0, "first frame at {first} ms");
+    eprintln!(
+        "RTC first tick at {:.3} ms, first telemetry at {first:.3} ms, {} frames",
+        marker_ms(&report, "rtc_tick_control"),
+        report.ble.frames
+    );
+    // PRL writes now reload DIV (RM0008 §18.4.4), removing the reset-divider startup delay.
+    // Both backends measure 1177.753 ms for the first RTC tick and 1480.700 ms for telemetry.
+    assert!((first - 1480.7).abs() < 10.0, "first frame at {first} ms");
     assert_eq!(report.injections[0].reply_text, ["GW1825020"]);
     assert_eq!(report.injections[1].reply_text, ["NAME:EXTREME\r\n"]);
-    assert_eq!(report.ble.frames, 40);
+    assert_eq!(report.ble.frames, 45);
 }
 
 /// 30 simulated seconds with no blocker, the real-time factor, and the CPI the TRM cycle model

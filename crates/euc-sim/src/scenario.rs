@@ -36,6 +36,9 @@ use thiserror::Error;
 
 use crate::session::Session;
 
+/// Physical observation after a phase sequence completes or fails (no fabricated stop).
+const PHASE_OBSERVE_S: f64 = 2.0;
+
 /// A scenario file.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -54,6 +57,12 @@ pub struct Scenario {
     pub release_s: f64,
     /// Target speed: `[seconds, km/h]` points, linear in between, held after the last.
     pub speed_kmh: Vec<[f64; 2]>,
+    /// Start of measured-speed lean phases; defaults to release time.
+    #[serde(default)]
+    pub phase_start_s: Option<f64>,
+    /// Optional bounded lean commands, advanced by measured ground-speed crossings.
+    #[serde(default, rename = "phase")]
+    pub phases: Vec<Phase>,
     /// The rider (defaults for anything not given).
     #[serde(default)]
     pub rider: Rider,
@@ -84,6 +93,41 @@ pub struct Scenario {
     /// Faults to inject, from `[[timeline]]`.
     #[serde(skip)]
     pub faults: Vec<TimedFault>,
+}
+
+/// A rider lean command with a measured-speed gate, never a velocity or motor torque override.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Phase {
+    /// Unique name used in events and outcomes.
+    pub name: String,
+    /// Desired lean from vertical, forward positive, subject to the rider's existing limits.
+    pub lean_deg: f64,
+    /// Signed forward ground speed at which to advance, km/h.
+    pub until_speed_kmh: f64,
+    /// Direction of the measured threshold crossing.
+    pub crossing: Crossing,
+    /// Maximum simulated time in this phase, seconds.
+    pub timeout_s: f64,
+}
+
+/// Direction of a signed ground-speed crossing.
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Crossing {
+    /// Previous speed below the threshold, new speed at or above it.
+    Above,
+    /// Previous speed above the threshold, new speed at or below it.
+    Below,
+}
+
+impl Phase {
+    fn crossed(&self, previous: f64, current: f64) -> bool {
+        match self.crossing {
+            Crossing::Above => previous < self.until_speed_kmh && current >= self.until_speed_kmh,
+            Crossing::Below => previous > self.until_speed_kmh && current <= self.until_speed_kmh,
+        }
+    }
 }
 
 /// A fault and its window.
@@ -372,6 +416,41 @@ impl Scenario {
         if scenario.speed_kmh.is_empty() || scenario.speed_kmh.windows(2).any(|w| w[1][0] < w[0][0]) {
             return bad("speed_kmh needs at least one [s, km/h] point, in time order".into());
         }
+        if scenario.phase_start_s.is_some() && scenario.phases.is_empty() {
+            return bad("phase_start_s needs at least one phase".into());
+        }
+        if !scenario.phases.is_empty() {
+            let start = scenario.phase_start_s.unwrap_or(scenario.release_s);
+            if !scenario.seconds.is_finite()
+                || !start.is_finite()
+                || !(scenario.release_s..scenario.seconds).contains(&start)
+                || scenario.phases.len() > 16
+            {
+                return bad("phases need finite times, a start at or after release, and at most 16 entries".into());
+            }
+            scenario.rider.control.validate().map_err(|e| ScenarioError::Invalid(e.to_string()))?;
+            for (i, phase) in scenario.phases.iter().enumerate() {
+                if phase.name.trim().is_empty()
+                    || phase.name.len() > 64
+                    || scenario.phases[..i].iter().any(|p| p.name == phase.name)
+                    || !phase.lean_deg.is_finite()
+                    || phase.lean_deg.abs() > scenario.rider.control.lean_max_deg
+                    || !phase.until_speed_kmh.is_finite()
+                    || !phase.timeout_s.is_finite()
+                    || phase.timeout_s <= 0.0
+                {
+                    return bad(format!(
+                        "phase {} needs a unique name, finite speed and lean within rider limits, and a positive finite timeout",
+                        i + 1
+                    ));
+                }
+            }
+            if start + scenario.phases.iter().map(|p| p.timeout_s).sum::<f64>() + PHASE_OBSERVE_S > scenario.seconds {
+                return bad(
+                    "seconds must include phase_start_s, every phase timeout, and 2 s of final observation".into()
+                );
+            }
+        }
         if scenario.step_off_s.is_some_and(|at| !(scenario.release_s..scenario.seconds).contains(&at)) {
             return bad("step_off_s must fall between release_s and the end of the run".into());
         }
@@ -450,6 +529,244 @@ pub struct Outcome {
     pub max_abs_pitch_deg: f64,
     /// Distance travelled, metres.
     pub distance_m: f64,
+    /// Measured-speed phase results; absent for legacy speed schedules.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub phases: Vec<PhaseResult>,
+}
+
+/// Verdict of a measured-speed gate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PhaseStatus {
+    /// An earlier phase failed, or the run ended before this phase began.
+    NotStarted,
+    /// The phase is still active (internal progress only).
+    Running,
+    /// Healthy measured ground speed crossed the threshold.
+    Reached,
+    /// The gate did not complete before a timeout, interruption, or run end.
+    TargetUnreachable,
+}
+
+/// Sampled measurements for one lean phase. Missing measurements serialize as null.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct PhaseResult {
+    /// Name from the scenario.
+    pub name: String,
+    /// Gate verdict, independent of later upright/cutoff checks.
+    pub status: PhaseStatus,
+    /// Failure reason, if any: timeout, cutoff, fall, halted, `nonfinite_speed`, or `duration_ended`.
+    pub reason: Option<String>,
+    /// First command time, seconds from power-on.
+    pub start_s: Option<f64>,
+    /// Gate/failure observation time, seconds from power-on.
+    pub end_s: Option<f64>,
+    /// Time since the first phase command, seconds.
+    pub elapsed_s: Option<f64>,
+    /// Signed forward distance change during this phase, metres (not total path length).
+    pub distance_m: Option<f64>,
+    /// Measured speed when the command begins, km/h.
+    pub start_speed_kmh: Option<f64>,
+    /// Measured speed when the phase ends, km/h.
+    pub end_speed_kmh: Option<f64>,
+    /// Highest measured forward speed during this phase, km/h.
+    pub max_speed_kmh: Option<f64>,
+    /// Largest absolute sampled current among all three motor phases, A.
+    pub max_abs_phase_current_a: Option<f64>,
+    /// Lowest sampled q current, A.
+    pub iq_min_a: Option<f64>,
+    /// Highest sampled q current, A.
+    pub iq_max_a: Option<f64>,
+    /// Lowest sampled battery current, A (negative is regeneration).
+    pub battery_current_min_a: Option<f64>,
+    /// Highest sampled battery current, A.
+    pub battery_current_max_a: Option<f64>,
+    /// Lowest sampled bus voltage, V.
+    pub battery_voltage_min_v: Option<f64>,
+    /// Highest sampled bus voltage, V.
+    pub battery_voltage_max_v: Option<f64>,
+    #[serde(skip)]
+    start_distance_m: Option<f64>,
+}
+
+impl PhaseResult {
+    fn pending(phase: &Phase) -> Self {
+        Self {
+            name: phase.name.clone(),
+            status: PhaseStatus::NotStarted,
+            reason: None,
+            start_s: None,
+            end_s: None,
+            elapsed_s: None,
+            distance_m: None,
+            start_speed_kmh: None,
+            end_speed_kmh: None,
+            max_speed_kmh: None,
+            max_abs_phase_current_a: None,
+            iq_min_a: None,
+            iq_max_a: None,
+            battery_current_min_a: None,
+            battery_current_max_a: None,
+            battery_voltage_min_v: None,
+            battery_voltage_max_v: None,
+            start_distance_m: None,
+        }
+    }
+
+    fn begin(&mut self, t: f64, speed: f64, distance: f64) {
+        self.status = PhaseStatus::Running;
+        self.start_s = Some(t);
+        self.start_speed_kmh = speed.is_finite().then_some(speed);
+        self.start_distance_m = distance.is_finite().then_some(distance);
+        extremum(&mut self.max_speed_kmh, speed, f64::max);
+    }
+
+    fn measure(&mut self, s: &Sample, signals: &Signals) {
+        self.end_s = Some(s.t_s);
+        self.elapsed_s = self.start_s.map(|start| s.t_s - start);
+        self.end_speed_kmh = s.speed_kmh.is_finite().then_some(s.speed_kmh);
+        self.distance_m = self.start_distance_m.and_then(|start| {
+            let distance = f64::from(signals.distance_m) - start;
+            distance.is_finite().then_some(distance)
+        });
+        self.measure_extrema(s, signals);
+    }
+
+    /// Includes an entry/boundary sample without advancing elapsed time, distance, or gates.
+    fn measure_extrema(&mut self, s: &Sample, signals: &Signals) {
+        extremum(&mut self.max_speed_kmh, s.speed_kmh, f64::max);
+        for current in [signals.phase_a_a, signals.phase_b_a, signals.phase_c_a] {
+            extremum(&mut self.max_abs_phase_current_a, f64::from(current).abs(), f64::max);
+        }
+        extremum(&mut self.iq_min_a, f64::from(signals.iq_a), f64::min);
+        extremum(&mut self.iq_max_a, f64::from(signals.iq_a), f64::max);
+        extremum(&mut self.battery_current_min_a, f64::from(signals.battery_a), f64::min);
+        extremum(&mut self.battery_current_max_a, f64::from(signals.battery_a), f64::max);
+        extremum(&mut self.battery_voltage_min_v, f64::from(signals.battery_v), f64::min);
+        extremum(&mut self.battery_voltage_max_v, f64::from(signals.battery_v), f64::max);
+    }
+}
+
+fn extremum(slot: &mut Option<f64>, value: f64, combine: fn(f64, f64) -> f64) {
+    if value.is_finite() {
+        *slot = Some(slot.map_or(value, |old| combine(old, value)));
+    }
+}
+
+/// Owns phase progression independently of the CPU and plant. The only output is rider intent.
+#[derive(Debug, Clone)]
+struct PhaseRun {
+    results: Vec<PhaseResult>,
+    index: usize,
+    previous_speed: f64,
+    terminal_s: Option<f64>,
+}
+
+impl PhaseRun {
+    fn new(phases: &[Phase]) -> Self {
+        Self {
+            results: phases.iter().map(PhaseResult::pending).collect(),
+            index: 0,
+            previous_speed: 0.0,
+            terminal_s: None,
+        }
+    }
+
+    fn command(&mut self, scenario: &Scenario, t: f64, speed: f64, distance: f64) -> Option<Intent> {
+        if self.results.is_empty() {
+            return None;
+        }
+        if self.terminal_s.is_some() {
+            return Some(if self.index == self.results.len() { Intent::Speed(0.0) } else { Intent::Lean(0.0) });
+        }
+        if t < scenario.phase_start_s.unwrap_or(scenario.release_s) {
+            return None;
+        }
+        let result = &mut self.results[self.index];
+        if result.start_s.is_none() {
+            result.begin(t, speed, distance);
+            self.previous_speed = speed;
+        }
+        Some(Intent::Lean(scenario.phases[self.index].lean_deg.to_radians()))
+    }
+
+    fn observe(&mut self, scenario: &Scenario, sample: Sample, signals: &Signals, halted: bool) {
+        if self.results.is_empty() || self.terminal_s.is_some() {
+            return;
+        }
+        let result = &mut self.results[self.index];
+        // Boot cutoff flags may be normal. Any cut/fall after release, or a halt at any time,
+        // makes the first target unreachable without inventing a launch or a braking phase.
+        if result.start_s.is_none() {
+            let failure = if halted {
+                Some("halted")
+            } else if sample.t_s >= scenario.release_s && sample.fallen {
+                Some("fall")
+            } else if sample.t_s >= scenario.release_s && sample.cutoff {
+                Some("cutoff")
+            } else {
+                None
+            };
+            if let Some(reason) = failure {
+                result.status = PhaseStatus::TargetUnreachable;
+                result.reason = Some(reason.into());
+                result.end_s = Some(sample.t_s);
+                self.terminal_s = Some(sample.t_s);
+            }
+            return;
+        }
+        result.measure(&sample, signals);
+        let phase = &scenario.phases[self.index];
+        let elapsed = result.elapsed_s.unwrap_or(0.0);
+        let failure = if halted {
+            Some("halted")
+        } else if sample.fallen {
+            Some("fall")
+        } else if sample.cutoff {
+            Some("cutoff")
+        } else if !sample.speed_kmh.is_finite() || !self.previous_speed.is_finite() {
+            Some("nonfinite_speed")
+        } else if elapsed > phase.timeout_s + 1e-9 {
+            Some("timeout")
+        } else {
+            None
+        };
+        let reached = failure.is_none() && phase.crossed(self.previous_speed, sample.speed_kmh);
+        let failure = failure.or_else(|| (!reached && elapsed + 1e-9 >= phase.timeout_s).then_some("timeout"));
+        if let Some(reason) = failure {
+            result.status = PhaseStatus::TargetUnreachable;
+            result.reason = Some(reason.into());
+            self.terminal_s = Some(sample.t_s);
+        } else if reached {
+            result.status = PhaseStatus::Reached;
+            self.index += 1;
+            if self.index == self.results.len() {
+                self.terminal_s = Some(sample.t_s);
+            } else {
+                let next = &mut self.results[self.index];
+                next.begin(sample.t_s, sample.speed_kmh, f64::from(signals.distance_m));
+                next.measure_extrema(&sample, signals);
+            }
+        }
+        self.previous_speed = sample.speed_kmh;
+    }
+
+    fn finished(&self, t: f64) -> bool {
+        self.terminal_s.is_some_and(|end| t + 1e-9 >= end + PHASE_OBSERVE_S)
+    }
+
+    fn outcomes(&self, t: f64) -> Vec<PhaseResult> {
+        let mut results = self.results.clone();
+        if self.terminal_s.is_none()
+            && let Some(result) = results.get_mut(self.index)
+        {
+            result.status = PhaseStatus::TargetUnreachable;
+            result.reason = Some("duration_ended".into());
+            result.end_s = Some(t);
+            result.elapsed_s = result.start_s.map(|start| t - start);
+        }
+        results
+    }
 }
 
 impl Outcome {
@@ -766,6 +1083,7 @@ pub struct Ride {
     /// Fault windows already announced: (started, ended) per timeline entry.
     announced: Vec<(bool, bool)>,
     distance_m: f64,
+    phases: PhaseRun,
 }
 
 impl Ride {
@@ -799,12 +1117,15 @@ impl Ride {
             last_push: 0.0,
             announced: vec![(false, false); scenario.faults.len()],
             distance_m: 0.0,
+            phases: PhaseRun::new(&scenario.phases),
         })
     }
 
-    /// The scenario has run its time.
+    /// The declared duration ended, or the machine halted before completion.
     pub fn finished(&self, scenario: &Scenario, session: &Session) -> bool {
-        session.time_s() + 0.5 * session.sample_period_s() >= scenario.seconds
+        session.machine().halted().is_some()
+            || self.phases.finished(session.time_s())
+            || session.time_s() + 0.5 * session.sample_period_s() >= scenario.seconds
     }
 
     /// Runs one sample period: stand, target speed, pushes, then the machine.
@@ -814,14 +1135,28 @@ impl Ride {
             session.set_held(false);
         }
         let target = scenario.target_kmh(t);
+        let previous_speed = self.samples.last().map_or(0.0, |s| s.speed_kmh);
+        let previous_distance = self.observed.last().map_or(0.0, |o| f64::from(o.signals.distance_m));
+        let was_started = self.phases.results.get(self.phases.index).is_some_and(|r| r.start_s.is_some());
+        let phase_intent = self.phases.command(scenario, t, previous_speed, previous_distance);
+        if !was_started
+            && let Some(result) = self.phases.results.get(self.phases.index)
+            && result.start_s.is_some()
+        {
+            session.note(format!(
+                "phase {} starts: lean {:.1} deg",
+                result.name, scenario.phases[self.phases.index].lean_deg
+            ));
+        }
         // A note per change of the target: at each ramp's start and end, not every sample on it.
         let ramping = (target - self.last_target).abs() > 1e-9;
-        if ramping != self.was_ramping || self.last_target.is_nan() {
+        if phase_intent.is_none() && (ramping != self.was_ramping || self.last_target.is_nan()) {
             session.note(format!("target {target:.1} km/h"));
         }
         self.was_ramping = ramping;
         self.last_target = target;
-        session.set_intent(Intent::Speed(target / 3.6));
+        let intent = phase_intent.unwrap_or(Intent::Speed(target / 3.6));
+        session.set_intent(intent);
         if scenario.step_off_s.is_some_and(|at| t >= at) {
             session.step_off();
         }
@@ -842,15 +1177,42 @@ impl Ride {
             }
         }
         let mut snapshot = session.step();
-        snapshot.signals.target_speed_kmh = target as f32;
+        snapshot.signals.target_speed_kmh = match intent {
+            Intent::Speed(v) => (v * 3.6) as f32,
+            Intent::Lean(_) => f32::NAN,
+        };
         let state = session.machine().plant().live_part().map(|l| l.physics().state());
-        self.samples.push(Sample {
+        let sample = Sample {
             t_s: snapshot.t_s,
             speed_kmh: f64::from(snapshot.signals.speed_kmh),
             pitch_deg: f64::from(snapshot.signals.pitch_deg),
             fallen: state.is_some_and(|s| s.fallen),
             cutoff: session.cutoff().is_some(),
-        });
+        };
+        self.samples.push(sample);
+        let previous_index = self.phases.index;
+        let was_terminal = self.phases.terminal_s.is_some();
+        self.phases.observe(scenario, sample, &snapshot.signals, session.machine().halted().is_some());
+        if (self.phases.index != previous_index || (!was_terminal && self.phases.terminal_s.is_some()))
+            && let Some(result) = self.phases.results.get(previous_index)
+        {
+            session.note(format!(
+                "phase {} {:?}{} at {:.3} s",
+                result.name,
+                result.status,
+                result.reason.as_ref().map_or(String::new(), |reason| format!(" ({reason})")),
+                snapshot.t_s
+            ));
+            if let Some(next) = self.phases.results.get(self.phases.index)
+                && next.start_s.is_some()
+                && self.phases.terminal_s.is_none()
+            {
+                session.note(format!(
+                    "phase {} starts: lean {:.1} deg",
+                    next.name, scenario.phases[self.phases.index].lean_deg
+                ));
+            }
+        }
         self.observed.push(Observation {
             cutoff_flags: session.cutoff_flags(),
             vars: self.vars.iter().map(|v| (v.clone(), session.firmware_var(v).unwrap_or(0))).collect(),
@@ -870,15 +1232,26 @@ impl Ride {
     pub fn outcome(&self, scenario: &Scenario) -> Outcome {
         let samples = &self.samples;
         let released = samples.iter().filter(|s| s.t_s >= scenario.release_s);
+        let phases = self.phases.outcomes(samples.last().map_or(0.0, |s| s.t_s));
+        let mut checks: Vec<_> =
+            scenario.expects.iter().map(|e| e.judge_observed(samples, &self.observed, scenario.release_s)).collect();
+        checks.extend(phases.iter().map(|p| CheckResult {
+            what: format!("phase {} reaches measured speed gate", p.name),
+            passed: p.status == PhaseStatus::Reached,
+            measured: format!(
+                "{:?}{}; elapsed {} s; distance {} m",
+                p.status,
+                p.reason.as_ref().map_or(String::new(), |r| format!(" ({r})")),
+                p.elapsed_s.map_or_else(|| "unavailable".into(), |s| format!("{s:.3}")),
+                p.distance_m.map_or_else(|| "unavailable".into(), |d| format!("{d:.3}"))
+            ),
+        }));
         Outcome {
-            checks: scenario
-                .expects
-                .iter()
-                .map(|e| e.judge_observed(samples, &self.observed, scenario.release_s))
-                .collect(),
+            checks,
             top_speed_kmh: samples.iter().map(|s| s.speed_kmh).fold(0.0, f64::max),
             max_abs_pitch_deg: released.map(|s| s.pitch_deg.abs()).fold(0.0, f64::max),
             distance_m: self.distance_m,
+            phases,
         }
     }
 }
@@ -955,6 +1328,289 @@ max_abs_deg = 10.0
 check = "speed_reached"
 kmh = 19.0
 "#;
+
+    #[test]
+    fn measured_speed_phases_parse_without_changing_static_profiles() {
+        let text = format!("{RIDE}\nphase_start_s = 6.0\n");
+        // Top-level keys must precede array tables.
+        let text =
+            text.replace("\nphase_start_s = 6.0\n", "").replacen("[[expect]]", "phase_start_s = 6.0\n[[expect]]", 1);
+        let text = format!(
+            "{text}\n[[phase]]\nname = \"accelerate\"\nlean_deg = 15.0\nuntil_speed_kmh = 70.0\ncrossing = \"above\"\ntimeout_s = 10.0\n"
+        );
+        assert!(Scenario::from_toml(&text).is_ok());
+        assert!(Scenario::from_toml(RIDE).is_ok());
+    }
+
+    fn phase_case() -> Scenario {
+        Scenario::from_toml(&format!("{RIDE}\n[[phase]]\nname = \"accelerate\"\nlean_deg = 15.0\nuntil_speed_kmh = 70.0\ncrossing = \"above\"\ntimeout_s = 10.0\n[[phase]]\nname = \"brake\"\nlean_deg = -15.0\nuntil_speed_kmh = 1.0\ncrossing = \"below\"\ntimeout_s = 10.0\n")).unwrap()
+    }
+
+    fn phase_signals(speed: f32, distance: f32) -> Signals {
+        Signals {
+            speed_kmh: speed,
+            distance_m: distance,
+            phase_a_a: -120.0,
+            phase_b_a: 90.0,
+            phase_c_a: 30.0,
+            iq_a: -100.0,
+            battery_a: -20.0,
+            battery_v: 130.0,
+            ..Signals::default()
+        }
+    }
+
+    fn phase_sample(t_s: f64, speed_kmh: f64) -> Sample {
+        Sample { t_s, speed_kmh, pitch_deg: 0.0, fallen: false, cutoff: false }
+    }
+
+    #[test]
+    fn phases_use_signed_measured_crossings_and_measure_braking_from_gate() {
+        let s = phase_case();
+        let mut run = PhaseRun::new(&s.phases);
+        assert!(run.command(&s, 4.9, 0.0, 0.0).is_none());
+        assert_eq!(run.command(&s, 5.0, 0.0, 0.0), Some(Intent::Lean(15_f64.to_radians())));
+        run.observe(&s, phase_sample(6.0, -75.0), &phase_signals(-75.0, 5.0), false);
+        assert_eq!(run.index, 0);
+        run.observe(&s, phase_sample(7.0, 69.0), &phase_signals(69.0, 15.0), false);
+        run.observe(&s, phase_sample(7.01, 70.1), &phase_signals(70.1, 15.2), false);
+        assert_eq!(run.index, 1);
+        assert_eq!(run.command(&s, 7.01, 70.1, 15.2), Some(Intent::Lean(-15_f64.to_radians())));
+        run.observe(&s, phase_sample(10.01, 0.9), &phase_signals(0.9, 40.2), false);
+        let results = run.outcomes(10.01);
+        assert_eq!(results[1].status, PhaseStatus::Reached);
+        assert!((results[1].elapsed_s.unwrap() - 3.0).abs() < 1e-9);
+        assert!((results[1].distance_m.unwrap() - 25.0).abs() < 1e-5);
+        assert_eq!(results[1].max_abs_phase_current_a, Some(120.0));
+        assert_eq!(results[1].battery_current_min_a, Some(-20.0));
+        assert_eq!(results[1].battery_voltage_max_v, Some(130.0));
+        assert!(!run.finished(11.9));
+        assert!(run.finished(12.01));
+    }
+
+    #[test]
+    fn phase_transition_seeds_boundary_extrema_during_deceleration() {
+        let s = phase_case();
+        for high_boundary in [false, true] {
+            let mut run = PhaseRun::new(&s.phases);
+            run.command(&s, 5.0, 69.0, 100.0);
+            let boundary = Signals {
+                phase_a_a: -300.0,
+                phase_b_a: 40.0,
+                phase_c_a: 260.0,
+                iq_a: if high_boundary { 210.0 } else { -210.0 },
+                battery_a: if high_boundary { 70.0 } else { -70.0 },
+                battery_v: if high_boundary { 144.0 } else { 110.0 },
+                ..phase_signals(70.25, 150.0)
+            };
+            run.observe(&s, phase_sample(6.0, 70.25), &boundary, false);
+            let brake = &run.results[1];
+            assert_eq!(brake.status, PhaseStatus::Running);
+            assert_eq!(brake.start_s, Some(6.0));
+            assert_eq!(brake.start_speed_kmh, Some(70.25));
+            assert_eq!(brake.max_speed_kmh, brake.start_speed_kmh);
+            assert_eq!(brake.max_abs_phase_current_a, Some(300.0));
+            assert_eq!(brake.iq_min_a, Some(f64::from(boundary.iq_a)));
+            assert_eq!(brake.iq_max_a, Some(f64::from(boundary.iq_a)));
+            assert_eq!(brake.battery_current_min_a, Some(f64::from(boundary.battery_a)));
+            assert_eq!(brake.battery_current_max_a, Some(f64::from(boundary.battery_a)));
+            assert_eq!(brake.battery_voltage_min_v, Some(f64::from(boundary.battery_v)));
+            assert_eq!(brake.battery_voltage_max_v, Some(f64::from(boundary.battery_v)));
+            // Entry is not a second observation of a completed time/distance interval.
+            assert_eq!(brake.end_s, None);
+            assert_eq!(brake.end_speed_kmh, None);
+            assert_eq!(brake.elapsed_s, None);
+            assert_eq!(brake.distance_m, None);
+            assert_eq!(run.terminal_s, None);
+            assert_eq!(run.command(&s, 6.0, 70.25, 150.0), Some(Intent::Lean(-15_f64.to_radians())));
+
+            let middle = Signals { iq_a: -50.0, battery_a: -20.0, ..phase_signals(35.0, 170.0) };
+            run.observe(&s, phase_sample(7.0, 35.0), &middle, false);
+            let end = Signals { iq_a: 3.0, battery_a: 1.0, battery_v: 125.0, ..phase_signals(0.5, 180.0) };
+            run.observe(&s, phase_sample(8.0, 0.5), &end, false);
+            let results = run.outcomes(8.0);
+            let brake = &results[1];
+            assert_eq!(brake.status, PhaseStatus::Reached);
+            assert!(brake.max_speed_kmh.unwrap() >= brake.start_speed_kmh.unwrap());
+            assert_eq!(brake.max_speed_kmh, Some(70.25));
+            assert_eq!(brake.max_abs_phase_current_a, Some(300.0));
+            assert_eq!(brake.iq_min_a, Some(if high_boundary { -50.0 } else { -210.0 }));
+            assert_eq!(brake.iq_max_a, Some(if high_boundary { 210.0 } else { 3.0 }));
+            assert_eq!(brake.battery_current_min_a, Some(if high_boundary { -20.0 } else { -70.0 }));
+            assert_eq!(brake.battery_current_max_a, Some(if high_boundary { 70.0 } else { 1.0 }));
+            assert_eq!(brake.battery_voltage_min_v, Some(if high_boundary { 125.0 } else { 110.0 }));
+            assert_eq!(brake.battery_voltage_max_v, Some(if high_boundary { 144.0 } else { 130.0 }));
+            assert_eq!(brake.elapsed_s, Some(2.0));
+            assert_eq!(brake.distance_m, Some(30.0));
+            assert_eq!(results[0].distance_m, Some(50.0));
+            assert_eq!(run.command(&s, 8.0, 0.5, 180.0), Some(Intent::Speed(0.0)));
+            assert!(!run.finished(9.99));
+            assert!(run.finished(10.0));
+        }
+    }
+
+    #[test]
+    fn phase_transition_seed_does_not_reuse_the_crossing_for_the_next_gate() {
+        let mut s = phase_case();
+        s.phases[1].crossing = Crossing::Above;
+        s.phases[1].until_speed_kmh = 69.5;
+        let mut run = PhaseRun::new(&s.phases);
+        run.command(&s, 5.0, 69.0, 0.0);
+        run.observe(&s, phase_sample(6.0, 70.25), &phase_signals(70.25, 10.0), false);
+        assert_eq!(run.index, 1);
+        assert_eq!(run.results[1].status, PhaseStatus::Running);
+        assert_eq!(run.results[1].max_speed_kmh, Some(70.25));
+        assert_eq!(run.terminal_s, None);
+        run.observe(&s, phase_sample(7.0, 71.0), &phase_signals(71.0, 20.0), false);
+        assert_eq!(run.index, 1, "remaining above the next threshold is not another crossing");
+        run.observe(&s, phase_sample(8.0, 68.0), &phase_signals(68.0, 30.0), false);
+        run.observe(&s, phase_sample(9.0, 69.5), &phase_signals(69.5, 40.0), false);
+        assert_eq!(run.results[1].status, PhaseStatus::Reached);
+        assert_eq!(run.results[1].elapsed_s, Some(3.0));
+        assert_eq!(run.results[1].distance_m, Some(30.0));
+    }
+
+    #[test]
+    fn phase_initial_entry_speed_is_included_without_inventing_sensor_values() {
+        let mut s = phase_case();
+        s.phases.truncate(1);
+        s.phases[0].crossing = Crossing::Below;
+        s.phases[0].until_speed_kmh = 1.0;
+        let mut run = PhaseRun::new(&s.phases);
+        run.command(&s, 5.0, 70.0, 100.0);
+        assert_eq!(run.results[0].max_speed_kmh, Some(70.0));
+        assert_eq!(run.results[0].max_abs_phase_current_a, None);
+        assert_eq!(run.results[0].battery_voltage_min_v, None);
+        run.observe(&s, phase_sample(6.0, 35.0), &phase_signals(35.0, 110.0), false);
+        run.observe(&s, phase_sample(7.0, 0.5), &phase_signals(0.5, 120.0), false);
+        assert_eq!(run.results[0].status, PhaseStatus::Reached);
+        assert_eq!(run.results[0].max_speed_kmh, run.results[0].start_speed_kmh);
+        assert_eq!(run.results[0].elapsed_s, Some(2.0));
+        assert_eq!(run.results[0].distance_m, Some(20.0));
+    }
+
+    #[test]
+    fn phase_failures_prevent_a_fake_braking_phase() {
+        let s = phase_case();
+        for reason in ["cutoff", "fall", "halted", "timeout", "nonfinite_speed"] {
+            let mut run = PhaseRun::new(&s.phases);
+            run.command(&s, 5.0, 0.0, 0.0);
+            let mut sample = phase_sample(if reason == "timeout" { 15.01 } else { 6.0 }, 70.1);
+            sample.cutoff = reason == "cutoff";
+            sample.fallen = reason == "fall";
+            if reason == "nonfinite_speed" {
+                sample.speed_kmh = f64::NAN;
+            }
+            run.observe(&s, sample, &phase_signals(70.1, 10.0), reason == "halted");
+            let results = run.outcomes(sample.t_s);
+            assert_eq!(results[0].status, PhaseStatus::TargetUnreachable, "{reason}");
+            assert_eq!(results[0].reason.as_deref(), Some(reason));
+            assert_eq!(results[1].status, PhaseStatus::NotStarted);
+            assert_eq!(results[1].elapsed_s, None);
+            assert_eq!(results[1].distance_m, None);
+            assert_eq!(run.command(&s, sample.t_s, 70.1, 10.0), Some(Intent::Lean(0.0)));
+        }
+    }
+
+    #[test]
+    fn phases_reject_cutoff_or_fall_after_release_before_launch() {
+        let mut s = phase_case();
+        s.phase_start_s = Some(6.0);
+        for cutoff in [false, true] {
+            let mut run = PhaseRun::new(&s.phases);
+            let mut sample = phase_sample(5.0, 0.0);
+            sample.cutoff = cutoff;
+            sample.fallen = !cutoff;
+            run.observe(&s, sample, &phase_signals(0.0, 0.0), false);
+            let results = run.outcomes(5.0);
+            assert_eq!(results[0].status, PhaseStatus::TargetUnreachable);
+            assert_eq!(results[0].reason.as_deref(), Some(if cutoff { "cutoff" } else { "fall" }));
+            assert_eq!(results[0].start_s, None);
+            assert_eq!(results[1].status, PhaseStatus::NotStarted);
+            assert_eq!(run.command(&s, 5.0, 0.0, 0.0), Some(Intent::Lean(0.0)));
+        }
+    }
+
+    #[test]
+    fn phase_deadline_without_crossing_and_early_end_are_unreachable() {
+        let s = phase_case();
+        let mut run = PhaseRun::new(&s.phases);
+        run.command(&s, 5.0, 0.0, 0.0);
+        run.observe(&s, phase_sample(15.0, 69.0), &phase_signals(69.0, 20.0), false);
+        assert_eq!(run.outcomes(15.0)[0].reason.as_deref(), Some("timeout"));
+        let mut run = PhaseRun::new(&s.phases);
+        run.command(&s, 5.0, 0.0, 0.0);
+        assert_eq!(run.outcomes(6.0)[0].reason.as_deref(), Some("duration_ended"));
+    }
+
+    #[test]
+    fn phase_validation_rejects_unbounded_or_impossible_configuration() {
+        let base = format!(
+            "{RIDE}\n[[phase]]\nname = \"accelerate\"\nlean_deg = 15.0\nuntil_speed_kmh = 70.0\ncrossing = \"above\"\ntimeout_s = 10.0\n"
+        );
+        for (from, to) in [
+            ("lean_deg = 15.0", "lean_deg = 16.0"),
+            ("timeout_s = 10.0", "timeout_s = inf"),
+            ("timeout_s = 10.0", "timeout_s = 0.0"),
+            ("until_speed_kmh = 70.0", "until_speed_kmh = nan"),
+            ("seconds = 30.0", "seconds = 15.0"),
+            ("name = \"accelerate\"", "name = \"\""),
+        ] {
+            assert!(Scenario::from_toml(&base.replace(from, to)).is_err(), "{to}");
+        }
+    }
+
+    #[test]
+    fn published_full_effort_cases_keep_generic_mass_and_initial_soc() {
+        for (text, initial_soc) in [
+            (include_str!("../../../scenarios/full-effort-70kmh-stop-soc100.toml"), 1.0),
+            (include_str!("../../../scenarios/full-effort-70kmh-stop-soc50.toml"), 0.5),
+            (include_str!("../../../scenarios/full-effort-70kmh-stop-soc20.toml"), 0.2),
+        ] {
+            let s = Scenario::from_toml(text).unwrap();
+            assert_eq!(s.rider.mass_kg, 80.0);
+            assert_eq!(s.phases.len(), 5);
+            for (i, (phase, (name, lean, speed))) in s
+                .phases
+                .iter()
+                .zip([
+                    ("launch", 30.0, 35.0),
+                    ("build", 20.0, 50.0),
+                    ("accelerate", 15.0, 70.0),
+                    ("brake", -30.0, 15.0),
+                    ("settle", -5.0, 1.0),
+                ])
+                .enumerate()
+            {
+                assert_eq!(phase.name, name);
+                assert!((phase.lean_deg - lean).abs() < f64::EPSILON);
+                assert!((phase.until_speed_kmh - speed).abs() < f64::EPSILON);
+                assert_eq!(matches!(phase.crossing, Crossing::Above), i < 3);
+            }
+            assert!((s.rider.control.lean_rate_deg_s - 24.0).abs() < f64::EPSILON);
+            assert!((s.rider.control.ankle_max_nm - 400.0).abs() < f64::EPSILON);
+            assert!(
+                matches!(s.faults[0].fault, Fault::Plant(PlantFault::BatterySoc { soc }) if (soc - initial_soc).abs() < f64::EPSILON)
+            );
+            assert_eq!(s.faults[0].at_s, 0.0);
+        }
+    }
+
+    #[test]
+    fn phase_crossing_at_deadline_passes_but_remaining_above_does_not() {
+        let s = phase_case();
+        let mut run = PhaseRun::new(&s.phases);
+        run.command(&s, 5.0, 69.0, 0.0);
+        run.observe(&s, phase_sample(15.0, 70.0), &phase_signals(70.0, 100.0), false);
+        assert_eq!(run.results[0].status, PhaseStatus::Reached);
+        assert_eq!(run.index, 1);
+        // A phase starting beyond its threshold still needs a crossing, not an immediate pass.
+        let mut run = PhaseRun::new(&s.phases);
+        run.command(&s, 5.0, 71.0, 0.0);
+        run.observe(&s, phase_sample(6.0, 72.0), &phase_signals(72.0, 10.0), false);
+        assert_eq!(run.index, 0);
+        assert_eq!(run.results[0].status, PhaseStatus::Running);
+    }
 
     #[test]
     fn parses_and_interpolates_the_speed_profile() {

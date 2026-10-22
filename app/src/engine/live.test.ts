@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { WheelButtonInput, wheelButtonReady } from "../workspaces/ride/wheelButtonInput.ts";
 
 // The Tauri IPC layer, faked: engine_connect hands back the two channels the client created.
 const calls: { cmd: string; args?: Record<string, unknown> }[] = [];
@@ -51,6 +52,86 @@ describe("LiveEngine", () => {
     expect(e.scenarioId).toBe("balance-60s");
     expect(e.status.backend).toBe("unicorn");
   });
+
+  it("takes physical button readiness from the native input gate", async () => {
+    const e = new LiveEngine();
+    await vi.waitFor(() => expect(channels.messages).toBeDefined());
+    const status = {
+      type: "status",
+      run_epoch: 1,
+      state: "running",
+      message: "",
+      backend: "own",
+      scenario: "balance-60s",
+      firmware: "stock",
+      t_s: 1,
+      rtf: 1,
+      target_rtf: 1,
+      playing: true,
+    };
+    channels.messages?.onmessage({ ...status, buttons_ready: false });
+    expect(e.status.buttonsReady).toBe(false);
+    channels.messages?.onmessage({ ...status, buttons_ready: true });
+    expect(e.status.buttonsReady).toBe(true);
+  });
+
+  it.each([true, false])(
+    "clears both readiness flags immediately on reset (Handle ready %s)",
+    async (handle) => {
+      const e = new LiveEngine();
+      await vi.waitFor(() => expect(channels.messages).toBeDefined());
+      const status = {
+        type: "status",
+        run_epoch: 7,
+        run_mode: "scenario",
+        state: "running",
+        message: "",
+        backend: "own",
+        scenario: "old",
+        firmware: "stock",
+        playing: true,
+        buttons_ready: handle,
+        power_button_ready: true,
+        rtf: 1,
+        target_rtf: 1,
+      };
+      channels.messages?.onmessage(status);
+      expect(wheelButtonReady(e.status, "power")).toBe(true);
+      let readinessAtReset: boolean[] = [];
+      const off = e.subscribe(() => {
+        readinessAtReset = [e.status.buttonsReady === true, e.status.powerButtonReady === true];
+      });
+      channels.messages?.onmessage({ type: "reset", scenario: "new" });
+      expect(readinessAtReset).toEqual([false, false]);
+      expect(e.status.buttonsReady).toBe(false);
+      expect(e.status.powerButtonReady).toBe(false);
+      const input = new WheelButtonInput();
+      const epoch = e.status.runEpoch;
+      if (epoch === undefined) throw new Error("missing input epoch");
+      for (const button of ["power", "handle"] as const) {
+        expect(
+          input.down(
+            {
+              source: e,
+              epoch,
+              setButton: e.setButton.bind(e),
+              isCurrent: () =>
+                e.playing && e.status.state === "running" && wheelButtonReady(e.status, button),
+            },
+            button,
+          ),
+        ).toBe(false);
+      }
+      expect(calls.filter((call) => call.cmd === "engine_button_state")).toEqual([]);
+      channels.messages?.onmessage({ type: "bodies", bodies: [] });
+      expect(wheelButtonReady(e.status, "power")).toBe(false);
+      channels.messages?.onmessage({ ...status, run_epoch: 8, buttons_ready: false });
+      expect(e.status.runEpoch).toBe(8);
+      expect(wheelButtonReady(e.status, "power")).toBe(true);
+      expect(wheelButtonReady(e.status, "handle")).toBe(false);
+      off();
+    },
+  );
 
   it("feeds batches into the rings and the latest view", async () => {
     const e = new LiveEngine();

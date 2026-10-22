@@ -28,14 +28,20 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 tauri = { version = "2", features = [] }
+# "Open recording…": the system's open panel.
+tauri-plugin-dialog = "2"
+# Where "Record this run" saves (Documents/EUC Studio/Recordings).
+directories = "6"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "1"
 
+euc-physics = { path = "../../crates/euc-physics" }
 euc-core = { path = "../../crates/euc-core" }
 euc-devices = { path = "../../crates/euc-devices" }
 euc-display = { path = "../../crates/euc-display" }
 euc-fwsource = { path = "../../crates/euc-fwsource" }
+euc-image = { path = "../../crates/euc-image" }
 euc-profile = { path = "../../crates/euc-profile" }
 euc-proto-begode = { path = "../../crates/euc-proto-begode" }
 euc-sim = { path = "../../crates/euc-sim" }

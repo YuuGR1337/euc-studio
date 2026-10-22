@@ -59,7 +59,6 @@ export function Slider({
         max={max}
         step={step}
         disabled={disabled}
-        aria-label={label}
         onValueChange={([v]) => v !== undefined && onValueChange(v)}
         onPointerDown={() => setDragging(true)}
         onPointerUp={() => setDragging(false)}
@@ -70,6 +69,7 @@ export function Slider({
           <S.Range className="absolute h-full rounded-pill bg-accent" />
         </S.Track>
         <S.Thumb
+          aria-label={label}
           data-force={force}
           className={cx(
             "relative block size-[16px] rounded-pill border border-hairline-strong bg-fg",

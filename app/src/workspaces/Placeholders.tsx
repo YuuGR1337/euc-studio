@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { series } from "../design/tokens.ts";
 import { useUi } from "../state/ui.ts";
 import { Button } from "../ui/Button.tsx";
 import {
@@ -7,18 +6,14 @@ import {
   ArrowRight,
   Bluetooth,
   ChipWrite,
-  Crosshair,
-  Diverge,
   Eye,
   FileCode2,
-  Ghost,
   Lock,
   ScrollText,
   ShieldCheck,
   SlidersHorizontal,
   Unicycle,
 } from "../ui/icons.tsx";
-import { Pill } from "../ui/Pill.tsx";
 import { Toggle } from "../ui/Toggle.tsx";
 import { EmptyWorkspace } from "./EmptyWorkspace.tsx";
 
@@ -116,118 +111,6 @@ export function TuneWorkspace() {
       actions={<GoToRide label="Watch the demo ride" />}
       previewLabel="Preview. Names and values are illustrative until the inspector reads real symbols."
       preview={<TunePreview />}
-    />
-  );
-}
-
-/* ---------------------------------------------------------------- Compare */
-
-function trace(seed: number, diverge: number) {
-  const pts: string[] = [];
-  for (let i = 0; i <= 100; i++) {
-    const x = i * 4;
-    const base = 70 + 22 * Math.sin(i / 9) + 8 * Math.sin(i / 3.1);
-    const off = i > diverge ? (i - diverge) ** 1.35 * 0.55 * seed : 0;
-    pts.push(`${x},${(base + off).toFixed(1)}`);
-  }
-  return pts.join(" ");
-}
-
-function ComparePreview() {
-  const d = 58;
-  return (
-    <div className="flex flex-col">
-      <div className="flex h-(--dock-header) items-center gap-8 border-b border-hairline px-16">
-        <span className="label">Pitch, lock-step</span>
-        <span className="ml-auto flex items-center gap-8 text-12 text-fg-2">
-          <span className="size-[8px] rounded-pill" style={{ background: series.speed }} /> Stock
-          <span className="ml-8 size-[8px] rounded-pill" style={{ background: series.pwm }} />{" "}
-          Ours-clean
-        </span>
-      </div>
-      <svg
-        viewBox="0 0 400 150"
-        className="w-full"
-        role="img"
-        aria-label="Two pitch traces that match, then diverge"
-      >
-        {[30, 70, 110].map((y) => (
-          <line key={y} x1="0" x2="400" y1={y} y2={y} stroke="rgba(255,255,255,0.06)" />
-        ))}
-        <polyline
-          points={trace(1, d)}
-          fill="none"
-          stroke={series.speed}
-          strokeWidth="1.5"
-          strokeLinejoin="round"
-        />
-        <polyline
-          points={trace(-1, d)}
-          fill="none"
-          stroke={series.pwm}
-          strokeWidth="1.5"
-          strokeLinejoin="round"
-        />
-        <line
-          x1={d * 4}
-          x2={d * 4}
-          y1="8"
-          y2="142"
-          stroke="var(--color-danger)"
-          strokeDasharray="3 3"
-        />
-        <circle cx={d * 4} cy="8" r="3" fill="var(--color-danger)" />
-      </svg>
-      <div className="flex items-center gap-8 border-t border-hairline px-16 py-8">
-        <Pill tone="danger" dot>
-          First divergence
-        </Pill>
-        <span className="num text-12 text-fg-2">t = 12.418 s</span>
-        <span className="num ml-auto truncate text-12 text-fg-3">cause: KEIL_FTZ quirk</span>
-      </div>
-    </div>
-  );
-}
-
-export function CompareWorkspace() {
-  return (
-    <EmptyWorkspace
-      icon={<Diverge />}
-      name="Compare"
-      milestone="Arrives in M4"
-      title="Find where two firmwares part ways"
-      lede="Run stock and ours on the same scenario, seed and inputs. The studio marks the first sample where they differ and shows both wheels at once."
-      features={[
-        {
-          icon: <Crosshair />,
-          title: "Lock-step runs",
-          text: "Same scenario and seed for both sides; register writes are hashed every quantum.",
-        },
-        {
-          icon: <Ghost />,
-          title: "3D ghost",
-          text: "The second firmware rides as a translucent ghost next to the first.",
-        },
-        {
-          icon: <Diverge />,
-          title: "First divergence",
-          text: "A marker on every scope and on the timeline, with the instruction that caused it.",
-        },
-      ]}
-      actions={
-        <>
-          <Button
-            variant="primary"
-            icon={<Diverge />}
-            disabledReason="Needs our firmware running in the simulator (M4)"
-          >
-            Start a comparison
-          </Button>
-          <GoToRide label="Watch the demo ride" />
-        </>
-      }
-      previewLabel="Preview with illustrative traces."
-      preview={<ComparePreview />}
     />
   );
 }

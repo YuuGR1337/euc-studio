@@ -16,7 +16,7 @@ function IsrLoad() {
   const isr = useLive((l) => l.isr, 4, 0);
   const tone = isr >= 85 ? "bg-danger" : isr >= 70 ? "bg-caution" : "bg-ok";
   return (
-    <Tooltip content="Share of CPU time spent in interrupt handlers" side="top">
+    <Tooltip content="Estimated interrupt load from simulator cycle counts" side="top">
       <Item className="cursor-default">
         <Cpu className="text-fg-3" />
         ISR
@@ -40,6 +40,7 @@ function IsrLoad() {
 const STATE_DOT: Record<string, string> = {
   running: "animate-[live-pulse_1.6s_ease-in-out_infinite] bg-ok",
   paused: "bg-caution",
+  completed: "bg-ok",
   starting: "animate-[live-pulse_1.6s_ease-in-out_infinite] bg-caution",
   halted: "bg-danger",
   error: "bg-danger",
@@ -49,15 +50,22 @@ const STATE_DOT: Record<string, string> = {
 function EngineItem() {
   const { state, message, backend } = engine.status;
   const live = engine.kind === "live";
+  const playback = engine.kind === "playback";
   const tip = live
     ? `${message || "The stock firmware runs in the simulator"}${backend === "unicorn" ? ". CPU: Unicorn, development builds only" : ""}`
-    : "Synthetic signals; the desktop app runs the real firmware";
+    : playback
+      ? "Recorded telemetry and body poses. Firmware commands are unavailable."
+      : "Synthetic signals; the desktop app runs the real firmware";
   return (
     <Tooltip content={tip} side="top">
       <Item className="cursor-default">
         <span className={cx("size-[6px] rounded-pill", STATE_DOT[state] ?? "bg-fg-3")} />
         <span className="text-fg">
-          {live ? `Engine: ${engine.status.label ?? "connecting"}` : "Demo engine"}
+          {live
+            ? `Engine: ${engine.status.label ?? "connecting"}`
+            : playback
+              ? "Recording playback"
+              : "Demo engine"}
         </span>
         <span>{state}</span>
         {live && state === "starting" && message && <span className="text-fg-3">{message}</span>}

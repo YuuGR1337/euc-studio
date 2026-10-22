@@ -18,7 +18,7 @@ images), so a scenario check or `euc sim compare` reads the same quantity on eve
 | Detector | Input | Threshold | Time | Action | Restart | Depends on speed |
 |---|---|---|---|---|---|---|
 | Pitch | `attitude_pitch_deg`, or `tipped` | \|pitch\| > 40 deg | 52 ticks (105 ms) | `balance_disabled`, `fallen` | automatic: 101 ticks level (accelerometer tilt) and \|v\| <= 0.2 m/s, one 20-tick beep | no |
-| Error | error angle (`attitude_pitch_deg` + tiltbacks + pedal trim - restart and handle offsets), or `tipped` | \|error\| > 40 deg | 11 ticks (22 ms) | `balance_disabled`, one 60-tick beep | none (only with the pitch detector) | no |
+| Error | error angle (`attitude_pitch_deg` + tiltbacks + pedal trim - restart and handle offsets), or `tipped` | \|error\| > 40 deg | 11 ticks (22 ms). Clean: 52 ticks (105 ms) for the angle, 11 ticks with `tipped` (`ERROR_CUTOFF_22MS`) | `balance_disabled`, one 60-tick beep | none (only with the pitch detector) | no |
 | Overload | `vq_active` | \|Vq\| > 31000 (command above 1033 of 1050) | 752 ticks (1.52 s) | `balance_disabled` | none | no; in practice only at high speed or a stalled wheel |
 | Slow roll | roll | \|roll\| > 40 + 5 x `W X` deg | 21 ticks (42 ms) | `tipped` (feeds pitch and error) | with the pitch restart | no |
 | Fast roll | roll | \|roll\| > 50 / 58 / 66 deg (`<` `=` `>`) and Vq > 30000 | 1 tick | `tipped` | with the pitch restart | through Vq only |
@@ -27,18 +27,20 @@ images), so a scenario check or `euc sim compare` reads the same quantity on eve
 None of the angle thresholds or times depends on speed in either profile. Speed only enters the balance
 through the gain schedule (Kp + 1 per m/s, Kd + 0.32 per cm/s), the tiltbacks and the restart condition.
 
-The error detector is the fastest one: 22 ms past 40 deg ends the ride, and it has no automatic restart. In
-the pothole scenario (PRELIMINARY, rigid body) the clean firmware, which reads the true attitude, trips this
-detector on a +44 deg nose-up swing that its own full reverse command causes; the stock firmware never trips it
-because its clipped gyro makes it believe the wheel is level. With the rear suspension in the model the same
-pothole dips the shell only to about -7 deg, and no firmware trips anything. See "Open questions".
+In the stock firmware the error detector is the fastest one: 22 ms past 40 deg ends the ride, and it has no
+automatic restart. That is shorter than a deep pothole dip that the balance is already recovering: on the 5 cm
+pothole at 20 km/h (`pothole-5cm-20kmh`) the shell passes -40 deg for 0.06-0.09 s and comes back. The stock
+firmware rides through only because its clipped gyro (+-500 deg/s) makes it believe the dip is shallower; the
+clean firmware reads the true dip, so with the stock 22 ms it cut and the wheel fell. Clean therefore gives an
+error angle the pitch detector's 105 ms (`ERROR_CUTOFF_22MS`): a fall still cuts, 83 ms later, and a roll
+cut-off (`tipped`) keeps the stock 22 ms. See "Open questions" for the evidence.
 
 ## Speed and power limits (balance, no cut)
 
 | Protection | Trigger | Response | Depends on speed |
 |---|---|---|---|
 | Speed tiltback | speed above `W Y` (km/h, 200 = off) | nose-up offset, 10 deg per m/s over, time constant 4 s; releases with 2 s | yes |
-| PWM tiltback | PWM alarm active and `e` set; clean also whenever the voltage vector \|Vd, Vq\| passes 75 % (`PWM_TILTBACK_VQ_ONLY`) | nose-up offset at 2.7 deg/s, at most 12 deg | through PWM |
+| PWM tiltback | PWM alarm active and `e` set; clean also whenever the voltage vector \|Vd, Vq\| passes 75 %, or the driving Vd (positive Vd, the voltage the winding's inductance takes) low-passed over 0.3 s passes 35 % (`PWM_TILTBACK_VQ_ONLY`) | nose-up offset at 2.7 deg/s, at most 12 deg | through PWM |
 | Battery / temperature tiltback | voltage outside 99.20..137.60 V or board above about 80 degC | nose-up offset at 2.38 deg/s (1.98 backward); holds in the gap to the inner window, releases in 20 s. Stock: no limit (about 48 deg in the end). Clean: at most 8 deg, and the 10 km/h speed limit of limp mode takes over until the inner window (`BATTERY_TILTBACK_UNBOUNDED`) | no (clean: yes) |
 | Clean: limp mode | one stuck hall line found (`HALL_SINGLE_LINE_UNDETECTED`) or a stalled main loop (`NO_WATCHDOG`) | speed tiltback at 10 km/h at most, growing at most 2.5 deg/s, at most 12 deg, no automatic restart after the next stop | yes |
 | Clean: riderless wheel | a sudden load drop, then faster than 1 m/s, \|Iq\| (0.3 s low-pass) under 3.5 A for 0.6 s, speed dropping less than 0.15 m/s, no other limit, 3 s after start (`RIDERLESS_UNDETECTED`) | beeps and the limp speed limit; released by \|Iq\| above 7 A, below 1 m/s or a stop ([riderless-detection.md](riderless-detection.md)) | yes |
@@ -85,47 +87,46 @@ pothole dips the shell only to about -7 deg, and no firmware trips anything. See
 | Service sequences `!@` `cy` `+-` | BLE bytes, no authentication | only with no rider and a power-button press within 10 s (`SERVICE_WITHOUT_CONFIRM`) |
 | Ride settings over BLE | any speed (stock) | below 0.5 m/s only (`SETTINGS_WHILE_MOVING`) |
 
-## Open questions
+## Decisions and open questions
 
-### The error detector against a recovery swing
+The decision studies below use the earlier mechanical baseline named in each section.
+Their measured times and outcomes do not describe every later model revision.
+The [current validation](../../docs/models/clean-cutoff-next.md#current-validation-2026-10-21) uses the final 2026-10-21 rigid-rider baseline.
+It preserves the cutoff and warning settings in this document.
 
-The error detector's 22 ms is shorter than one recovery swing. With a true attitude, a hard pothole edge
-(PRELIMINARY, rigid body) trips it on the overshoot after a -40 deg nose dive: the law's rate terms
-(0.1 x Kd(v) x pitch rate and 160 x the change of the error) are not clamped, only the angle term is, so at
-about 540 deg/s they command full reverse (+73 to -1050 in 20 ms, the 120-per-tick slew) while the shell is
-still nose down, and it swings on to +44 deg.
+### The error detector against a recovery swing (decided 2026-10-20)
 
-Decision (2026-10-16): no change before the suspension model lands. Then rerun pothole-20kmh on stock, compat
-and clean, and if clean still trips, change in this order, each proven by one scenario:
+The stock error detector cuts after 22 ms past 40 deg. On the rigid body (2026-10-16, before the suspension) a
+hard pothole edge tripped it in clean on a +44 deg nose-up swing; with the rear suspension the 2 cm pothole dips
+the shell only to about -10 deg and nothing trips. The 5 cm pothole (`pothole-5cm-20kmh`) is the edge case: the
+shell passes -40 deg for 0.06-0.09 s and the balance brings it back. Stock and compat ride through because their
+clipped gyro makes them believe the dip is shallower (stock's attitude reaches 34.5 deg while the shell is at
+-42.7 deg); clean reads the true dip, and with the stock 22 ms its error detector cut at 19.88 s at quantum 3000
+and 2000 (error count 11 of 11, pitch count 2 of 52) and the wheel fell backwards.
 
-1. Clamp the rate terms of the law (for example to +-500), so the rate alone cannot command full reverse while
-   the angle is still on the other side.
-2. A lower command slew (for example 40 per tick) when the command crosses zero while \|error\| > 15 deg.
-3. The pitch detector's 105 ms for the error detector too: this changes when a fall cuts, not whether.
-4. Only if a realistic body still trips: a speed-aware cut-off, with evidence.
+Two clean candidates from the list of 2026-10-16 were built as quirks and judged at quantum 4000, 3000 and 2000
+(model of 2026-10-16 with the CPI 2.0 timing: linkage ratio 1.2, rigid rider):
 
-Result (2026-10-16, rear suspension in the model): pothole-20kmh on stock, compat and clean, each at emulator
-quantum sizes 4000, 3000 and 2000. All nine runs stay up with no cut. The shell dips to -6.7..-7.4 deg, the
-shock compresses about 37 of 60 mm, the peak pitch rate is about 250 deg/s (from the 100 Hz true pitch, below
-the stock gyro's +-500 deg/s), and the firmware attitude follows the true pitch through the impact (0.8 deg RMS
-stock, 0.7 deg clean, 19.7-20.5 s). The recovery swing does not happen on the 2 cm pothole.
+| Clean build | 2 cm pothole | 3 cm pothole | 5 cm pothole |
+|---|---|---|---|
+| stock cut-offs (22 ms) | holds | holds | **borderline** (holds, falls, falls): the error detector cuts at 19.88 s |
+| (c) the error angle gets the pitch detector's 105 ms | holds | holds | holds; error count at most 20-26 of 52, shell -41.8..-42.3 deg, 0.06-0.07 s past 40 deg |
+| (a) the law's rate terms clamped to +-500 | falls | falls | falls |
+| (c) and (a) at +-500 | falls | falls | falls |
+| (c) and (a) at +-1000 | holds | holds | falls |
 
-OPEN (2026-10-16): a 5 cm pothole at 20 km/h (periph's copy of pothole-20kmh with depth_m 0.05) is at the
-edge. The shell really dips to about -42 deg. Stock and compat ride through on a wrong attitude (about 5-6 deg
-RMS error after the impact: they believe +1 deg while the shell is at -4..-5 deg). Clean reads the true dip:
-on periph's 15:34 tree (before the last spring change) its 40 deg cut-off tripped at 19.86 s and the wheel fell;
-on the current tree (quantum 4000) clean's shell reaches -40.4 deg for about 0.03 s and it rides through, stock
-reaches -42.1 deg for 0.06 s. Which detector tripped in periph's run is not identified yet; a dip past 40 deg
-for under 105 ms points to the error detector (22 ms). A safer attitude must not make the wheel fall where stock
-survives, so this needs a fix before the clean profile rides. Options, in order, each as a clean build judged
-on the 2, 3 and 5 cm potholes, both rider-steps-off scenarios (must still cut), overlean-top-speed-30pct and
-hard-braking-30kmh at quantum sizes 4000, 3000 and 2000, with the final suspension (spring 750 lb/in, shock
-200 mm):
+(a) is rejected. The rate terms (0.1 x Kd(v) x pitch rate and 160 x the change of the error) are the balance's
+damping: clamped to +-500, the 2 cm dip starts a growing oscillation (shell -9.8, +12.7, -36.6, +42.6 deg within
+0.4 s), the error detector cuts at 20.21 s and the wheel falls at 20.33 s. With the suspension in the model the
+full reverse command after a dip is what stops the swing, not what causes it.
 
-1. (c) The pitch detector's 105 ms for the error detector too: the 5 cm dip stays past 40 deg for 0.03-0.06 s,
-   so it would ride through; rider-steps-off must still cut (the shell stays past the limit there).
-2. (a) Clamp the rate terms of the law (for example to +-500), if the swing after the dip still trips.
-3. The command slew near a zero crossing and a speed-aware cut-off stay last, as above.
+(c) is in the clean profile (`ERROR_CUTOFF_22MS`). An error angle alone now counts 52 ticks, as the pitch
+detector does; a roll cut-off (`tipped`) keeps the stock 11 ticks, so a wheel on its side still stops within
+64 ms (21 + 11 ticks). On the acceptance cases the cut times are unchanged: rider-steps-off-15kmh 17.76-17.79 s,
+rider-steps-off-5kmh 12.64 s, hall-loss-while-riding 15.07 s (hall fault); hard-braking-30kmh and
+overlean-top-speed-30pct hold as before. A fall past 40 deg in pitch still cuts, 83 ms later than in stock; the
+pitch detector already took that long, and the error detector still has no automatic restart. The two last
+options of the list (a lower command slew near a zero crossing, a speed-aware cut-off) are not needed.
 
 ### Telemetry PWM % and the true headroom
 
@@ -138,33 +139,75 @@ decided after periph's sensitivity check on the motor values:
 2. Report \|V\| in the same field (honest headroom, but a different meaning under the same name).
 3. Keep Vq and add \|V\| in a spare telemetry field (no app changes its meaning; new apps can show both).
 
-### Headroom tiltback with a high-inductance motor
+### Headroom tiltback with a high-inductance motor (decided 2026-10-20)
 
-OPEN (2026-10-16): the clean headroom tiltback (`PWM_TILTBACK_VQ_ONLY`, \|Vd, Vq\| above 75 %) must give
-about 2 s of tiltback before the drive saturates for any plausible motor, judged on the start time before
-saturation (the overlean fall/no-fall verdicts depend on a few cycles of emulator timing). The inductance is
-not measured (200 uH is an estimate). On overlean-top-speed (rider ignoring tiltback, full battery, model of
-2026-10-16 15:34 with the first suspension, quantum 4000):
+The clean headroom tiltback must give about 2 s of tiltback before the drive saturates for any plausible motor;
+the inductance is not measured (200 uH is an estimate). With the vector trigger alone (\|Vd, Vq\| above 75 %) it
+started only 0.3-0.5 s before saturation at twice the inductance.
 
-| Inductance | Tiltback starts | Vq first above 100 % | Lead | Outcome |
-|---|---|---|---|---|
-| 100 uH (0.5x) | 24.75 s | never | - | holds about 69.6 km/h (speed tiltback), \|V\| at most 80 % |
-| 200 uH (1x) | 22.39 s | never | - | holds about 69.6 km/h, \|V\| at most 84 % |
-| 400 uH (2x) | 18.23 s | 18.32 s | 0.09 s | falls at 19.57 s at 49 km/h |
+Why: at 2x the drive does not run out of voltage first. Near 41 km/h the balance command and the current loop
+start a 10 Hz oscillation that grows within about 0.8 s (command 165..250, then 42..409; Id +-7 A, then +-30 A)
+while the vector averages only about 60 %; its peaks then reach the circle limit and the current loop loses
+control. Vd is about w x L x Iq, so it grows with the inductance (at 2x it is larger than Vq). Clean therefore
+also starts the PWM tiltback when the driving part of Vd (positive Vd, motoring in either direction; braking
+makes it negative), low-passed over 0.3 s, passes 35 % (`PWM_TILTBACK_VQ_ONLY`). 38 % gave 1.7-1.9 s at 2x for
+the default rider, 35 % gives at least 2.45 s.
 
-periph measured the same at 2x on the default rider: saturation 18.10 s, tiltback 18.11 s, fall 19.49 s.
-At 2x the vector does not climb smoothly to 100 %: it rises to about 70 % (Vd 52-54 %, larger than Vq) and then
-the current loop loses control within about 0.3 s, so neither a lower \|V\| threshold that keeps 0.5x and 1x
-quiet nor a rate term (time to saturation from the \|V\| slope) gives 2 s. Options:
+Overlean riders on the maintainer's settings (accelerating at 5 km/h per second, leaning up to 18 deg), at 0.5x,
+1x and 2x the plant's inductance (scratch profile copies), model of 2026-10-16 with the CPI 2.0 timing: linkage ratio 1.2, rigid rider. Before: clean with the vector trigger
+only; after: with the Vd trigger. Times at quantum 4000; "lead" is from the tiltback start to the first sample
+with \|V\| at 98 % or more (saturation); the verdicts are over quantum 4000, 3000 and 2000.
 
-1. A second trigger on Vd in the driving direction, low-passed over 0.3 s, above about 38 %: the voltage the
-   inductance takes at the present load and speed. A first try (not kept, not gated) put the 2x start at
-   about 16.0 s (2.3 s before saturation) and the 1x start about 2 s earlier than now, quiet at 0.5x. Still to
-   check: every shipped scenario at 1x and 2x (instant Vd peaks: pothole 56 %, hard braking 37 % at 1x) and the
-   3x3 table (inductance x rider: ignore, default, strong easing).
-2. Find why the current loop loses control at 2x (no d/q decoupling in the stock loop) and fix that in clean;
-   then the 75 % trigger may be enough.
-3. Wait for the measured inductance (bench, M8) and keep 75 %.
+Full battery (`overlean-top-speed`; its rider ignores tiltback):
+
+| Inductance | Rider | Before: tiltback, first \|V\| >= 98 %, verdict | After: tiltback, first \|V\| >= 98 %, lead, verdict |
+|---|---|---|---|
+| 0.5x | ignores tiltback | 22.44 s, - (lead -), holds | 22.43 s, -, -, holds |
+| 0.5x | default | 22.44 s, - (lead -), holds | 22.43 s, -, -, holds |
+| 0.5x | strong easing | 22.44 s, - (lead -), holds | 22.43 s, -, -, holds |
+| 1x | ignores tiltback | 20.97 s, 26.69 s (lead 5.72 s), holds | 19.65 s, 26.68 s, 7.03 s, **borderline** (falls, holds, falls) |
+| 1x | default | 20.97 s, 22.18 s (lead 1.21 s), holds | 19.65 s, -, -, holds |
+| 1x | strong easing | 20.97 s, 37.88 s (lead 16.91 s), holds | 19.65 s, -, -, holds |
+| 2x | ignores tiltback | 17.66 s, 17.96 s (lead 0.30 s), falls | 15.46 s, 17.91 s, 2.45 s, falls |
+| 2x | default | 17.66 s, 17.96 s (lead 0.30 s), falls | 15.46 s, 18.44 s, 2.98 s, holds |
+| 2x | strong easing | 17.66 s, 17.96 s (lead 0.30 s), **borderline** (holds, falls, falls) | 15.46 s, 19.57 s, 4.11 s, holds |
+
+30 % battery (`overlean-top-speed-30pct`):
+
+| Inductance | Rider | Before: tiltback, first \|V\| >= 98 %, verdict | After: tiltback, first \|V\| >= 98 %, lead, verdict |
+|---|---|---|---|
+| 0.5x | ignores tiltback | 20.97 s, - (lead -), holds | 20.93 s, -, -, holds |
+| 0.5x | default | 20.97 s, - (lead -), holds | 20.93 s, -, -, holds |
+| 0.5x | strong easing | 20.97 s, - (lead -), holds | 20.93 s, -, -, holds |
+| 1x | ignores tiltback | 19.54 s, 29.66 s (lead 10.12 s), holds | 18.72 s, 28.07 s, 9.35 s, holds |
+| 1x | default | 19.54 s, 23.24 s (lead 3.70 s), holds | 18.72 s, -, -, holds |
+| 1x | strong easing | 19.54 s, - (lead -), holds | 18.72 s, -, -, holds |
+| 2x | ignores tiltback | 16.42 s, 16.90 s (lead 0.48 s), falls | 14.78 s, 17.25 s, 2.47 s, falls |
+| 2x | default | 16.42 s, 16.90 s (lead 0.48 s), falls | 14.78 s, 18.67 s, 3.89 s, holds |
+| 2x | strong easing | 16.42 s, 16.90 s (lead 0.48 s), holds | 14.78 s, 18.85 s, 4.07 s, holds |
+
+With the PWM tiltback switched off (`overlean-no-pwm-tiltback`, default rider) clean holds at all three
+inductances before and after; at 2x the tiltback now starts at 14.8 s instead of 16.8 s.
+
+No new triggers elsewhere: on every other shipped scenario at 0.5x and 1x the low-passed driving Vd stays below
+25 % (hill climb 22 %, 5 cm pothole 25 %, hard braking 14 %, the rest below 12 %), and the PWM tiltback starts
+and peaks as before. At 2x one scenario gains a tiltback: `hill-climb-low-battery` (3 % battery, 73 A at
+25 km/h; Vd 41 % at 18.3 s, the PWM tiltback reaches 12 deg); it still holds.
+
+The cost at 1x: the tiltback starts about 1.3 s earlier (about 50 instead of 54 km/h on a full battery), and the
+easing riders top out 3-4 km/h lower.
+
+Still open:
+
+1. The full-battery rider who ignores tiltback at 1x stays **borderline**. From 25.5 s it rides at 67-72 km/h
+   with the vector at 85-97 % for more than 3 s and the PWM tiltback at its 12 deg limit; only the speed
+   tiltback (69 km/h setting) still grows. Whether a disturbance saturates the vector there depends on a few
+   cycles of timing: the same rider held on the build before (all three sizes) and fell at 4000 on HEAD. The
+   warning itself starts 7-9 s earlier. A larger cap (18 deg) held at all three sizes but tipped the pedals
+   25 deg nose up; not adopted.
+2. At 2x the riders who ignore tiltback still fall, now with about 2.5 s of tiltback first. Fixing the loop
+   oscillation itself (d/q decoupling in the clean current loop) is the next step if a measured motor needs it.
+3. The measured inductance (bench, M8) decides how much of this matters.
 
 ### Acceptance: what must still cut
 
@@ -174,5 +217,5 @@ Any change to a cut-off or to the law's limits must keep every case below cuttin
 - the shell stays past the limit and does not come back (rider off, wheel down): rider-steps-off-15kmh;
 - the angle keeps growing while the command is saturated (overlean past the motor's limit);
 - any over-angle at walking speed;
-- roll past the slow or fast roll limit (wheel on its side);
+- roll past the slow or fast roll limit (wheel on its side), still 22 ms after `tipped` in both profiles;
 - the hall fault, the start-up current-sensor check and the system cuts above, unchanged.

@@ -154,6 +154,10 @@ const PACK_R = 0.18; // ohm
 /** The applied voltage against the PWM figure: the inverter's dead time takes about 2 %. */
 const DEAD_TIME_LOSS = 0.98;
 const ABS_SPEED_MAX = 68; // km/h at 100 % PWM on a full pack, roughly
+/** Manual riding: km/h gained per second at full forward lean (and lost at full back lean). */
+const MANUAL_ACCEL_KMH_S = 9;
+/** Manual riding: roll into a full turn, degrees. */
+const MANUAL_ROLL_DEG = 4;
 
 export class DemoEngine implements EngineClient {
   readonly kind = "demo" as const;
@@ -215,6 +219,10 @@ export class DemoEngine implements EngineClient {
   private accel = 0;
   private noise = { pitch: 0, current: 0, isr: 0, roll: 0 };
   private rtfWindow: { wall: number; sim: number }[] = [];
+  /** Manual riding: what the keys or the stick ask, the speed they hold, a rider who left. */
+  private manual: { lean: number; steer: number } | null = null;
+  private manualSpeed = 0;
+  private steppedOff = false;
   private listeners = new Set<() => void>();
   private version = 0;
   private lastLoop = -1;
@@ -292,6 +300,25 @@ export class DemoEngine implements EngineClient {
     return Promise.reject(new Error("The demo engine has no firmware to talk to"));
   }
 
+  setManual(input: { lean: number; steer: number } | null): void {
+    if (input && !this.manual) {
+      this.manualSpeed = this.latest.speed;
+      this.pushEvent(this.latest.t, "scenario", "Manual control");
+    }
+    if (!input && this.manual)
+      this.pushEvent(this.latest.t, "scenario", "Control back to the scenario");
+    this.manual = input && {
+      lean: clamp(input.lean, -1, 1),
+      steer: clamp(input.steer, -1, 1),
+    };
+  }
+
+  stepOff(): void {
+    if (this.steppedOff) return;
+    this.steppedOff = true;
+    this.pushEvent(this.latest.t, "scenario", "Rider steps off");
+  }
+
   setScenario(id: string): void {
     const s = SCENARIOS.find((x) => x.id === id);
     if (!s || s === this.scenario) return;
@@ -357,6 +384,8 @@ export class DemoEngine implements EngineClient {
     this.noise = { pitch: 0, current: 0, isr: 0, roll: 0 };
     this.rtfWindow = [];
     this.lastLoop = -1;
+    this.manualSpeed = 0;
+    this.steppedOff = false;
     Object.assign(this.latest, {
       t: 0,
       speed: 0,
@@ -417,10 +446,19 @@ export class DemoEngine implements EngineClient {
 
     const target = scenarioTarget(s, lt);
     const clean = this.firmware === "ours-clean";
+    // By hand, the lean sets how fast the speed changes; a rider who stepped off lets it stop.
+    if (this.manual) {
+      this.manualSpeed = clamp(
+        this.manualSpeed + this.manual.lean * MANUAL_ACCEL_KMH_S * DT,
+        0,
+        40,
+      );
+    }
+    const wanted = this.steppedOff ? 0 : this.manual ? this.manualSpeed : target.speed;
 
     // Speed follows the rider's intent with a short lag; acceleration drives lean and current.
     const prevSpeed = L.speed;
-    const speed = Math.max(0, prevSpeed + (target.speed - prevSpeed) * (1 - Math.exp(-DT / 0.35)));
+    const speed = Math.max(0, prevSpeed + (wanted - prevSpeed) * (1 - Math.exp(-DT / 0.35)));
     const accelRaw = (speed - prevSpeed) / 3.6 / DT; // m/s^2
     this.accel += (accelRaw - this.accel) * 0.2;
 
@@ -431,7 +469,10 @@ export class DemoEngine implements EngineClient {
       wobble * Math.sin(2 * Math.PI * 1.3 * t) +
       0.07 * Math.sin(2 * Math.PI * 3.7 * t + 1.1) +
       0.12 * this.walk("pitch", 0.05);
-    const roll = 0.35 * Math.sin(2 * Math.PI * 0.21 * t) + 0.2 * this.walk("roll", 0.02);
+    const roll =
+      0.35 * Math.sin(2 * Math.PI * 0.21 * t) +
+      0.2 * this.walk("roll", 0.02) -
+      (this.manual?.steer ?? 0) * MANUAL_ROLL_DEG;
 
     // Braking current is regenerative and smaller than the drive current for the same rate.
     const drag = 0.012 * speed * speed;

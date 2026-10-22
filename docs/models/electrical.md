@@ -73,10 +73,15 @@ the open-leg rule above, DC link capacitor (the battery is the bus).
 
 PWM and modulation in telemetry: `pwm_pct` is the firmware's own figure, as its app frame reports it
 (frame 07: the commanded q voltage `vq_active`, Q15 of Vbus/√3, divided by 315 and truncated, so
-31 500 is 100 %). `modulation_pct` is the voltage the inverter really applies in the plant, |Vd, Vq|
-of the pole voltages, on the same scale. It includes Vd, so it is at least the commanded |Vq|, less
-the dead-time error: at 20 km/h with the default 0.5 µs, the applied voltage is about 2 % below the
-command on average (up to 6 %). It is 0 while any leg is off.
+31 500 is 100 %). Values can exceed 100 % near saturation; telemetry does not clamp them.
+`modulation_pct` is the voltage the inverter really applies in the plant, |Vd, Vq|
+of the pole voltages, on the same scale. It includes Vd, but it does not have a general lower
+bound of `pwm_pct`: circle limitation reduces the commanded vector, dead time changes the
+applied voltage, and sampled values can represent different update instants. The firmware's
+`vq_active` precedes circle limitation, except during stop braking.
+At 20 km/h with the default 0.5 µs dead time, the applied voltage was about 2 % below the
+command on average (up to 6 %) in the diagnostic run. This is a scenario result, not an invariant.
+Modulation is 0 while any leg is off.
 
 ## Motor
 

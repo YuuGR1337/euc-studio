@@ -20,8 +20,8 @@ const PROFILE: (usize, usize) = (0x18, 8);
 const VERSION_AT: usize = 0x20;
 const FLAGS_AT: usize = 0x26;
 const GIT_SHA: (usize, usize) = (0x28, 12);
-const IMAGE_LEN_AT: usize = 0x34;
-const CRC_AT: usize = 0x38;
+pub(crate) const IMAGE_LEN_AT: usize = 0x34;
+pub(crate) const CRC_AT: usize = 0x38;
 const SIGNATURE: (usize, usize) = (0x3C, 64);
 const RESERVED_AT: usize = 0x7C;
 

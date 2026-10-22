@@ -134,7 +134,7 @@ export function TailLight3D({ layout, scan }: { layout: LightsLayout; scan?: THR
       shown.current = null;
     }
     const lit = scanLights.current?.lights;
-    const on = engine.outputs !== null;
+    const on = engine.outputs !== null && engine.outputs.controller_powered !== false;
     if (status.current) status.current.visible = on && !lit;
     for (const m of lit?.ble ?? [])
       m.emissive.set(on ? (layout.indicators[0]?.colour ?? "#3050FF") : "#000000");

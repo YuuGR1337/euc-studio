@@ -3,13 +3,13 @@
 **Run real electric-unicycle firmware in a 3D simulation with a physical rider. Inspect it, compare it, improve it.**
 
 EUC Studio is a workbench for people who want better and safer EUC controller firmware. It runs the controller's
-actual firmware image on an emulated microcontroller, wired to models of the motor, the battery, the wheel and a full
-human rider, so you can watch what the firmware does in every situation before anyone rides it.
+actual firmware image on an emulated microcontroller. Motor, battery, wheel, and rigid rider models supply its inputs.
+The simulator helps inspect behavior under specified conditions. It does not establish real riding safety.
 
 ![EUC Studio, Ride workspace](app/docs/screenshots/ride.png)
 
-<sub>Milestone M0: the app shell and design system run on a demo engine with synthetic telemetry. The real engine
-lands in the next milestones.</sub>
+<sub>The desktop Ride workspace runs real firmware on the project's CPU core, with motor, battery, terrain, and rider models.
+Some physical parameters remain estimates. Desktop workflow completion is in progress.</sub>
 
 > [!WARNING]
 > Custom firmware can make a wheel cut out, injure its rider or destroy its power stage. Read [SAFETY.md](SAFETY.md)
@@ -42,23 +42,31 @@ lands in the next milestones.</sub>
 Everything runs on one deterministic clock counted in microcontroller cycles, so every run can be replayed exactly.
 See [docs/architecture.md](docs/architecture.md).
 
-The first wheel is the **Begode Extreme**. Its stock firmware already boots unchanged in our prototype emulator, and we
-have mapped how every part of it behaves; the engine in this repository is the production version of that work.
+The first wheel is the **Begode Extreme**. Its stock firmware boots unchanged in the Rust engine.
+The simulator reproduces the observed interfaces. Unknown hardware values remain explicit estimates.
 
 ## Status
 
-| Milestone | Goal | State |
+| Milestone | Implemented | Remaining |
 |---|---|---|
-| M0 Foundation | Repo, CI, vendor guard, engine core traits, firmware fetch, firmware skeleton, app shell | ✅ done |
-| M1 Stock boots | Stock firmware boots in the Rust engine | ✅ done: 2.3× real time, byte-identical to the reference emulator |
-| M2 Stock rides in 3D | Motor, battery and body physics, 3D viewport | next |
-| M3 Own CPU core | ARMv7-M interpreter verified against a reference emulator | |
-| M4 Human rider | Full rider, recordings, Python, scenarios | |
-| M5 Our firmware | Complete C firmware, compat and clean profiles | |
-| M6 Flasher | BLE flasher with safety gates | |
-| M7 Release | Desktop builds, docs site, a second wheel | |
+| M0 Foundation | Repository, CI, vendor guard, fetch and image gates | Maintain these gates for new features |
+| M1 Stock boots | Stock boots and sends telemetry on the Rust engine | Broader hardware calibration |
+| M2 Stock rides in 3D | Live electrical/body physics, terrain, display, telemetry and Ride workspace | Measured battery, motor and suspension limits |
+| M3 Own CPU core | Own ARMv7-M core and reference lockstep checks | Detailed flash timing; Tune memory writes, gain editing, and runtime quirks |
+| M4 Human rider | Rigid and articulated rider control, fall release, scenarios, .eucrec recordings, Python bindings, generated-map free ride, and recorded map context | Independent foot contact, calibrated human response, exact audio playback, and broader physical validation |
+| M5 Our firmware | Compat and clean run in the simulator, desktop, and CLI | Known cut-off edge cases; hardware validation |
+| M6 Flasher | Image gate; separate simulation/sealing foundation patches | OTA protocol, complete safety gates and fault-recovery evidence |
+| M7 Release | Desktop source builds, local package tooling, and wheel onboarding work | Final integrated package checks, public signing, docs site, browser firmware demo and a second wheel |
+| M8 Bench | Safety procedure only | Authorized controlled bench work and trace comparison |
 
 Details: [docs/roadmap.md](docs/roadmap.md).
+The [request ledger](docs/project-status.md) identifies unfinished requests and current checks.
+
+Desktop Tune reads live variables, scopes, triggers, and per-handler ISR estimates.
+Compare runs bounded A/B scenarios and shows traces, events, and sampled body playback.
+These implementations still need integrated runtime checks.
+See [coverage](docs/models/coverage-matrix.md), [Python](docs/python.md), and [recordings](docs/recordings.md).
+The [human and free ride plan](docs/models/human-and-free-ride.md) defines later work.
 
 ## Stock firmware is never in this repository
 
@@ -79,10 +87,10 @@ cargo run -p euc-cli -- fetch begode-extreme       # download and verify the off
 cargo run -p euc-cli -- firmware list
 cargo run -p euc-cli -- image validate <file>      # the image gate the flasher will use
 
-# run the stock firmware in the simulator (development backend, needs CMake to build Unicorn)
-cargo run --release -p euc-cli --features unicorn -- sim run begode-extreme --seconds 10 --inject V@2.6
+# run stock firmware with the project's CPU core
+cargo run --release -p euc-cli -- sim run begode-extreme --seconds 10 --inject V@2.6
 # ride it: motor, battery, body and rider simulated, expectations checked (scenarios/)
-cargo run --release -p euc-cli --features unicorn -- sim run --scenario scenarios/ride-20kmh-stop.toml
+cargo run --release -p euc-cli -- sim run --scenario scenarios/ride-20kmh-stop.toml
 
 (cd firmware && cmake --workflow --preset target-clean)  # our firmware image (Arm GNU Toolchain)
 (cd app && pnpm install && pnpm tauri dev)                # the EUC Studio app (Node, pnpm, Tauri)

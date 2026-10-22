@@ -4,6 +4,7 @@
 
 import type { RingBuffer } from "../lib/ring.ts";
 import type { Tone } from "./buzzerAudio.ts";
+import type { HeightMap } from "./freeRide.ts";
 import type { BodyInfo, Outputs } from "./telemetry.gen.ts";
 
 /** The lanes and readouts the UI shows. Each engine maps its own signals onto them. */
@@ -48,6 +49,7 @@ export const SAMPLE_RATE = 60;
 export const HISTORY_SECONDS = 30;
 
 export type FirmwareId = "stock" | "ours-compat" | "ours-clean";
+export type WheelButton = "power" | "handle";
 
 export interface FirmwareInfo {
   id: FirmwareId;
@@ -135,9 +137,16 @@ export interface PhoneCommand {
   maxSpeed?: number;
 }
 
-export type EngineState = "starting" | "running" | "paused" | "halted" | "error" | "unavailable";
+export type EngineState =
+  "starting" | "running" | "paused" | "completed" | "halted" | "error" | "unavailable";
 
 export interface EngineStatus {
+  runMode?: "scenario" | "free_ride";
+  runEpoch?: number;
+  /** Native physical input admission, including the initial power hold. */
+  buttonsReady?: boolean;
+  /** Power can wake an unpowered controller; Handle cannot. */
+  powerButtonReady?: boolean;
   state: EngineState;
   /** What the engine is doing or why it stopped, for the status bar. */
   message: string;
@@ -147,6 +156,14 @@ export interface EngineStatus {
   backend: string;
   /** What runs ("Stock firmware, no physics yet"). */
   label?: string;
+}
+
+/** Native output capability and device status, separate from simulator state. */
+export interface NativeAudioStatus {
+  backend: "native" | "unsupported";
+  state: "ready" | "muted" | "error" | "unsupported";
+  enabled: boolean;
+  error: string | null;
 }
 
 /** `[grid, bit]`: a TM1640 grid byte and the bit in it that lights a piece. */
@@ -233,10 +250,20 @@ type Vec3 = [number, number, number];
 export type TerrainProfile = [number, number, number][];
 
 export interface EngineClient {
-  readonly kind: "demo" | "live";
+  readonly kind: "demo" | "live" | "playback";
   readonly time: RingBuffer;
   readonly channels: Record<ChannelId, RingBuffer>;
   readonly latest: Latest;
+  /** Visual reset/seek generation. Read after samplePoses; compare with engine identity before smoothing. */
+  readonly poseEpoch?: number;
+  /**
+   * Sample visual poses once per render frame into a caller-owned buffer (at least bodies.length × 7).
+   * Wall time is performance.now()/RAF milliseconds. Returns the presented simulation time or NaN.
+   * Share this output with the camera/model; never replace latest.poses or use it for telemetry.
+   * Live uses about 50 ms wall delay; playback uses its current position without extra delay.
+   * Invalid frames/short or aliased output return NaN without writing; only the current body prefix is used.
+   */
+  samplePoses?(out: Float32Array, wallNowMs: number): number;
   /** Bodies whose poses `latest.poses` carries (empty for the demo). */
   readonly bodies: BodyInfo[];
   readonly events: SimEvent[];
@@ -260,10 +287,18 @@ export interface EngineClient {
   } | null;
   /** The ground along the path (physics frame); null on flat ground. */
   readonly terrain: TerrainProfile | null;
+  /** Authoritative saved ground for playback; absent when the recording has no map context. */
+  readonly recordedMap?: HeightMap;
   /** Times the buzzer started sounding in this run. */
   readonly beeps: number;
   /** Buzzer changes as they arrive, at their simulated times (live engine only). */
   subscribeTones(fn: (tones: Tone[]) => void): () => void;
+  /** Native output status; absent until connect or when this client has no native audio. */
+  readonly audio?: NativeAudioStatus;
+  /** Apply the sound preference to native output. Failures do not stop the simulator. */
+  setSound?(enabled: boolean): Promise<void>;
+  /** Refresh native device status without changing the sound preference. */
+  refreshAudioStatus?(): Promise<void>;
   readonly status: EngineStatus;
   readonly playing: boolean;
   readonly targetRtf: number;
@@ -272,6 +307,8 @@ export interface EngineClient {
 
   firmwares(): FirmwareInfo[];
   scenarios(): ScenarioInfo[];
+  /** Imports a user-selected TOML file into this desktop app session. */
+  importScenario?(text: string): Promise<ScenarioInfo>;
 
   /** Coarse changes: status, play state, scenario, events, bodies. */
   subscribe(fn: () => void): () => void;
@@ -294,4 +331,15 @@ export interface EngineClient {
   measuredRtf(): number;
   /** Sends a phone command (validated again by the engine). Resolves with what was sent. */
   sendCommand(id: string, value?: number): Promise<string>;
+  /**
+   * Manual riding: the rider's lean and turn, each -1..1 (forward and left positive); null gives
+   * the rider back to the scenario. Engines without a rider leave it out.
+   */
+  setManual?(input: { lean: number; steer: number } | null): void;
+  /** The rider steps off the pedals. */
+  stepOff?(): void;
+  /** Holds a physical input for a bounded duration on the simulation clock. Live only. */
+  pressButton?(button: WheelButton, durationMs: number): Promise<string>;
+  /** Live GPIO state. A held button needs a renewed native lease until release. */
+  setButton?(button: WheelButton, pressed: boolean, epoch?: number): Promise<string>;
 }

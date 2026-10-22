@@ -72,19 +72,22 @@ test("ride workspace: viewport, telemetry, events", async ({ page }, info) => {
 
 test("workspace switching with ⌘1-⌘4", async ({ page }, info) => {
   await openRide(page, { scene: false });
-  for (const [key, name, heading] of [
-    ["2", "tune", "See inside the firmware while it rides"],
-    ["3", "compare", "Find where two firmwares part ways"],
-    ["4", "flash", "Write firmware to a wheel, safely"],
+  for (const [key, name, role, label] of [
+    ["2", "tune", "heading", "Firmware variables"],
+    ["3", "compare", "combobox", "Compare scenario"],
+    ["4", "flash", "heading", "Write firmware to a wheel, safely"],
   ] as const) {
     await page.keyboard.press(`ControlOrMeta+${key}`);
-    await expect(page.getByRole("heading", { name: heading })).toBeVisible();
+    await expect(page.getByRole(role, { name: label })).toBeVisible();
     await expect(page).toHaveURL(new RegExp(`#/${name}$`));
     await page.waitForTimeout(700);
     await shot(page, name, info.project.name);
   }
   await page.keyboard.press("ControlOrMeta+1");
-  await expect(page.getByRole("button", { name: "Ride" })).toHaveAttribute("aria-current", "page");
+  await expect(page.getByRole("button", { name: "Ride", exact: true })).toHaveAttribute(
+    "aria-current",
+    "page",
+  );
 });
 
 test("docks toggle and persist", async ({ page }) => {

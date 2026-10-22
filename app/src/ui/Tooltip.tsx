@@ -30,12 +30,12 @@ export function TooltipBubble({
   return (
     <div
       className={cx(
-        "flex items-center gap-8 rounded-8 border border-hairline-strong bg-raised py-4 pl-8 text-12 font-medium text-fg shadow-overlay",
+        "flex max-w-[min(360px,calc(100vw-16px))] items-center gap-8 rounded-8 border border-hairline-strong bg-raised py-4 pl-8 text-12 font-medium text-fg shadow-overlay",
         shortcut ? "pr-4" : "pr-8",
         className,
       )}
     >
-      <span>{content}</span>
+      <span className="min-w-0 [overflow-wrap:anywhere]">{content}</span>
       {shortcut && <Shortcut keys={shortcut} />}
     </div>
   );

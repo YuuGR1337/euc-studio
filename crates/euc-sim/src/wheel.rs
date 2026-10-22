@@ -114,6 +114,13 @@ impl WheelFiles {
         let physics = Physics::new(Setup { rider, assist, terrain, ..Setup::new(self.body.clone()) })?;
         Ok(Live::new(electrical, physics, self.hclk()))
     }
+
+    /// A live plant on a validated finite generated map. Existing scenario profiles stay unchanged.
+    pub fn live_on_map(&self, rider: Rider, assist: Assist, map: euc_physics::HeightMap) -> Result<Live, LiveError> {
+        let electrical = ElectricalPlant::new(self.electrical.clone(), self.hclk())?;
+        let physics = Physics::new(Setup { rider, assist, height_map: Some(map), ..Setup::new(self.body.clone()) })?;
+        Ok(Live::new(electrical, physics, self.hclk()))
+    }
 }
 
 /// The measured collision shapes of `geometry.toml` (`[collision]`), if it has them: `tire_torus`

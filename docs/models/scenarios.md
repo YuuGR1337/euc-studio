@@ -164,5 +164,7 @@ anything else is a heightfield strip sampled every 2 cm along the path, from 5 m
 
 Rider reactions: the rider model follows a target speed by leaning, eases off for the firmware's
 tiltback and steers to keep the line, but it does not react to beeps, has no feel for a grade (on a
-slope it stops and then rolls back slowly), and the rigid rider with its aids can hold on longer than a
-person during a nose-down struggle. Knees: the rider is rigid above the ankles.
+slope it stops and then rolls back slowly), and with its aids it can hold on longer than a person
+during a nose-down struggle. The rider bends at the ankles, knees and hips (since 2026-10-20), but only
+forward and back: it cannot shift or balance sideways, and its feet never lose the pedals until it
+lets go.

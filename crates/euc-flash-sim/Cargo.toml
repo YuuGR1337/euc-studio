@@ -1,0 +1,18 @@
+[package]
+name = "euc-flash-sim"
+description = "Software-only application-slot flash transaction simulation"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+euc-image.workspace = true
+euc-profile.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true
