@@ -10,15 +10,21 @@ step; `profiles/begode-extreme/geometry.toml` holds the measurements.
 Parts that follow the owner's photos (2026-10-16) or an estimate, to be refined from his measurements:
 
 - **Rear shock.** DNM coil-over without reservoir, 200 mm eye to eye and 750 lb/in (MEASURED by the
-  owner), 56 mm x 115 mm spring, on the scan's two cross shafts. Stroke ESTIMATE. No brand marks.
+  owner), 56 mm x 115 mm spring. It runs forward and down from its top eye on the rocker, under the
+  roller, to its bottom eye on the carriage. Stroke ESTIMATE. No brand marks.
+- **Rear linkage: rocker and link per side.** Current linkage per owner photos; the scan shows an
+  older system, which is not drawn. The rocker plate (outline, window, empty hole), the top eye and
+  the rocker pin are placed from the owner's photos; the link runs from the rocker pin to the
+  carriage. The rocker's frame pivot and the carriage clevis are hidden in every photo and are
+  ESTIMATES (`docs/hardware/geometry.md`, "Rear linkage").
 - **Rear handle.** Orange CNC U-handle with a black grip bar. The lower part of each arm is in the
   scan; the part above the roller and the grip are ESTIMATES from the photos.
 - **Pedals.** The decks were not on the wheel for the scan; their shape and size are an ESTIMATE.
 
 | File                      | Triangles | Size    | Use                  |
 | ------------------------- | --------- | ------- | -------------------- |
-| `begode-extreme-lod0.glb` | 300k      | 2.5 MB  | close-ups            |
-| `begode-extreme-lod1.glb` | 114k      | 1.2 MB  | default view         |
+| `begode-extreme-lod0.glb` | 293k      | 2.5 MB  | close-ups            |
+| `begode-extreme-lod1.glb` | 113k      | 1.1 MB  | default view         |
 | `begode-extreme-lod2.glb` | 40k       | 0.37 MB | far away, thumbnails |
 
 The files use meshopt compression (`EXT_meshopt_compression`, `KHR_mesh_quantization`). three.js
@@ -48,15 +54,26 @@ begode-extreme
    ├─ headlight_lens     the four lenses to light
    ├─ display_window     smoked glass; TEXCOORD_0 spans the T16-007 LED panel
    ├─ shock              coil-over only (body, collar, spring, shaft, red knob, eyes); see below
-   ├─ shock_links        link plates and cross shafts (static until the linkage is resolved)
+   ├─ shock_links        the rocker's pivot shaft, the front frame blocks and their pin (static)
+   ├─ shock_mount        the carriage's clevis and bottom shaft: moves with the axle
+   ├─ rocker             both rocker plates, the top-eye and rocker-pin cross shafts: turns about z
+   ├─ link               both link plates: turns about z on the rocker pin
    ├─ pedal_mount_left, pedal_mount_right
    ├─ axle
    └─ pedal_left, pedal_right   origin on the hinge pin: fold about x
 ```
 
-- **Shock.** `shock` has its origin on the top eye; its local +Y axis points from the bottom eye
-  to the top eye, and the bottom eye is at local (0, -0.2035, 0). The linkage (rocker + link) is
-  not resolved yet, so `shock` and `shock_links` are static.
+- **Shock and linkage.** Current linkage per owner photos; the scan shows an older system. `shock`
+  has its origin on the top eye; its local +Y axis points from the bottom eye to the top eye, and
+  the bottom eye is at local (0, -0.200, 0), so scaling Y about the origin moves the bottom eye.
+  `shock_mount` has its origin on the bottom eye, `rocker` on its frame pivot and `link` on the
+  rocker pin; at rest the four origins are the linkage at full extension
+  (`profiles/begode-extreme/geometry.toml` `[suspension] linkage_pivots_xz_m`). With the axle
+  `t` metres up the rods, `shock_mount` moves by `t` up the rods (0.13 degrees rearward), the
+  rocker turns about z until the link's length fits between the rocker pin and the bottom eye,
+  the link turns to point at the bottom eye, and the shock spans the two eyes. The studio does
+  this from the Suspension channel (`app/src/workspaces/ride/shockLinkage.ts`). The pivot is an
+  ESTIMATE, so the drawn shock length can differ from the engine's shock channel (up to 17 mm).
 - **Pedals.** `pedal_left` folds up with rotation.x = +90 degrees, `pedal_right` with -90 degrees.
   Their shape and size are an estimate (see above).
 - **Display.** On `display_window`, u and v run from 0 to 1 across the 82.6 x 55.2 mm LED panel of

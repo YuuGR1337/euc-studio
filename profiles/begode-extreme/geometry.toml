@@ -160,20 +160,43 @@ rod_stop_z_m = 0.3595                   # MEASURED: lower face of the ring on th
 free_rod_above_carriage_m = 0.1085      # to the ring; 0.132 to the top plate
 frame_bottom_mount_z_m = [-0.052, -0.020]  # MEASURED: block around the rod below the axle (INFERRED frame)
 state_in_scan = "topped out (INFERRED: unloaded wheel, carriage at the bottom of the rods)"
-moving = "INFERRED: rods and pedal brackets on the frame (sprung); carriage, axle, motor, tire unsprung"
-linkage_pivots_xz_m = { shock_top = [-0.1395, 0.3675], shock_bottom = [-0.2265, 0.1835], plate_upper = [-0.132, 0.333] }
-# MEASURED: cross shafts 20 mm, plate_upper +-0.003; long plates run shock_bottom -> plate_upper,
-# short plates plate_upper -> shock_top. The owner's parts photo shows a rocker (three holes) and a
-# link (two holes): which scan pivot is which, and which part meets the carriage, is UNRESOLVED.
+moving = "INFERRED: rods and pedal brackets on the frame (sprung); carriage, axle, motor, tire and the shock's bottom eye (on the carriage) unsprung"
+# The scan shows an OLDER linkage (owner, 2026-10-20): a shock from a rear tray up to a top cross
+# shaft, plates between. Kept for the record only (MEASURED, 20 mm cross shafts, plate_upper
+# +-0.003); the owner's 2026-10-22 photos show none of these parts any more.
+scan_linkage_pivots_xz_m = { shock_top = [-0.1395, 0.3675], shock_bottom = [-0.2265, 0.1835], plate_upper = [-0.132, 0.333] }
+# Current linkage (owner photos 2026-10-22 with the pad cover and the seat off; positions from
+# camera poses solved on scan points; docs/hardware/geometry.md "Rear linkage"), per side: the
+# shock runs forward and down from its top eye on the rocker, under the rear roller, to its bottom
+# eye on the carriage; a link joins the rocker pin to the same carriage shaft; the rocker turns
+# about a frame pivot. Positions at full extension, x and z in metres:
+#   shock_top     MEASURED (photo pose, +-3 mm)
+#   rocker_pin    MEASURED (photo pose, +-3 mm)
+#   spare_hole    MEASURED (photo pose): an empty hole beside the top eye, a second shock position
+#   shock_bottom  INFERRED: 200 mm from the top eye along the photographed shock line (44-52 deg
+#                 forward of vertical), +-10 mm; hidden behind the rear packs in every photo
+#   frame_pivot   ESTIMATE: hidden in every photo. Drawn at the kinematically sound point nearest the
+#                 steel pin seen with the seat off (front_pin); band x -0.128..-0.081, z 0.376..0.413
+#   front_pin     MEASURED roughly (seat-off photos): x +-0.020, z +-0.015; a steel pin between two
+#                 frame blocks at the front end of the plates. As the rocker's pivot it would lock
+#                 the linkage (near toggle), so its role is open (a stop, a mount, or the pivot of
+#                 another part)
+linkage_pivots_xz_m = { frame_pivot = [-0.1000, 0.3950], rocker_pin = [-0.1770, 0.3130], shock_top = [-0.1850, 0.3780], shock_bottom = [-0.0338, 0.2471] }
+spare_hole_xz_m = [-0.1725, 0.3930]
+front_pin_xz_m = [-0.045, 0.400]
+link_length_m = 0.1576                  # INFERRED: rocker_pin to shock_bottom
+rocker_sides_m = { pivot_to_pin = 0.1125, pivot_to_eye = 0.0867, eye_to_pin = 0.0655 }  # eye_to_pin MEASURED, the others ESTIMATE
+rocker_turn_deg = 11.0                  # ESTIMATE: largest turn over the physics travel (drawn linkage)
 
 [shock]
 # Current shock: DNM coil-over without reservoir. Owner photos 2026-10-16: body and threaded collar
-# at the bottom eye, shaft and red rebound knob at the top eye. It sits on the scan's two cross
-# shafts. Which eye moves with the axle carriage is UNRESOLVED (rocker linkage; press test pending).
-eye_top_m = [-0.1395, 0.0, 0.3675]      # MEASURED (scan): top cross shaft
-eye_bottom_m = [-0.2265, 0.0, 0.1835]   # MEASURED (scan): bottom cross shaft
-eye_to_eye_m = 0.200                    # MEASURED (owner); the scan's shafts are 0.2035 apart
-stroke_m = 0.050                        # ESTIMATE (typical for a 200 mm DNM; not stated)
+# at the bottom eye, shaft and red rebound knob at the top eye. Both eyes move: the bottom eye with
+# the carriage, the top eye with the rocker ([suspension] linkage_pivots_xz_m). Positions at full
+# extension (owner photos 2026-10-22).
+eye_top_m = [-0.1850, 0.0, 0.3780]      # MEASURED (photo pose): on the rocker, under the rear roller
+eye_bottom_m = [-0.0338, 0.0, 0.2471]   # INFERRED: 200 mm along the photographed shock line, on the carriage
+eye_to_eye_m = 0.200                    # MEASURED (owner); the scan's (older) shafts are 0.2035 apart
+stroke_m = 0.055                        # ESTIMATE: 200 mm DNM coil-overs come with 50-57 mm (plant.toml)
 body_at = "bottom eye"                  # owner photos: shaft and knob at the top eye
 spring_outer_diameter_m = 0.056         # DNM size chart
 spring_length_m = 0.115                 # DNM size chart for 200 mm
@@ -182,7 +205,7 @@ spring_coils = 7                        # owner photos
 spring_rate_n_per_m = 131_300           # 750 lb/in, MEASURED (owner; printed on the spring)
 eyelet_bore_m = 0.008                   # DNM listing
 eyelet_width_m = 0.024                  # DNM listing
-motion_ratio = "UNRESOLVED: rocker + link linkage, hole spacings and mapping pending (owner)"
+motion_ratio = "UNRESOLVED: the photo-measured layout needs the rocker's frame pivot (hidden) and the spring preload; with a pivot between the rear packs the ratio is 2.1-2.7 at rest (ESTIMATE). The physics keeps plant.toml's constant 1.7; docs/hardware/geometry.md"
 
 [rear_handle]
 # Orange anodised CNC U-handle (owner photos 2026-10-16): two flat arms bolted to the frame and
@@ -214,7 +237,9 @@ pack_right = { centre = [0.0, -0.0734, 0.1644], half = [0.1243, 0.0284, 0.2059] 
 top = { centre = [-0.0267, -0.0009, 0.4199], half = [0.1380, 0.0923, 0.0496] }
 front = { centre = [0.1495, 0.0, 0.4250], half = [0.0382, 0.0750, 0.0590] }
 roller = { from = [-0.1868, -0.059, 0.4491], to = [-0.1868, 0.059, 0.4491], radius = 0.0275 }
-# Shock: the current DNM between the two cross shafts, spring radius.
+# Shock: a static capsule on the scan's (older) shock line, spring radius. The current shock runs
+# from (-0.185, 0.378) forward and down to (-0.034, 0.247) ([shock]); this solid moves to it when the
+# physics takes the photo-measured linkage (a physics change, not made yet).
 shock = { from = [-0.1395, 0.0, 0.3675], to = [-0.2265, 0.0, 0.1835], radius = 0.028 }
 # ESTIMATE: rear handle grip bar (see [rear_handle]).
 rear_handle_grip = { from = [-0.2515, -0.0527, 0.5042], to = [-0.2515, 0.0527, 0.5042], radius = 0.013 }
@@ -233,7 +258,10 @@ pedal_nodes = ["pedal_left", "pedal_right"]  # node origin on the pin: fold abou
 roller_nodes = ["roller_sleeve_left", "roller_sleeve_right", "roller_center_band", "speaker_left",
                 "speaker_right", "ble_led"]  # sleeves and ble_led are the emissive parts
 handle_nodes = ["rear_handle"]
-# "shock": the coil-over only; origin on the top eye, local +Y from the bottom eye to the top eye,
-# bottom eye at local (0, -0.2035, 0). "shock_links": plates and cross shafts. Both static until
-# the linkage is resolved (which eye moves is UNRESOLVED).
-shock_nodes = ["shock", "shock_links"]
+# Current linkage per owner photos (the scan shows an older system, not drawn). "shock": the
+# coil-over only; origin on the top eye, local +Y from the bottom eye to the top eye, bottom eye at
+# local (0, -0.200, 0). "shock_mount": the carriage's clevis and bottom shaft, origin on the bottom
+# eye (moves with the axle). "rocker": origin on its frame pivot (turns about z). "link": origin on
+# the rocker pin. "shock_links": the pivot shaft, the front blocks and their pin (static). Rest
+# origins = [suspension] linkage_pivots_xz_m.
+shock_nodes = ["shock", "shock_links", "shock_mount", "rocker", "link"]
