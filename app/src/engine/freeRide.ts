@@ -1,11 +1,14 @@
 import { invoke } from "@tauri-apps/api/core";
 
 export type FreeRideSource = "keyboard_slider" | "gamepad";
-export type RiderModel = "rigid_ankle_v1" | "articulated_sagittal_v1";
+export type RiderModel = "articulated_sagittal_v1" | "articulated_contact_v1" | "rigid_ankle_v1";
+/** The default rider first; the same models and default as the scenarios. */
 export const RIDER_MODELS = [
+  { value: "articulated_sagittal_v1", label: "Articulated" },
+  { value: "articulated_contact_v1", label: "Articulated, foot contact (experimental)" },
   { value: "rigid_ankle_v1", label: "Rigid baseline" },
-  { value: "articulated_sagittal_v1", label: "Articulated (experimental)" },
 ] as const;
+export const DEFAULT_RIDER_MODEL: RiderModel = "articulated_sagittal_v1";
 export const isRiderModel = (value: unknown): value is RiderModel =>
   RIDER_MODELS.some((model) => model.value === value);
 export interface MapFeature {
@@ -115,7 +118,7 @@ function epochCheck(epoch: number) {
   if (!Number.isSafeInteger(epoch) || epoch < 0) throw new Error("Invalid run epoch.");
 }
 export const freeRideApi = {
-  async start(map: GeneratedMapSpec, riderModel: RiderModel = "rigid_ankle_v1"): Promise<void> {
+  async start(map: GeneratedMapSpec, riderModel: RiderModel = DEFAULT_RIDER_MODEL): Promise<void> {
     const error = mapProblem(map);
     if (error) throw new Error(error);
     if (!isRiderModel(riderModel)) throw new Error("Select a supported rider model.");

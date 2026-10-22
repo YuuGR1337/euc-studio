@@ -1,4 +1,5 @@
 import {
+  DEFAULT_RIDER_MODEL,
   freeRideApi,
   FREE_RIDE_LIMITS,
   type FreeRideInput,
@@ -92,7 +93,7 @@ export class FreeRideController {
     status: null,
     map: null,
     applied: null,
-    riderModel: "rigid_ankle_v1",
+    riderModel: DEFAULT_RIDER_MODEL,
     source: "keyboard_slider",
     padIndex: null,
     pads: [],

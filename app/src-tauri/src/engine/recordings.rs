@@ -1162,7 +1162,7 @@ mod tests {
 
     #[test]
     fn free_ride_context_survives_capture_and_import_and_bad_context_is_refused_first() {
-        for model in ["rigid_ankle_v1", "articulated_sagittal_v1"] {
+        for model in ["rigid_ankle_v1", "articulated_sagittal_v1", "articulated_contact_v1"] {
             let (_dir, state) = capturing(0);
             let context = free_context(model);
             let mut info = run(vec![body(1)]);

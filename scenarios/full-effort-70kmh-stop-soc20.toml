@@ -1,5 +1,12 @@
 # Full rider effort inside a speed-dependent lean envelope, then brake at measured 70 km/h.
 # Rider: generic 80 kg rigid ankle rider; 30 deg lean cap, 24 deg/s slew, 400 Nm ankle cap.
+# Pinned to the rigid baseline (model = "rigid_ankle_v1"): these runs measure firmware headroom
+# with the rider of docs/models/full-effort-acceptance.md. The default articulated rider (welded
+# feet) completes the full-battery run on stock and compat as the rigid rider does. At 20 % it falls
+# in the 20 deg build phase at about 9.8 s, and at 50 % it falls there at about 10.3 s or never
+# reaches 70 km/h; the rigid rider is cut later, near 70 km/h. On contact feet (articulated_contact_v1,
+# at most about 120 Nm of forward ankle moment) it pitches off the pedals in the 30 deg launch. Known
+# limitations of the articulated model (2026-10-22, docs/models/scenarios.md).
 # The rider reduces forward lean as motor voltage headroom falls with speed.
 # Braking uses -30 deg to 15 km/h, then -5 deg to avoid reversing through the stop.
 # These are bounded model commands, not a proven human maximum or a globally fastest trajectory.
@@ -18,6 +25,7 @@ speed_kmh = [[0, 0]]
 settings = "tarik-2026-10-15"
 
 [rider]
+model = "rigid_ankle_v1"
 mass_kg = 80.0
 
 [rider.control]

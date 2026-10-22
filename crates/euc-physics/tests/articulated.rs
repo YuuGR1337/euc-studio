@@ -1,4 +1,4 @@
-//! Opt-in physical articulation. No firmware image or hardware is used.
+//! Physical articulation (the default rider model). No firmware image or hardware is used.
 use euc_physics::{
     Intent, Physics, Rider, RiderModel, Setup, Shapes, Shell, TIMESTEP_S, Terrain, Tire, Torus, Wheel, WheelBody,
 };
@@ -26,10 +26,15 @@ fn run(physics: &mut Physics, seconds: f64) {
     }
 }
 #[test]
-fn legacy_model_remains_default_with_the_same_three_exported_bodies() {
+fn articulated_model_is_the_default_and_the_rigid_baseline_stays_selectable() {
     let rider: Rider = toml::from_str("").unwrap();
-    assert_eq!(rider.model, RiderModel::RigidAnkleV1);
-    let physics = Physics::new(setup(rider.model)).unwrap();
+    assert_eq!(rider.model, RiderModel::ArticulatedSagittalV1);
+    assert_eq!(rider.model.id(), euc_physics::RIDER_MODEL);
+    assert_eq!(Rider::default().model, RiderModel::ArticulatedSagittalV1);
+    let rigid: Rider = toml::from_str(r#"model = "rigid_ankle_v1""#).unwrap();
+    assert_eq!(rigid.model, RiderModel::RigidAnkleV1);
+    // The rigid baseline keeps its three exported bodies.
+    let physics = Physics::new(setup(rigid.model)).unwrap();
     let names: Vec<_> = physics.bodies().into_iter().map(|b| b.name).collect();
     assert_eq!(names, ["wheel", "shell", "rider"]);
     assert_eq!(physics.poses().len(), 3);
@@ -380,4 +385,52 @@ fn moving_release_keeps_visible_state_and_airborne_horizontal_momentum() {
     assert!((final_velocity - released_velocity).abs() < 1e-5, "airborne rider COM must retain horizontal velocity");
     assert_eq!(physics.total_mass(), mass);
     assert!(physics.rider_off());
+}
+
+/// The lean of the whole rider: the angle from vertical of the line from the ankles (the mean of
+/// the two foot body origins) to the rider subtree's centre of mass, along the shell heading. For
+/// the rigid rider this is its hinge angle; it is what the acceleration answers to.
+fn centre_of_mass_lean(physics: &Physics) -> f64 {
+    let com = physics.rider_com_m();
+    let (bodies, poses) = (physics.bodies(), physics.poses());
+    let feet: Vec<[f64; 3]> = bodies
+        .iter()
+        .zip(&poses)
+        .filter(|(body, _)| body.name.ends_with("_foot"))
+        .map(|(_, pose)| pose.pos.map(f64::from))
+        .collect();
+    assert_eq!(feet.len(), 2);
+    let ankles: [f64; 3] = std::array::from_fn(|i| f64::midpoint(feet[0][i], feet[1][i]));
+    let offset: [f64; 3] = std::array::from_fn(|i| com[i] - ankles[i]);
+    let heading = physics.heading_rad();
+    (offset[0] * heading.cos() + offset[1] * heading.sin()).atan2(offset[2])
+}
+
+#[test]
+fn the_body_leans_from_the_ankles_so_the_centre_of_mass_follows_the_upper_body() {
+    let mut physics = Physics::new(setup(RiderModel::ArticulatedSagittalV1)).unwrap();
+    balanced_for(&mut physics, 1000);
+    physics.set_held(false);
+    physics.rider().set_intent(Intent::Speed(3.3));
+    balanced_for(&mut physics, 24000);
+    let (mut worst, mut upper, mut whole) = (0.0_f64, 0.0, 0.0);
+    let (start, start_speed) = (physics.time_s(), physics.state().speed_mps);
+    for _ in 0..4000 {
+        balanced_step(&mut physics);
+        let (trunk, com) = (physics.rider_state().measured_lean_rad, centre_of_mass_lean(&physics));
+        worst = worst.max((trunk - com).abs());
+        upper += trunk / 4000.0;
+        whole += com / 4000.0;
+    }
+    let accel = (physics.state().speed_mps - start_speed) / (physics.time_s() - start);
+    println!(
+        "steady 3.3 m/s: upper body {:.3}°, centre of mass {:.3}°, largest gap {:.3}°, acceleration {accel:.4} m/s²",
+        upper.to_degrees(),
+        whole.to_degrees(),
+        worst.to_degrees()
+    );
+    // A straight body: the two leans agree in steady riding. Before the ankle fix the trunk
+    // pitched forward while the legs angled back, and the two parted by degrees.
+    assert!(worst < 0.5_f64.to_radians(), "the legs bend against the lean: gap {}°", worst.to_degrees());
+    assert!(whole > 0.0, "the rider leans into the drag at speed");
 }

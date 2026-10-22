@@ -24,7 +24,13 @@ seconds = 36.0
 release_s = 2.5
 speed_kmh = [[0, 0], [6, 0], [26, 100]]
 settings = "tarik-2026-10-15"
-# Rider: the default rider, who eases off for tiltback.
+# Rider: the rigid baseline with the default controls, who eases off for tiltback. Pinned
+# (model = "rigid_ankle_v1"): the cut this run shows, and its numbers in docs/models/scenarios.md,
+# come from that rider. Known limitation of the default articulated rider: it reaches the 69 km/h
+# speed tiltback before the voltage runs out and eases off, at most 71 km/h, and stock does not cut
+# (2026-10-22, all three quanta).
+[rider]
+model = "rigid_ankle_v1"
 
 [[timeline]]
 at_s = 0.0

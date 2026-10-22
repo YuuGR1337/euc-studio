@@ -1,7 +1,8 @@
 # Articulated rider physical acceptance
 
 Status: focused mechanical acceptance, 2026-10-16, with merge checks on 2026-10-21.
-The model remains experimental. The rigid rider remains the default.
+Since 2026-10-22 the articulated rider is the default rider; independent foot contact is opt-in.
+The rigid rider remains selectable as the controlled baseline. See the last section.
 
 ## Scope
 
@@ -144,7 +145,7 @@ rustfmt --edition 2024 --check crates/euc-physics/tests/articulated.rs
 ## Limits
 
 These are mechanical tests with a test balance law. They do not run stock firmware or prove real FreeRide timing.
-Pedal welds remain ideal constraints. The model has no foot slip, gait, independent elbow motion, or lateral human balance.
+The cases above ran with welded feet. The model has no gait, independent elbow motion, or lateral human balance.
 Mass fractions, inertias, posture control, and joint limits remain estimates.
 External roll and yaw aids remain active while attached.
 No result establishes human validity, high-speed safety, low-SOC behavior, injury risk, or real-wheel readiness.
@@ -193,3 +194,114 @@ The yaw aid remains an external moment at every speed.
 
 The complete physics suite passes 49 tests with no failures or ignored tests.
 Strict physics Clippy passes for all targets.
+
+## Default rider and foot contact, 2026-10-22
+
+The articulated rider became the default rider for scenarios, the Ride workspace and the CLI.
+Its feet stay welded to the pedals by default.
+`model = "rigid_ankle_v1"` in a scenario, or `--rider-model rigid_ankle_v1`, selects the rigid baseline.
+Recordings from `euc sim run --record` now carry the recording context with the model that actually ran.
+Free Ride keeps its own model selector.
+
+Three model changes came with the switch. Each one has a regression test.
+
+### Lean from the ankles
+
+The scenario matrix first showed the articulated rider accelerating about half as hard as the rigid rider.
+At the same lean command it reached 15 km/h at 15 s in `overlean-top-speed`, where the rigid rider reached 30 km/h.
+The cause was the posture spring at the ankles.
+The lean task moment acts equally at hip, knee and ankle, and all three joints had the same posture stiffness.
+The joints shared the lean, so the legs leaned about a third as far as the upper body.
+The centre of mass leaned about half as far as commanded.
+A standing ankle now has no posture spring. The hips and knees hold the body straight.
+The whole body leans from the ankles, as the rigid rider does.
+The task moment mapping, its gains and its torque caps are unchanged.
+A first attempt set the ankle posture target to the commanded lean plus the pedal pitch.
+That added a second absolute lean loop, and the welded rider fell at the stand release of `hard-braking-30kmh`.
+It was rejected.
+
+With the change, the articulated rider accelerates slightly harder than the rigid rider at the same lean.
+In `overlean-top-speed` on stock firmware it reaches 33.6 km/h at 15 s against 30.6 km/h.
+The mechanical cases above now give these results (default welded feet):
+
+| Case | Before (ankle spring) | Now |
+|---|---|---|
+| Neutral request: speed change | 0.372 to 0.380 m/s | 0.767 to 0.819 m/s (continued lean: 1.313 m/s) |
+| Neutral request: body lean | 0.0370 to 0.00002 rad | 0.0422 to 0.0004 rad |
+| Braking: speed | 1.758 to 0.128 m/s | 2.124 to 0.000 m/s |
+| Braking: stopping travel, axle work | 7.46 m, -68.4 J | 5.05 m, -194.8 J |
+| Braking: minimum lean command, motor torque | -0.103 rad, -18.5 N·m | -0.130 rad, -34.5 N·m |
+| +2% grade: ground, wheel height change | +65.5, +65.1 mm | +122.4, +122.3 mm |
+| -2% grade: ground, wheel height change | -70.4, -70.5 mm | -128.3, -128.5 mm |
+| 10 mm bump: crest rise, final height change | 9.785, -0.402 mm | 9.932, -0.524 mm |
+| Moving release: COM velocity before, released, airborne | 0.37256, 0.37260, 0.37260 m/s | 0.76751, 0.76775, 0.76775 m/s |
+| 0.4 rad/s turn: speed, radius, mean roll, yaw aid | 4.29 m/s, 10.7 m, -9.5°, 3.3 N·m | 4.34 m/s, 10.8 m, -9.7°, 3.3 N·m |
+
+The grade and bump runs travel further because the rider now reaches the requested speed sooner.
+The turn now matches the rigid rider's (4.33 m/s, 10.8 m, -9.7°).
+All the existing limits in these tests hold without change.
+
+### Step-off push
+
+The articulated rider had no step-off push. A riderless wheel in this symmetric model then rolls on upright.
+Both shipped step-off scenarios lost their cut within 3 s.
+The stepping foot now pushes off: the right foot presses its pedal straight down for 0.2 s.
+The pedal pushes the foot up equally hard.
+The force gives the rigid rider's 30 N·m roll moment about the heading.
+It is an internal force pair at one point, so wheel and rider together get no external force or moment.
+The rider's horizontal momentum is unchanged; the moving-release test still holds to 0.00001 m/s.
+
+### Independent foot contact (opt-in)
+
+The model id `articulated_contact_v1` stands each sole on its own pedal; `articulated_sagittal_v1` keeps welded feet.
+A separate id keeps every recording and result that names `articulated_sagittal_v1` meaning the same physics.
+Each sole touches only its own pedal through an explicit MuJoCo contact pair.
+No collision mask changes: torso, legs and wheel still never touch the shell.
+Friction is 1.0 and the contact time constant is 5 ms (both DEFAULT).
+The pedal pushes and never pulls.
+The soles therefore carry an ankle moment only while the centre of pressure stays under them.
+For the default rider that is about 70 N·m backward and 120 N·m forward, both feet together.
+
+Contact feet do not hold the body to the shell, and the sagittal legs cannot roll.
+The roll aid that holds the shell therefore also holds the upper body at the wheel's roll target.
+Its torque and work add to the reported roll aid.
+Without it, the end of a turn and any one-foot stance longer than about 0.3 s topple the rider sideways off the pedals.
+When both soles have been off their pedals for 0.5 s, the rider counts as off (`Leaving::LostFooting`).
+Release switches the sole-pedal pairs off with a pair margin of -1000 m on a model copy.
+The swap keeps every coordinate and velocity.
+MuJoCo 3.9 does not apply a pair's `gap` to explicit pairs, so `gap` could not do this.
+
+`crates/euc-physics/tests/feet.rs` checks the contact with the test balance law and the profile's suspension:
+
+| Case | Result |
+|---|---|
+| Standing still, 5 s | Each foot carries 392.4 N, half the rider's weight. Slip and lift stay below 0.002 mm. |
+| One-foot lift, 0.3 rad for 0.25 s | The right sole rises 24 mm and is off its pedal for 0.20 s. The left foot keeps its contact and carries a mean 787 N, at least 560 N. Both feet stand again; they end 22 and 8 mm from where they stood. |
+| One-foot stance, 1 s | The rider stays on with the roll aid. The feet end 63 and 59 mm back along the decks, 2 mm sideways. |
+| One-foot stance without any roll aid | The rider topples over the standing foot. 0.5 s after both soles leave their pedals the rider counts as off. All aids and joint motors stop. |
+| 2 cm pothole at 12 km/h | Both soles slip at most 3.7 mm and lift at most 1.0 mm. Both are unloaded together for 0.053 s. The peak sole load is 2088 N. |
+| 0.4 rad/s turn at 15 km/h | The wheel turns at 0.400 rad/s and leans -8.9°. The feet move at most 1.4 mm sideways; the least sole load is 255 N. The wheel stands up again after the turn. |
+| Manual lean -0.05 rad after the turn | The wheel slows by more than 0.5 m/s, both feet stay on. |
+| Let-go after a drive cut at 15 km/h | The sole-pedal pairs switch off; neither foot carries load; every joint motor is zero. |
+| Step-off at rest | The feet land on the ground within 25 cm. |
+
+Contact feet stay opt-in because the lean controller was tuned on welded feet.
+It does not keep the soles' centre of pressure under the feet, and the rider cannot recover with the hips or step.
+On stock firmware at all three quanta, with contact feet, the rider comes off the pedals while the wheel stays up:
+
+| Scenario | Rider off (stock, quantum 4000) | What happens |
+|---|---|---|
+| `full-effort-70kmh-stop-soc100` | 8.69 s | At 30° lean the wheel accelerates about 3 m/s²; the rider pitches forward over the toes |
+| `hard-braking-30kmh` | 17.75 s | The hard brake (up to 6 m/s² asked) throws the rider off the soles |
+| `hill-climb-low-battery` | 33.35 s | The rider who never gives up stalls on the 20 % grade |
+| `overlean-top-speed` | 38.69 s | Late in the run, held by the stock tiltbacks near 75 km/h |
+
+These runs predate the `rider_on_pedals` check: the other checks look at the wheel, so `hard-braking-30kmh` and `hill-climb-low-battery` passed with a riderless wheel.
+Every scenario without a step-off now has `rider_on_pedals`, which fails in exactly these cases (see the contact matrix in [scenarios.md](scenarios.md#rigid-and-articulated-riders-2026-10-22)).
+In the other sixteen shipped scenarios the contact rider leaves the pedals only where the rigid rider does.
+
+### Limits of the default rider
+
+Lateral balance and twisting still come from the external aids.
+Welded feet pass the controller's whole ankle torque to the shell, more than real soles carry.
+The segment fractions, joint gains, sole size and friction remain estimates.

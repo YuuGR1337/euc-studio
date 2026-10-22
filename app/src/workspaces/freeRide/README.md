@@ -46,14 +46,14 @@ Escape pauses free ride and then passes through to Radix dialogs and menus.
 
 The frontend uses these exact command arguments:
 
-| Command            | Arguments                                                                                      |
-| ------------------ | ---------------------------------------------------------------------------------------------- |
-| `free_ride_start`  | `{ spec: { wheel: 'begode-extreme', settings: 'blank', rider_model: 'rigid_ankle_v1', map } }` |
-| `free_ride_status` | none                                                                                           |
-| `free_ride_map`    | `{ epoch }`                                                                                    |
-| `free_ride_arm`    | `{ epoch, source }`                                                                            |
-| `free_ride_input`  | `{ input: { run_epoch, seq, source, desired_lean_rad, heading_rate_rad_s, armed } }`           |
-| `free_ride_pause`  | `{ epoch }`                                                                                    |
+| Command            | Arguments                                                                                               |
+| ------------------ | ------------------------------------------------------------------------------------------------------- |
+| `free_ride_start`  | `{ spec: { wheel: 'begode-extreme', settings: 'blank', rider_model: 'articulated_sagittal_v1', map } }` |
+| `free_ride_status` | none                                                                                                    |
+| `free_ride_map`    | `{ epoch }`                                                                                             |
+| `free_ride_arm`    | `{ epoch, source }`                                                                                     |
+| `free_ride_input`  | `{ input: { run_epoch, seq, source, desired_lean_rad, heading_rate_rad_s, armed } }`                    |
+| `free_ride_pause`  | `{ epoch }`                                                                                             |
 
 The source values are `keyboard_slider` and `gamepad`.
 Input sequences use uint32 values.

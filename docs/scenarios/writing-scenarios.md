@@ -68,23 +68,31 @@ Unknown fields are errors, so a typo does not pass silently.
 Start the file with a comment that says what the run shows and why, and a line `# Rider: ...` that
 says which rider it uses and how it differs from the default.
 
-### The rider: `[rider]` and `[rider.control]`
+### The rider: `[rider]`, `[rider.articulation]` and `[rider.control]`
 
 Every field has a default; give only what you change. The model is described in
 [models/body.md](../models/body.md).
 
+The default rider is articulated (`articulated_sagittal_v1`): an upper body on two legs with hip,
+knee and ankle hinges, the feet welded to the pedals. `model = "articulated_contact_v1"` is the same
+rider with each sole on its own pedal through friction contact (opt-in). The rigid rider
+(`model = "rigid_ankle_v1"`) stays for controlled comparisons with the results before 2026-10-22: a
+scenario that measures the firmware against that baseline on purpose pins it and says why in its
+header. `euc sim run --rider-model ...` overrides the scenario's model for one run.
+
 | Field | Default | Meaning |
 |---|---|---|
+| `model` | `"articulated_sagittal_v1"` | Or `"rigid_ankle_v1"`, or `"articulated_contact_v1"` (contact feet, opt-in; see [body.md](../models/body.md#the-articulated-rider-default)). |
 | `mass_kg` | 80 | Rider mass; every segment's mass scales with it. |
 | `height_m` | 1.78 | Standing height; every segment's length scales with it. |
 | `ankle_above_pedals_m` | 0.08 | Ankle joints above the pedals, shoe included. |
+| `com_above_pedals_m` | 1.0 | Height of the rider's centre of mass above the pedals. |
+| `gyration_m` | 0.35 | Radius of gyration of the rigid body (the articulated upper body's inertia). |
 | `cda_m2` | 0.6 | Drag area of rider and wheel. |
+| `articulation.joint_kp`, `articulation.joint_kd`, `articulation.joint_max_nm` | 1000, 60, 180 | Hip and knee posture: stiffness (N·m/rad), damping (N·m·s/rad), strongest torque per joint (N·m). |
+| `articulation.sole_friction`, `articulation.sole_contact_time_s` | 1.0, 0.005 | Sole-on-pedal friction and contact softness (s), for `articulated_contact_v1`. |
 | `control.lean_kp`, `control.lean_kd` | 6000, 900 | Ankle stiffness (N·m/rad) and damping (N·m·s/rad) about the lean. |
-| `control.ankle_max_nm` | 400 | Strongest ankle torque, both legs. |
-| `control.knee_bend_deg`, `control.torso_lean_deg` | 25, 5 | The standing pose: knee bend, and the torso's pitch forward of the lean. |
-| `control.knee_kp`, `control.knee_kd`, `control.knee_max_nm` | 300, 30, 400 | How far the knees give under a bump (both legs). |
-| `control.hip_kp`, `control.hip_kd`, `control.hip_max_nm` | 2500, 190, 400 | How the hips hold the torso's pitch (both legs). |
-| `control.hip_strategy`, `control.hip_bend_max_deg` | 1, 30 | How far the torso bends when the ankles are at their limit. |
+| `control.ankle_max_nm` | 400 | Strongest ankle torque, both legs. Contact feet carry less: about 70 N·m backward and 120 N·m forward for the default rider, while the centre of pressure stays under the soles. |
 | `control.speed_kp`, `control.speed_ki` | 0.6, 0.03 | Acceleration asked per m/s of speed error, and its integral. |
 | `control.accel_max`, `control.brake_max` | 1.5, 2.5 | Strongest acceleration and braking asked, m/s². |
 | `control.lean_max_deg`, `control.lean_rate_deg_s` | 15, 12 | Largest lean, and how fast it changes. |
@@ -317,6 +325,7 @@ scenario. `record` checks never fail: they print a measurement. Times default to
 | `cutoff` | `from_s`, `within_s`, `flag` | The firmware cuts within `within_s` of `from_s`, with that flag set if given (`hall_fault`, `balance_disabled`, `drive_fault`). |
 | `speed_reached` | `kmh` | The ground speed reaches at least this. |
 | `stopped_at_end` | `max_abs_kmh` | \|speed\| at the end is at most this. |
+| `rider_on_pedals` | `from_s` | The rider never comes off the pedals while the wheel stays up. Every scenario without `step_off_s` gets it by default; list it to set `from_s`. Welded feet and the rigid rider cannot come off that way, so only `articulated_contact_v1` can fail it. |
 | `pitch_reaches` | `deg`, `from_s`, `by_s` | The pitch reaches `deg` (nose up positive; a negative value means a nose dive at least that deep). |
 | `ripple` | `signal`, `max`, `from_s`, `by_s` | The signal's standard deviation stays at most `max`. |
 | `firmware_tracks` | `var`, `scale`, `signal`, `max_rms`, `from_s`, `by_s` | A firmware variable times `scale` follows a signal within an RMS error. |

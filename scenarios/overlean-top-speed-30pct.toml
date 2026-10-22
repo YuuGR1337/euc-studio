@@ -11,6 +11,14 @@ speed_kmh = [[0, 0], [6, 0], [26, 100]]
 settings = "tarik-2026-10-15"
 
 # The overleaning rider ignores the tiltback and keeps leaning: that is the danger this run shows.
+# Pinned to the rigid baseline (model = "rigid_ankle_v1"): the cutout this run shows, and its
+# numbers in docs/models/scenarios.md, come from that rider. Known limitation of the default
+# articulated rider: with the same lean its drive torque is smoother and keeps the PWM out of saturation;
+# on stock its PWM alarm comes at 23.7 s, the PWM stays below 100 % and the wheel stays up
+# (2026-10-22, all three quanta).
+[rider]
+model = "rigid_ankle_v1"
+
 [rider.control]
 tiltback_feel_deg = 90.0      # never eases off, whatever the tiltback
 

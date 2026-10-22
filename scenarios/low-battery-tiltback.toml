@@ -12,8 +12,14 @@ release_s = 2.5
 speed_kmh = [[0, 0], [6, 0], [10, 15]]
 # Factory settings with level pedals (a blank journal would tilt them 4.8° nose down).
 settings = "neutral"
-# Rider: the default rider, who eases off when the pedals tip back: the tiltback slows them, as it
-# should.
+# Rider: the rigid baseline with the default controls, who eases off when the pedals tip back: the
+# tiltback slows them, as it should. Pinned (model = "rigid_ankle_v1"): the 8° check describes that
+# rider, who rolls back a little at rest, which unwinds the stock battery tiltback (it ramps with the
+# sign of the speed), and then sets off. The default articulated rider stands still on the stand
+# release, the tiltback stays at about 6-7° nose up, and the rider, waiting for it to fall within
+# 2°, never sets off: top 0.6 km/h, pitch at most 7.4° by 15 s on stock (2026-10-22, all quanta).
+[rider]
+model = "rigid_ankle_v1"
 
 [[timeline]]
 at_s = 0.0

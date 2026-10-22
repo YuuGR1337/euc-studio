@@ -70,6 +70,9 @@ fn records_a_run_and_reads_it_back() {
     assert_eq!((h.cpu.as_deref(), h.sample_hz.round()), (Some("own"), 100.0));
     assert!(h.profile_sha256.is_some() && h.seed.is_some());
     assert!(h.bodies.iter().any(|b| b.name == "wheel"));
+    // The context names the rider model that actually ran: the default articulated one here.
+    assert_eq!(h.context.as_ref().unwrap()["rider_model"], "articulated_sagittal_v1");
+    assert_eq!(h.context.as_ref().unwrap()["run_mode"], "scenario");
     let samples = reader.read_all().unwrap();
     assert!((115..=121).contains(&samples.len()), "{} samples", samples.len());
     assert!(reader.events().iter().any(|e| e.text == "stand released"));
@@ -97,6 +100,22 @@ fn records_a_run_and_reads_it_back() {
     for file in ["drive", "battery", "attitude", "channels", "poses", "events", "frames", "outputs"] {
         assert!(dir.join(format!("csv/{file}.csv")).is_file(), "{file}.csv");
     }
+}
+
+#[test]
+fn a_rider_model_override_is_what_the_recording_names() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path();
+    std::fs::write(dir.join("app.bin"), spinning_app()).unwrap();
+    std::fs::write(dir.join("rec-test.toml"), SCENARIO).unwrap();
+    let args = ["sim", "run", "--scenario", "rec-test.toml", "--firmware", "app.bin", "--record", "rigid.eucrec"];
+    let out = euc(dir, &[&args[..], &["--rider-model", "rigid_ankle_v1"]].concat());
+    assert!(dir.join("rigid.eucrec").is_file(), "{}", String::from_utf8_lossy(&out.stderr));
+    let reader = Reader::open(&dir.join("rigid.eucrec")).unwrap();
+    let context = reader.header().context.clone().expect("a scenario recording has a context");
+    assert_eq!(context["rider_model"], "rigid_ankle_v1");
+    assert_eq!(context["model_aids"]["roll_stiffness"], 5000.0);
+    assert_eq!(reader.header().bodies.iter().filter(|b| b.name == "rider").count(), 1);
 }
 
 #[test]

@@ -24,10 +24,18 @@ core, the default; development builds can add `--cpu unicorn` as the reference).
 with the measured 3.00-12 tire (rolling radius 0.2251 m, 28 pole pairs) and the rear suspension
 (the measured 750 lb/in spring and 200 mm shock; stroke and linkage ratio estimates); "maintainer's"
 settings are the `tarik-2026-10-15` preset (current-mode drive, hard pedals, PWM alarm 80 % with PWM
-tiltback, speed tiltback 69 km/h). The rider is welded to the pedals, can step off (`step_off_s`),
-steers to keep the line, feels the firmware's own tiltback (the sum of its speed, battery and PWM
-offsets), and lets go of the pedals 0.1 s after a cut that tips the wheel past 20°, or after any fall
-past 45°. Our builds in these runs: clean `4054b4d0`, compat `00bb2466`.
+tiltback, speed tiltback 69 km/h). The rider in the table below is the rigid rider, welded to the
+pedals; it can step off (`step_off_s`), steers to keep the line, feels the firmware's own tiltback
+(the sum of its speed, battery and PWM offsets), and lets go of the pedals 0.1 s after a cut that
+tips the wheel past 20°, or after any fall past 45°. Our builds in these runs: clean `4054b4d0`,
+compat `00bb2466`.
+
+**Rider model (2026-10-22).** The default rider is now articulated, its feet welded to the pedals
+([body.md](body.md#the-rider)). Seven scenarios pin the rigid rider on purpose, because their
+checks or the numbers below come from it: the three `full-effort-*` runs, the three `overlean-*`
+runs and `low-battery-tiltback`. The other thirteen ride the articulated rider.
+[Rigid and articulated riders](#rigid-and-articulated-riders-2026-10-22) compares the rigid rider,
+the default and the opt-in contact-feet model on every scenario.
 
 **Robustness.** Every scenario ran on stock, compat and clean at three emulator quantum sizes
 (`--max-quantum` 4000, 3000 and 2000). Near a limit, a fall can depend on the emulator's timing; a
@@ -50,6 +58,129 @@ pothole (below).
 | `rider-steps-off-15kmh`, `rider-steps-off-5kmh` | maintainer's | **Cut once the wheel goes down,** no runaway. | The riderless wheel is easy to balance, so the drive stays on until the wheel tips onto its side; the roll cut-off disables it 70 ms after the roll passes 40°: 2.75 s after the step-off at 15 km/h (at 7.8 km/h), 0.64 s at 5 km/h (at 4.0 km/h). Stock, compat and clean cut the same way; clean also suspects a riderless wheel 1.0 s after the 15 km/h step-off (beeps and its speed limit). |
 | `downhill-cruise-2pct`, `coasting-stop` | maintainer's | **Hold** (guards for riderless detection). | 20 km/h down a 2 % slope: the motor gives 2.6-8.6 N·m (mean 4.1) with a rider on. A coast from 20 km/h to a stop at 0.4 m/s²: −12.5 to +10.8 N·m (mean −4.6). No cutoff, no fall on any firmware, and clean's riderless detection never triggers (fw's runs, all three sizes). |
 | `balance-60s`, `ride-20kmh-stop` | neutral | Hold (CI regression runs). | |
+
+## Rigid and articulated riders (2026-10-22)
+
+Every shipped scenario ran with three rider models on stock, compat and clean at `--max-quantum`
+4000, 3000 and 2000: the rigid rider (`rigid_ankle_v1`), the default articulated rider
+(`articulated_sagittal_v1`, welded feet) and the opt-in articulated rider on contact feet
+(`articulated_contact_v1`). The build is the integration checkpoint plus the rider change only (no
+other in-flight work), with the shipped fixed timing (CPI 2.0 with exception costs); compat and clean
+come from the `target-compat` and `target-clean` presets of the same checkpoint. `--rider-model` set
+the model for every run, so pinned scenarios also show the articulated results. Each cell gives the
+verdict at quanta 4000, 3000 and 2000 (P pass, F fail). None of the 540 runs halted.
+
+| Scenario | Firmware | Rigid | Articulated (default) | Articulated, contact feet |
+|---|---|---|---|---|
+| balance-60s | stock | P P P | P P P | P P P |
+| balance-60s | compat | P P P | P P P | P P P |
+| balance-60s | clean | P P P | P P P | P P P |
+| ble-service-cut-standing | stock | F F F | F F F | F F F |
+| ble-service-cut-standing | compat | F F F | F F F | F F F |
+| ble-service-cut-standing | clean | F F F | F F F | F F F |
+| coasting-stop | stock | P P P | P P P | P P P |
+| coasting-stop | compat | P P P | P P P | P P P |
+| coasting-stop | clean | P P P | P P P | P P P |
+| downhill-cruise-2pct | stock | P P P | P P P | P P P |
+| downhill-cruise-2pct | compat | P P P | P P P | P P P |
+| downhill-cruise-2pct | clean | P P P | P P P | P P P |
+| full-effort-70kmh-stop-soc100 (pinned rigid) | stock | P P P | P P P | F F F |
+| full-effort-70kmh-stop-soc100 (pinned rigid) | compat | P P P | P P P | F F F |
+| full-effort-70kmh-stop-soc100 (pinned rigid) | clean | F F F | F F F | F F F |
+| full-effort-70kmh-stop-soc20 (pinned rigid) | stock | F F F | F F F | F F F |
+| full-effort-70kmh-stop-soc20 (pinned rigid) | compat | F F F | F F F | F F F |
+| full-effort-70kmh-stop-soc20 (pinned rigid) | clean | F F F | F F F | F F F |
+| full-effort-70kmh-stop-soc50 (pinned rigid) | stock | F F F | F F F | F F F |
+| full-effort-70kmh-stop-soc50 (pinned rigid) | compat | F F F | F F F | F F F |
+| full-effort-70kmh-stop-soc50 (pinned rigid) | clean | F F F | F F F | F F F |
+| hall-loss-while-riding | stock | P P P | P P P | P P P |
+| hall-loss-while-riding | compat | P P P | P P P | P P P |
+| hall-loss-while-riding | clean | P P P | P P P | P P P |
+| hall-single-line-loss | stock | P P P | P P P | P P P |
+| hall-single-line-loss | compat | P P P | P P P | P P P |
+| hall-single-line-loss | clean | F F F | F F F | F F F |
+| hard-braking-30kmh | stock | P P P | P P P | F F F |
+| hard-braking-30kmh | compat | P P P | P P P | F F F |
+| hard-braking-30kmh | clean | P P P | P P P | F F F |
+| hill-climb-low-battery | stock | P P P | P P P | F F F |
+| hill-climb-low-battery | compat | P P P | P P P | F F F |
+| hill-climb-low-battery | clean | P P P | P P P | F F F |
+| low-battery-tiltback (pinned rigid) | stock | P P P | F F F | P P P |
+| low-battery-tiltback (pinned rigid) | compat | P P P | F F F | P P P |
+| low-battery-tiltback (pinned rigid) | clean | F F F | F F F | F F F |
+| overlean-no-pwm-tiltback (pinned rigid) | stock | P P P | F F F | F F F |
+| overlean-no-pwm-tiltback (pinned rigid) | compat | P P P | F F F | F F F |
+| overlean-no-pwm-tiltback (pinned rigid) | clean | F F F | F F F | F F F |
+| overlean-top-speed (pinned rigid) | stock | F F F | P P P | F F F |
+| overlean-top-speed (pinned rigid) | compat | F F F | P P P | F F F |
+| overlean-top-speed (pinned rigid) | clean | F F P | P P P | F F F |
+| overlean-top-speed-30pct (pinned rigid) | stock | F F F | P P P | P P P |
+| overlean-top-speed-30pct (pinned rigid) | compat | F F F | P P P | P P P |
+| overlean-top-speed-30pct (pinned rigid) | clean | F F F | P P P | P P P |
+| pothole-20kmh | stock | P P P | P P P | P P P |
+| pothole-20kmh | compat | P P P | P P P | P P P |
+| pothole-20kmh | clean | P P P | P P P | P P P |
+| pothole-5cm-20kmh | stock | P P P | P P P | P P P |
+| pothole-5cm-20kmh | compat | P P P | P P P | P P P |
+| pothole-5cm-20kmh | clean | P P P | P P P | P P P |
+| ride-20kmh-stop | stock | P P P | P P P | P P P |
+| ride-20kmh-stop | compat | P P P | P P P | P P P |
+| ride-20kmh-stop | clean | P P P | P P P | P P P |
+| rider-steps-off-15kmh | stock | P P P | P P P | P P P |
+| rider-steps-off-15kmh | compat | P P P | P P P | P P P |
+| rider-steps-off-15kmh | clean | P P P | P P P | P P P |
+| rider-steps-off-5kmh | stock | P P P | P P P | P P P |
+| rider-steps-off-5kmh | compat | P P P | P P P | P P P |
+| rider-steps-off-5kmh | clean | P P P | P P P | P P P |
+
+**Articulation (rigid against the default).** All thirteen scenarios on the default rider keep every
+verdict of the rigid rider at all three quanta on all three firmwares. Seven scenarios pin the rigid
+rider, because their checks or documented numbers describe it. Their articulated outcomes are known
+limitations of the model, not firmware findings:
+
+- **`low-battery-tiltback`.** The rigid rider rolls back a little after the stand release, which
+  unwinds the stock battery tiltback (it ramps with the sign of the speed), and then sets off. The
+  articulated rider stands still, the tiltback stays at about 6-7° nose up, and the rider, waiting
+  for it to fall within 2°, never sets off (top 0.6 km/h). The pedals reach 7.37° on stock, 7.11°
+  on compat and 6.9-7.2° on clean by 15 s, short of the 8° check.
+- **`overlean-top-speed`, `overlean-top-speed-30pct`.** The articulated rider, leaning the same 18°,
+  drives the wheel with a smoother torque at the edge of the voltage headroom. On stock its PWM alarm
+  comes at 26.4 s (rigid 24.3 s) at full charge and 23.7 s (rigid 23.6 s) at 30 %, its drive torque
+  keeps the PWM under 100 %, and the tiltbacks hold the wheel near 75 km/h: no cutout on any
+  firmware. The rigid rider's drive torque swings by about ±10 N·m near the limit; one swing takes
+  the PWM over 80 % and then to 100 % within 0.4 s. The outcome at this edge already depended on the
+  emulator's timing.
+- **`overlean-no-pwm-tiltback`.** The articulated rider reaches the 69 km/h speed tiltback before the
+  voltage runs out and eases off at most 71 km/h; stock and compat do not cut.
+- **`full-effort-70kmh-stop-soc*`.** These measure firmware headroom with the rider of
+  [full-effort acceptance](full-effort-acceptance.md). The articulated rider completes the full-battery
+  run on stock and compat as the rigid rider does; at 20 % it falls in the 20° build phase at about
+  9.8 s, and at 50 % it falls there at about 10.3 s or never reaches 70 km/h.
+
+**Foot contact (the default against contact feet).** On contact feet the soles carry an ankle moment
+only while the centre of pressure stays under them, and the lean controller does not keep within
+that yet. The rider comes off the pedals while the wheel stays up, and `rider_on_pedals` fails, in
+four scenarios at every firmware and quantum: `hard-braking-30kmh` (17.7-17.8 s, in the hard brake),
+`hill-climb-low-battery` (33.4-34.0 s, stalled on the 20 % grade), `overlean-top-speed` (34.8-39.0 s,
+held near 75 km/h) and every full-effort launch (8.7-15.2 s, at 30° lean). In the other sixteen
+scenarios the contact rider keeps the welded rider's verdicts, except `low-battery-tiltback`, where
+it rolls enough to unwind the tiltback and passes on stock and compat like the rigid rider. That is
+why contact feet stay opt-in.
+
+The `rider_on_pedals` check (every scenario without a step-off) passes by construction for welded
+feet and the rigid rider, so it changes no verdict of the default or the baseline, and no
+compat-vs-stock verdict.
+
+The compat-vs-stock comparison (`.github/workflows/compare.yml`, run as there) passes on all twenty
+scenarios. Three needed wider speed limits, each written in the tolerance file's notes: the
+articulated rider sways for a few seconds after a push or a stop (about 0.4 Hz, pitch about ±0.4°),
+where the rigid rider settles, so a few cycles of timing part the two firmwares' runs more:
+
+| Scenario | Largest difference, articulated | Rigid | New limit |
+|---|---|---|---|
+| `balance-60s` | speed 0.585 km/h at 42.96 s | 0.056 km/h | 0.9 km/h |
+| `hard-braking-30kmh` | speed 0.545 km/h at 21.41 s | 0.260 km/h | 0.85 km/h |
+| `hill-climb-low-battery` | speed 0.521 km/h, pitch 6.65° at 34.5 s | 0.283 km/h, 2.12° | 0.8 km/h, 10° |
 
 ## What the overlean runs show
 
@@ -165,6 +296,8 @@ anything else is a heightfield strip sampled every 2 cm along the path, from 5 m
 Rider reactions: the rider model follows a target speed by leaning, eases off for the firmware's
 tiltback and steers to keep the line, but it does not react to beeps, has no feel for a grade (on a
 slope it stops and then rolls back slowly), and with its aids it can hold on longer than a person
-during a nose-down struggle. The rider bends at the ankles, knees and hips (since 2026-10-20), but only
-forward and back: it cannot shift or balance sideways, and its feet never lose the pedals until it
-lets go.
+during a nose-down struggle. The default rider bends at the ankles, knees and hips, but only forward
+and back: it cannot shift or balance sideways without the roll aid. Its feet are welded to the pedals
+by default. With the opt-in contact feet they can lift, rock and slip, but the controller does not yet
+keep the soles' centre of pressure under the feet, and the rider cannot recover with the hips or by
+stepping.

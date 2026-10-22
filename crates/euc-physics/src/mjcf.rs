@@ -14,8 +14,9 @@
 //!
 //! Axes: x forward, y left, z up. Both hinges turn about +y, so a positive wheel angle rolls
 //! forward and a positive lean tips the rider forward. Only the tire, the shell and the pedals
-//! touch the ground alongside rider shapes. The optional articulated model uses a free upper
-//! body and six internal hip/knee/ankle hinges; its feet weld to the pedals until release.
+//! touch the ground alongside rider shapes. The articulated model (the default) uses a free upper
+//! body and six internal hip/knee/ankle hinges; each foot welds to its pedal until release, or,
+//! for `articulated_contact_v1`, stands on it through its own contact pair (`<side>_sole_on_pedal`).
 
 use crate::TIMESTEP_S;
 use crate::params::{RiderModel, Setup, Solid};
@@ -41,6 +42,14 @@ pub(crate) mod names {
 
 /// Largest lean of the rider relative to the pedals, radians (the joint limit).
 pub(crate) const LEAN_LIMIT_RAD: f64 = 0.7;
+
+/// The articulated rider's sole-on-pedal contact pairs are named `<side>` + this.
+pub(crate) const SOLE_PAIR_SUFFIX: &str = "_sole_on_pedal";
+
+/// The articulated rider stands on the pedals through contact (no pedal welds).
+pub(crate) const fn feet_in_contact(setup: &Setup) -> bool {
+    setup.rider.model.has_contact_feet()
+}
 
 /// Shell layout as fractions of the tire radius (drawing and fall contacts only; mass and
 /// inertia come from the parameters).
@@ -149,6 +158,18 @@ pub(crate) fn mjcf(setup: &Setup) -> String {
     // between them with a suspension).
     x.line("  <contact>");
     x.line(format!(r#"    <exclude body1="{}" body2="{}"/>"#, names::SHELL, names::WHEEL));
+    if feet_in_contact(setup) {
+        // Each sole meets its own pedal and nothing else of the shell: explicit pairs, no mask
+        // change, so torso, legs and wheel still never touch the shell.
+        let a = setup.rider.articulation;
+        let mu = a.sole_friction;
+        for side in ["left", "right"] {
+            x.line(format!(
+                r#"    <pair name="{side}{SOLE_PAIR_SUFFIX}" geom1="{side}_sole" geom2="pedal_{side}" condim="3" friction="{mu} {mu} 0.005 0.0001 0.0001" solref="{} 1"/>"#,
+                a.sole_contact_time_s
+            ));
+        }
+    }
     x.line("  </contact>");
     x.line("  <actuator>");
     let max = setup.rider.control.ankle_max_nm;
@@ -177,7 +198,7 @@ pub(crate) fn mjcf(setup: &Setup) -> String {
             names::RIDER,
             names::FEET
         ));
-    } else {
+    } else if !feet_in_contact(setup) {
         for side in ["left", "right"] {
             x.line(format!(r#"    <weld name="on_{side}_pedal" body1="{side}_foot" body2="shell" solref="0.002 1"/>"#));
         }
@@ -369,8 +390,9 @@ fn rider(x: &mut Xml, setup: &Setup, layout: &Layout) {
     x.line("    </body>");
 }
 
-/// Seven real rigid bodies. Feet remain constrained to pedals until release; no sole slip model.
-/// Fractions and dimensions are generic estimates. All rider mass travels with the released tree.
+/// Seven real rigid bodies. Each foot welds to its pedal, or for `articulated_contact_v1` stands on
+/// it through a friction contact pair. Fractions and dimensions are generic estimates. All rider
+/// mass travels with the released tree.
 fn articulated(x: &mut Xml, setup: &Setup, layout: &Layout) {
     let r = setup.rider;
     let length = r.height_m * 0.245;

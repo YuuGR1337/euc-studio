@@ -225,6 +225,13 @@ pub enum Expect {
         /// From this time on, seconds (default: the release).
         from_s: Option<f64>,
     },
+    /// The rider stays on the pedals: never comes off them while the wheel stays up. Welded feet
+    /// and the rigid rider cannot come off that way, so it bites only with contact feet
+    /// (`articulated_contact_v1`). Every scenario without a `step_off_s` gets it by default.
+    RiderOnPedals {
+        /// From this time on, seconds (default: the release).
+        from_s: Option<f64>,
+    },
     /// The firmware never cuts the motor (none of its cutoff flags is set).
     NoCutoff {
         /// From this time on, seconds (default: the release).
@@ -466,6 +473,12 @@ impl Scenario {
             let keys: Vec<&str> = CHANNELS.iter().map(|c| c.key).collect();
             return bad(format!("unknown telemetry signal \"{signal}\" (known: {})", keys.join(", ")));
         }
+        // A rider who comes off the pedals while the wheel stays up must not pass unseen: every
+        // scenario without a planned step-off checks it.
+        if scenario.step_off_s.is_none() && !scenario.expects.iter().any(|e| matches!(e, Expect::RiderOnPedals { .. }))
+        {
+            scenario.expects.push(Expect::RiderOnPedals { from_s: None });
+        }
         for (i, table) in std::mem::take(&mut scenario.timeline).into_iter().enumerate() {
             let fault =
                 timed_fault(table).map_err(|why| ScenarioError::Invalid(format!("timeline entry {}: {why}", i + 1)))?;
@@ -505,6 +518,9 @@ pub struct Sample {
     pub fallen: bool,
     /// A firmware cutoff flag is set.
     pub cutoff: bool,
+    /// The rider has come off the pedals while the wheel stayed up (contact feet only: both soles
+    /// off their pedals for `euc_physics::LOST_FOOTING_S`).
+    pub off_pedals: bool,
 }
 
 /// The verdict of one expectation.
@@ -809,6 +825,17 @@ impl Expect {
                     measured: worst.map_or_else(
                         || "no samples".to_owned(),
                         |s| format!("max {:.2}° at {:.2} s", s.pitch_deg, s.t_s),
+                    ),
+                }
+            }
+            Self::RiderOnPedals { from_s } => {
+                let off = after(from_s).find(|s| s.off_pedals);
+                CheckResult {
+                    what: format!("rider stays on the pedals {}", from_text(from_s)),
+                    passed: off.is_none(),
+                    measured: off.map_or_else(
+                        || "stayed on".to_owned(),
+                        |s| format!("both feet off the pedals at {:.2} s, the wheel still up", s.t_s),
                     ),
                 }
             }
@@ -1181,13 +1208,17 @@ impl Ride {
             Intent::Speed(v) => (v * 3.6) as f32,
             Intent::Lean(_) => f32::NAN,
         };
-        let state = session.machine().plant().live_part().map(|l| l.physics().state());
+        let physics = session.machine().plant().live_part().map(crate::plant::Live::physics);
+        let state = physics.map(euc_physics::Physics::state);
         let sample = Sample {
             t_s: snapshot.t_s,
             speed_kmh: f64::from(snapshot.signals.speed_kmh),
             pitch_deg: f64::from(snapshot.signals.pitch_deg),
             fallen: state.is_some_and(|s| s.fallen),
             cutoff: session.cutoff().is_some(),
+            off_pedals: physics
+                .and_then(euc_physics::Physics::left_pedals)
+                .is_some_and(|(_, how)| how == euc_physics::Leaving::LostFooting),
         };
         self.samples.push(sample);
         let previous_index = self.phases.index;
@@ -1361,7 +1392,7 @@ kmh = 19.0
     }
 
     fn phase_sample(t_s: f64, speed_kmh: f64) -> Sample {
-        Sample { t_s, speed_kmh, pitch_deg: 0.0, fallen: false, cutoff: false }
+        Sample { t_s, speed_kmh, pitch_deg: 0.0, fallen: false, cutoff: false, off_pedals: false }
     }
 
     #[test]
@@ -1624,6 +1655,26 @@ kmh = 19.0
     }
 
     #[test]
+    fn every_scenario_without_a_step_off_checks_that_the_rider_stays_on_the_pedals() {
+        let implicit = |s: &Scenario| s.expects.iter().filter(|e| matches!(e, Expect::RiderOnPedals { .. })).count();
+        assert_eq!(implicit(&Scenario::from_toml(RIDE).unwrap()), 1, "added by default");
+        let explicit = format!("{RIDE}\n[[expect]]\ncheck = \"rider_on_pedals\"\nfrom_s = 8.0\n");
+        let explicit = Scenario::from_toml(&explicit).unwrap();
+        assert_eq!(implicit(&explicit), 1, "not added twice");
+        assert!(explicit.expects.contains(&Expect::RiderOnPedals { from_s: Some(8.0) }));
+        let stepping = RIDE.replace("release_s = 5.0", "release_s = 5.0\nstep_off_s = 25.0");
+        assert_eq!(implicit(&Scenario::from_toml(&stepping).unwrap()), 0, "a planned step-off is not a fall");
+
+        let at =
+            |t_s, off_pedals| Sample { t_s, speed_kmh: 10.0, pitch_deg: 0.0, fallen: false, cutoff: false, off_pedals };
+        let check = Expect::RiderOnPedals { from_s: None };
+        let on = check.judge(&[at(6.0, false), at(7.0, false)], 5.0);
+        assert!(on.passed && on.measured == "stayed on", "{on:?}");
+        let off = check.judge(&[at(6.0, false), at(17.75, true)], 5.0);
+        assert!(!off.passed && off.measured.contains("17.75"), "{off:?}");
+    }
+
+    #[test]
     fn refuses_bad_files() {
         let bad = RIDE.replace("release_s = 5.0", "release_s = 50.0");
         assert!(Scenario::from_toml(&bad).unwrap_err().to_string().contains("release_s"));
@@ -1656,7 +1707,14 @@ kmh = 19.0
 
     #[test]
     fn judges_fault_reactions() {
-        let at = |t_s, pitch_deg, cutoff| Sample { t_s, speed_kmh: 0.0, pitch_deg, fallen: false, cutoff };
+        let at = |t_s, pitch_deg, cutoff| Sample {
+            t_s,
+            speed_kmh: 0.0,
+            pitch_deg,
+            fallen: false,
+            cutoff,
+            off_pedals: false,
+        };
         let samples = [at(1.0, 0.0, false), at(2.0, 9.0, false), at(2.1, 12.0, true)];
         let seen = |flags: &[&str], alerts| Observation {
             cutoff_flags: flags.iter().map(|&f| f.to_owned()).collect(),
@@ -1689,7 +1747,7 @@ kmh = 19.0
 
     #[test]
     fn judges_ripple_and_tracking() {
-        let at = |t_s| Sample { t_s, speed_kmh: 20.0, pitch_deg: 0.0, fallen: false, cutoff: false };
+        let at = |t_s| Sample { t_s, speed_kmh: 20.0, pitch_deg: 0.0, fallen: false, cutoff: false, off_pedals: false };
         let samples = [at(1.0), at(2.0), at(3.0), at(4.0)];
         let seen = |torque: f32, speed_cms: f64| Observation {
             values: vec![("speed_cms".to_owned(), speed_cms)],
@@ -1717,7 +1775,7 @@ kmh = 19.0
 
     #[test]
     fn records_always_pass_and_say_what_they_saw() {
-        let at = |t_s| Sample { t_s, speed_kmh: 0.0, pitch_deg: 0.0, fallen: false, cutoff: false };
+        let at = |t_s| Sample { t_s, speed_kmh: 0.0, pitch_deg: 0.0, fallen: false, cutoff: false, off_pedals: false };
         let samples = [at(1.0), at(2.0), at(3.0)];
         let seen = |speed: f32, vq: f64| Observation {
             values: vec![("vq_active".to_owned(), vq)],
@@ -1752,7 +1810,14 @@ kmh = 19.0
 
     #[test]
     fn judges_samples() {
-        let at = |t_s, speed_kmh, pitch_deg| Sample { t_s, speed_kmh, pitch_deg, fallen: false, cutoff: false };
+        let at = |t_s, speed_kmh, pitch_deg| Sample {
+            t_s,
+            speed_kmh,
+            pitch_deg,
+            fallen: false,
+            cutoff: false,
+            off_pedals: false,
+        };
         let samples = [at(1.0, 0.0, 30.0), at(6.0, 10.0, -4.0), at(7.0, 19.5, 2.0), at(8.0, 0.4, 1.0)];
         let pitch = Expect::Pitch { max_abs_deg: 5.0, from_s: None }.judge(&samples, 5.0);
         assert!(pitch.passed, "the stand phase does not count: {pitch:?}");
