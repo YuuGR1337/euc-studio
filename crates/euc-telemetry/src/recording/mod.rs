@@ -188,9 +188,13 @@ pub struct Header {
     /// CPU backend (`own`, `unicorn`).
     #[serde(default)]
     pub cpu: Option<String>,
-    /// HCLK cycles per instruction the CPU model used.
+    /// HCLK cycles per instruction the CPU model used, with the fixed timing.
     #[serde(default)]
     pub cpi: Option<f64>,
+    /// Instruction timing (`fixed`, `flash`, `flash-wN`). Absent in recordings made before the
+    /// flash model, which all used the fixed timing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timing: Option<String>,
     /// Seed of the simulated sensor noise.
     #[serde(default)]
     pub seed: Option<u64>,
@@ -236,6 +240,7 @@ impl Header {
             firmware_sha256: None,
             cpu: None,
             cpi: None,
+            timing: None,
             seed: None,
             scenario: None,
             scenario_toml: None,

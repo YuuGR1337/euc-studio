@@ -16,8 +16,8 @@ See [the rider change](#rider-default-2026-10-22) below.
 | Recording integrity | Limits apply before decoding; duplicate indexes, inconsistent counts, and invalid sample bounds fail | Broader storage-failure injection |
 | Recording context | Actual rider model, external aids, scenario text, and generated Free Ride map; CLI scenario recordings too | Complete parameter preset snapshots |
 | Python | Existing euc_studio API, typed Session, phase results, reset, recording save, and recording import | Linux and Windows package verification |
-| Engine | RTC correction, battery bounds, supply-state handling, output telemetry, image seal, and flash simulation | Complete OTA transport and recovery proof |
-| Firmware | Earlier approved clean cutoff and headroom changes remain | System-level stock/compat equivalence beyond limited comparison windows |
+| Engine | RTC correction, battery bounds, supply-state handling, output telemetry, image seal, flash simulation, and a selectable per-instruction flash timing model (fixed CPI 2.0 stays the default) | Complete OTA transport and recovery proof; exact MMIO timestamps inside a quantum |
+| Firmware | Earlier approved clean cutoff and headroom changes remain | Compat's RTC tick takes twice stock's cycles (soft-double library); make it as fast with bit-identical results, then recheck full-run equivalence |
 | Distribution | Local package tooling and development app | Final release packaging, public signing, and notarization |
 
 ## Checks completed
@@ -85,6 +85,21 @@ No production code, firmware image, physical input, or acceptance limit changes 
 The [follow-up](models/soc50-high-speed-investigation.md) confirms the launch Hall transition and rules out the actuator cap in two stock counterfactuals.
 Sixteen additional quantum studies expose timing sensitivity down to one instruction per quantum.
 Both one-instruction cases cut before 70 km/h; full-run equivalence remains open.
+
+The [third SOC50 study](models/soc50-full-run-equivalence.md) (2026-10-22, base `63801a2`, rigid rider) finds the systematic cause.
+Compat performs stock's arithmetic, but its RTC tick takes about 75,000 cycles against stock's 37,000.
+Its libgcc double divide costs 528 instructions per call against stock's 75.
+Compat therefore publishes the motor command about 0.6 ms later in each tick.
+It stays voltage-limited longer at high speed and builds more PWM tiltback and pitch oscillation (p ≤ 0.001 over 12-16 distinct runs).
+A private causal test that swaps only the tick cost swaps the two regimes, and also the SOC20 cutoff times.
+The SOC50 cutoff time itself is chaotic: numerical perturbations alone spread it by more than 2 s.
+No firmware image, tolerance or window changed; the speed-up is a firmware item for the lead.
+
+The [stage B timing model](models/cpu-timing.md#flash-timing-stage-b) is selectable with `--timing flash`.
+Against the owner's wheel it gives a 2.515 s breathing period (video 2.1 ± 0.2 s; fixed timing 2.234 s).
+Both timings give 307.45 ms BLE groups (capture 309.6 ms).
+The fixed timing therefore stays the default.
+On stock, both timings give the same 15 passes and 5 expected failures at quanta 4000, 3000 and 2000.
 
 ## Rider default, 2026-10-22
 

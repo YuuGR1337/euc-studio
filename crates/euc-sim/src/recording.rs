@@ -312,6 +312,13 @@ pub fn header(
     header
 }
 
+/// Records the instruction timing in `header`: its name, and `cpi` only for the fixed timing
+/// (a timing model has no fixed cost per instruction).
+pub fn set_timing(header: &mut Header, timing: crate::cpu::Timing, cpi: f64) {
+    header.timing = Some(timing.name());
+    header.cpi = (timing == crate::cpu::Timing::Fixed).then_some(cpi);
+}
+
 /// A scenario's checks as timeline entries at `t_s` (the end of the run), as the studio posts
 /// them: one per check, then the verdict.
 pub fn verdict_events(scenario: &str, outcome: &Outcome, t_s: f64) -> Vec<Event> {

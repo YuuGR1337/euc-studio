@@ -164,7 +164,7 @@ pub(crate) fn serve(ctx: &Context, args: &ServeArgs) -> anyhow::Result<Verdict> 
 impl Server {
     /// Builds the wheel with a live plant, on its stand at power-on.
     fn new(ctx: &Context, args: &ServeArgs) -> anyhow::Result<Self> {
-        let cpu = cpu_factory(args.cpu)?;
+        let cpu = cpu_factory(args.cpu, args.cpu.default_timing())?;
         let scenario = args.scenario.as_deref().map(load_scenario).transpose()?;
         let wheel_id = match (&args.wheel, &scenario) {
             (Some(wheel), _) => wheel.clone(),

@@ -6,6 +6,8 @@ All six stock/compat cutoffs start with the balance-error detector.
 The launch comparison samples opposite sides of similar PWM transients, approximately 80 µs apart.
 Full-run equivalence remains open; this study changes no production behavior.
 The [follow-up investigation](soc50-high-speed-investigation.md) identifies the Hall transition and tests high-speed command and timing hypotheses.
+The [third study](soc50-full-run-equivalence.md) finds the systematic cause: compat's RTC tick takes twice stock's cycles.
+It also shows that the final cutoff time is chaotic at the stability limit.
 
 This study separates the launch voltage comparison from the later cutoff difference.
 It uses the accepted [full-effort baseline](full-effort-acceptance.md).
@@ -196,6 +198,11 @@ Extending the error deadline would change safety behavior without resolving that
 2. What establishes the trajectory phase difference before the shared Hall transition near 7.08 s?
 3. Where does sustained current-tracking error first separate the high-speed stock and compat trajectories?
 4. How can snapshots report a consistent electrical timestamp without changing scenario or peripheral scheduling?
+
+The [third study](soc50-full-run-equivalence.md#what-this-establishes) answers questions 2 and 3.
+Phase differences arise from timing and grow chaotically.
+The systematic high-speed separation starts when the wheel leaves voltage saturation near 11.7 s, and compat's longer RTC tick causes it.
+Questions 1 and 4 concern the shared engine and remain open.
 
 `System::now()` uses the current quantum start plus explicit skipped cycles.
 It does not add the instruction's position within the quantum to MMIO timestamps.

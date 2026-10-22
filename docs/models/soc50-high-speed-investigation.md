@@ -7,6 +7,9 @@ High-speed current demand rises before tracking fails.
 The closed-loop outcome remains sensitive to CPU quantum size, including the finest tested sizes.
 The accepted firmware images, profiles, physical model, scenario, and comparison limits stay unchanged.
 Private observation hooks and numerical sensitivity runs retain separate identities.
+The [third study](soc50-full-run-equivalence.md) explains the different command oscillations below.
+Compat's RTC tick takes about twice stock's cycles and publishes the motor command about 0.6 ms later.
+Swapping only the tick cost swaps the two firmwares' high-speed regimes.
 
 ## Launch cause confirmed
 
@@ -91,7 +94,7 @@ These cadence results do not exclude effects from earlier delayed updates.
 Neither stock run has the same combined deficit in the traced 16.3–16.9 s interval.
 The 100 Hz evidence first identifies later episodes at 17.09 s for stock q4000 and 17.20 s for stock q3000.
 The observed command rise therefore precedes the later current-tracking loss.
-The reason for the different command oscillations remains open.
+The reason for the different command oscillations remained open here; the [third study](soc50-full-run-equivalence.md#cause-compats-tick-takes-twice-as-long) traces it to compat's tick time.
 
 ## The actuator boundary does not explain these two stock outcomes
 
@@ -176,7 +179,8 @@ The later failure follows increasing balance demand with insufficient measured c
 The documented actuator cap does not explain the tested stock trajectories.
 An immediate long command gap does not initiate the traced compat episode near 16.3 s.
 
-The origin of the different balance-command oscillations remains unresolved.
+The origin of the different balance-command oscillations remained unresolved in this study.
+The third study's causal test attributes it to compat's longer RTC tick.
 The present closed-loop comparison combines firmware logic, execution timing, sensor phase, and physical feedback.
 Its timing sensitivity prevents attributing the remaining difference to one firmware rule from these results alone.
 The next discriminator requires identical recorded inputs at the relevant balance and FOC calculations.

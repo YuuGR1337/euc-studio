@@ -46,8 +46,10 @@ use euc_core::{Access, Bus, BusFault, BusFaultKind, CoreRegs, Cpu, Exit, Fault, 
 
 pub use mem::LayoutError;
 pub use op::{BitOp, Decoded, Dp, Extend, ImmCarry, MulLong, Op, SetFlags, Shift, Width, sysm};
+pub use timing::Flash;
 
 use crate::it::Flags;
+use crate::timing::FlashPipe;
 
 /// `CCR.UNALIGN_TRP`: unaligned single loads and stores fault.
 pub const CCR_UNALIGN_TRP: u32 = 1 << 3;
@@ -117,6 +119,12 @@ pub struct Armv7m {
     resume_pc: Option<u32>,
     retired: u64,
     cycles: u64,
+    /// The flash interface of the timing model, when the engine selected it.
+    flash: Option<Flash>,
+    /// The timing model's state and clock.
+    pipe: FlashPipe,
+    /// Data reads from the flash array by the current instruction.
+    flash_reads: u32,
 }
 
 impl Armv7m {
@@ -154,12 +162,38 @@ impl Armv7m {
             resume_pc: None,
             retired: 0,
             cycles: 0,
+            flash: None,
+            pipe: FlashPipe::default(),
+            flash_reads: 0,
         })
     }
 
-    /// Core cycles since the backend was created, by the Cortex-M3 TRM model in [`timing`].
+    /// Core cycles since the backend was created, by the Cortex-M3 TRM model in [`timing`], at
+    /// zero wait states.
     pub const fn cycles(&self) -> u64 {
         self.cycles
+    }
+
+    /// Switches the per-instruction timing model on with this flash interface, or off with
+    /// `None` (the default: the engine then charges a fixed cost per instruction). While it is
+    /// on, [`Cpu::model_cycles`] reports its clock and [`Cpu::run_for`] honours a cycle limit.
+    /// The model changes no architectural result.
+    pub fn set_flash(&mut self, flash: Option<Flash>) {
+        self.flash = flash;
+        for ram in &mut self.mem.rams {
+            ram.flash = flash.is_some_and(|f| {
+                let end = u64::from(f.base) + u64::from(f.size);
+                u64::from(ram.base) >= u64::from(f.base) && u64::from(ram.base) + u64::from(ram.size) <= end
+            });
+        }
+        if let Some(flash) = flash {
+            self.pipe.redirect(&flash, self.regs.pc & !1);
+        }
+    }
+
+    /// The flash interface of the timing model, if it is on.
+    pub const fn flash(&self) -> Option<Flash> {
+        self.flash
     }
 
     /// Sets the `CCR` (`0xE000_ED14`) bits the core honours: [`CCR_UNALIGN_TRP`] and
@@ -259,13 +293,16 @@ impl Armv7m {
     }
 
     /// Runs up to `budget` instructions. The retired count, the base cycles and the pipelining
-    /// state live in locals here and reach `self` when the run ends.
-    fn execute(&mut self, bus: &mut dyn Bus, budget: u32) -> Exit {
+    /// state live in locals here and reach `self` when the run ends. With `TIMED`, the flash
+    /// timing model also accounts for each retired instruction, and the run ends once its clock
+    /// has advanced `cycle_budget` cycles.
+    fn execute<const TIMED: bool>(&mut self, bus: &mut dyn Bus, budget: u32, flash: Flash, cycle_budget: u64) -> Exit {
         let mut left = budget;
         let mut cycles = 0_u64;
         let mut after_transfer = self.after_transfer;
+        let deadline = self.pipe.now().saturating_add(cycle_budget);
         let exit = loop {
-            if left == 0 {
+            if left == 0 || (TIMED && self.pipe.now() >= deadline) {
                 break Exit::Budget;
             }
             if !self.thumb {
@@ -279,6 +316,10 @@ impl Armv7m {
             self.r[15] = pc.wrapping_add(4);
             self.pc = pc.wrapping_add(u32::from(d.len));
             let it = self.it;
+            let extra_before = self.cycles;
+            if TIMED {
+                self.flash_reads = 0;
+            }
             let result = if it == 0 || self.flags.passes(it::condition(it)) { self.exec(bus, d.op) } else { Ok(()) };
             if let Err(Stop::Abort(exit)) = result {
                 self.pc = pc;
@@ -289,9 +330,20 @@ impl Armv7m {
             if it != 0 {
                 self.it = it::advance(it);
             }
-            cycles += u64::from(d.cycles) - u64::from(d.transfer && after_transfer);
+            let base = u64::from(d.cycles) - u64::from(d.transfer && after_transfer);
+            cycles += base;
             after_transfer = d.transfer;
             left -= 1;
+            if TIMED {
+                // An exception return moves PC through the engine, which charges the switch.
+                let next = if matches!(result, Err(Stop::ExceptionReturn(_))) {
+                    pc.wrapping_add(u32::from(d.len))
+                } else {
+                    self.pc
+                };
+                let cost = base + (self.cycles - extra_before);
+                self.pipe.retire(&flash, pc, u32::from(d.len), cost, self.flash_reads, next);
+            }
             match result {
                 Ok(()) => {
                     if self.bus_touched {
@@ -310,6 +362,9 @@ impl Armv7m {
                     // backend does, since a tail-chain puts this value in LR.
                     bus.exception_return(&mut self.regs, value | 1);
                     self.load_regs();
+                    if TIMED {
+                        self.pipe.redirect(&flash, self.pc);
+                    }
                     // Exception return clears the local monitor and sets the event register.
                     self.exclusive = false;
                     self.event = true;
@@ -339,17 +394,31 @@ impl Cpu for Armv7m {
     }
 
     fn run(&mut self, bus: &mut dyn Bus, max_instr: u32) -> Exit {
+        self.run_for(bus, max_instr, u64::MAX)
+    }
+
+    fn run_for(&mut self, bus: &mut dyn Bus, max_instr: u32, max_cycles: u64) -> Exit {
         if self.resume_pc != Some(self.regs.pc) {
             // The engine moved PC between runs (exception entry, reset, a debugger): exception
             // entry clears the local monitor and sets the event register.
             self.exclusive = false;
             self.event = true;
+            if let Some(flash) = self.flash {
+                self.pipe.redirect(&flash, self.regs.pc & !1);
+            }
         }
         self.load_regs();
-        let exit = self.execute(bus, max_instr);
+        let exit = match self.flash {
+            Some(flash) => self.execute::<true>(bus, max_instr, flash, max_cycles),
+            None => self.execute::<false>(bus, max_instr, Flash::STM32F1_72MHZ, u64::MAX),
+        };
         self.store_regs();
         self.resume_pc = Some(self.pc);
         exit
+    }
+
+    fn model_cycles(&self) -> Option<u64> {
+        self.flash.map(|_| self.pipe.now())
     }
 
     fn regs(&self) -> &CoreRegs {

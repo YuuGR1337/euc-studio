@@ -40,6 +40,8 @@ pub(crate) struct Ram {
     pub(crate) size: u32,
     ptr: NonNull<u8>,
     pub(crate) writable: bool,
+    /// Inside the flash array of the timing model (`Armv7m::set_flash`): data reads count.
+    pub(crate) flash: bool,
 }
 
 impl Ram {
@@ -163,7 +165,7 @@ impl Memory {
         for region in regions {
             match region.kind {
                 RegionKind::Memory { ptr, writable } => {
-                    rams.push(Ram { base: region.base, size: region.size, ptr, writable });
+                    rams.push(Ram { base: region.base, size: region.size, ptr, writable, flash: false });
                 }
                 RegionKind::Mmio => mmio.push((region.base, region.size)),
             }

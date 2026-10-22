@@ -105,7 +105,9 @@ The cutoff does not initiate that particular fall.
 The standard reports expose `balance_disabled`, but do not identify the first disabling instruction or detector.
 The later [SOC50 investigation](soc50-investigation.md) identifies the error detector as the first cause in all six stock/compat runs.
 Its instruction observer preserves the accepted sample streams and outcomes.
-The stock/compat trajectory difference before those cutoffs remains open.
+The [third SOC50 study](soc50-full-run-equivalence.md) explains the stock/compat trajectory difference before those cutoffs.
+Compat's RTC tick takes about twice stock's cycles, which changes how the wheel leaves voltage saturation at high speed.
+The cutoff times themselves are chaotic: numerical perturbations alone spread them by more than 2 s.
 No compat behavior change follows from this matrix.
 
 ## Comparison limits

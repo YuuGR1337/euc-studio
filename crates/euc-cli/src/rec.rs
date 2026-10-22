@@ -102,6 +102,9 @@ fn info(ctx: &Context, file: &Path, max_events: usize) -> anyhow::Result<Verdict
     if let Some(cpu) = &h.cpu {
         engine.push(format!("cpu {}", ui::safe(cpu)));
     }
+    if let Some(timing) = &h.timing {
+        engine.push(format!("{} timing", ui::safe(timing)));
+    }
     if let Some(cpi) = h.cpi {
         engine.push(format!("CPI {cpi}"));
     }

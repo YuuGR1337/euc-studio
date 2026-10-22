@@ -9,7 +9,7 @@ use anyhow::{Context as _, bail};
 use euc_fwsource::{FetchOptions, UreqClient};
 use euc_profile::{Channel, FirmwareSource, ProfileSource, Sha256, WheelProfile};
 use euc_sim::config::StockMap;
-use euc_sim::cpu::Backend;
+use euc_sim::cpu::{Backend, Timing};
 use euc_sim::recording::{self, Recorder};
 use euc_sim::scenario::{self, Outcome, Scenario};
 use euc_sim::{CpuFactory, Machine, MachineConfig, PlantState, Report, Session, WheelFiles};
@@ -65,7 +65,12 @@ pub(crate) struct Args {
     /// Seconds counted as boot; speed after them is reported as the steady state.
     #[arg(long, default_value_t = 4.0)]
     warmup: f64,
-    /// HCLK cycles per instruction.
+    /// Instruction timing: `fixed` (--cpi cycles per instruction), `flash` (our core's per-instruction
+    /// model with the STM32F1 flash at two wait states) or `flash-wN` (N wait states).
+    /// Default: the engine's shipped timing on `own`, `fixed` on `unicorn`.
+    #[arg(long, value_name = "fixed|flash|flash-wN")]
+    timing: Option<Timing>,
+    /// HCLK cycles per instruction with the fixed timing.
     #[arg(long, default_value_t = euc_sim::DEFAULT_CPI)]
     cpi: f64,
     /// Research only: omit exception overhead (with --cpi 1.25, reproduce reference-harness timing).
@@ -107,6 +112,8 @@ struct RunOutput<'a> {
     wheel: &'a str,
     firmware: FirmwareOut,
     cpu: &'static str,
+    /// The instruction timing (`fixed`, `flash`, `flash-wN`).
+    timing: String,
     wall_seconds: f64,
     realtime_factor: f64,
     steady_state: Steady,
@@ -128,6 +135,7 @@ struct Steady {
     realtime_factor: f64,
 }
 
+#[allow(clippy::too_many_lines)] // One sequential setup; splitting it would only move the argument list.
 pub(crate) fn run(ctx: &Context, command: Command) -> anyhow::Result<Verdict> {
     let args = match command {
         Command::Run(args) => args,
@@ -165,6 +173,7 @@ pub(crate) fn run(ctx: &Context, command: Command) -> anyhow::Result<Verdict> {
     }
 
     let hclk = files.hclk();
+    let timing = args.timing.unwrap_or_else(|| cpu.default_timing());
     let preset = args.settings.as_deref().or_else(|| scenario.as_ref().and_then(|s| s.settings.as_deref()));
     let board = board_with(&files, preset)?;
     let config = MachineConfig {
@@ -185,7 +194,7 @@ pub(crate) fn run(ctx: &Context, command: Command) -> anyhow::Result<Verdict> {
         exception_timing: if args.no_exception_timing {
             euc_sim::ExceptionTiming::REFERENCE
         } else {
-            euc_sim::ExceptionTiming::default()
+            timing.exception_timing()
         },
         max_quantum: args.max_quantum,
         marker_window_s: 4.0,
@@ -193,11 +202,11 @@ pub(crate) fn run(ctx: &Context, command: Command) -> anyhow::Result<Verdict> {
     let firmware_out = FirmwareOut { label, sha256, bytes: image.len() };
     if let Some(scenario) = scenario {
         let live = files.live_on(scenario.rider, scenario.assist, scenario.terrain.clone())?;
-        let machine = Machine::new_live(&config, &euc_sim::registry(), cpu_factory(cpu)?, live)?;
+        let machine = Machine::new_live(&config, &euc_sim::registry(), cpu_factory(cpu, timing)?, live)?;
         let session = Session::new(machine, fw.map.as_ref(), args.sample_hz);
-        return ride(ctx, &args, &source, &files, &scenario, session, firmware_out, cpu);
+        return ride(ctx, &args, &source, &files, &scenario, session, firmware_out, cpu, timing);
     }
-    let mut machine = Machine::new(&config, &euc_sim::registry(), cpu_factory(cpu)?)?;
+    let mut machine = Machine::new(&config, &euc_sim::registry(), cpu_factory(cpu, timing)?)?;
 
     let total = (args.seconds * hclk as f64) as u64;
     let warm = total.min((args.warmup * hclk as f64) as u64);
@@ -214,6 +223,7 @@ pub(crate) fn run(ctx: &Context, command: Command) -> anyhow::Result<Verdict> {
         wheel: &wheel.id,
         firmware: firmware_out,
         cpu: cpu.name(),
+        timing: timing.name(),
         wall_seconds: round(wall),
         realtime_factor: round(report.sim_seconds / wall),
         steady_state: Steady {
@@ -240,6 +250,8 @@ struct RideOutput<'a> {
     wheel: &'a str,
     firmware: FirmwareOut,
     cpu: &'static str,
+    /// The instruction timing (`fixed`, `flash`, `flash-wN`).
+    timing: String,
     scenario: &'a str,
     sim_seconds: f64,
     wall_seconds: f64,
@@ -282,13 +294,14 @@ fn ride(
     mut session: Session,
     firmware: FirmwareOut,
     cpu: Backend,
+    timing: Timing,
 ) -> anyhow::Result<Verdict> {
     let wheel = &files.profile;
     let mut recorder = match &args.record {
         Some(path) => {
             let mut header = recording::header(PRODUCER, source, files, &session, &firmware.label, &firmware.sha256);
             header.cpu = Some(cpu.name().to_owned());
-            header.cpi = Some(args.cpi);
+            recording::set_timing(&mut header, timing, args.cpi);
             header.scenario = Some(scenario.name.clone());
             header.scenario_toml = args.scenario.as_deref().and_then(|p| fs::read_to_string(p).ok());
             header.settings = args
@@ -333,6 +346,7 @@ fn ride(
         wheel: &wheel.id,
         firmware,
         cpu: cpu.name(),
+        timing: timing.name(),
         scenario: &scenario.name,
         sim_seconds: round(sim_seconds),
         wall_seconds: round(wall),
@@ -395,10 +409,10 @@ fn print_ride(wheel: &WheelProfile, scenario: &Scenario, args: &Args, output: &R
     }
 }
 
-/// The factory for the `cpu` backend, or why this build cannot run it (Unicorn without the
-/// `unicorn` feature).
-pub(crate) fn cpu_factory(cpu: Backend) -> anyhow::Result<Box<CpuFactory<'static>>> {
-    cpu.factory().map_err(anyhow::Error::msg)
+/// The factory for the `cpu` backend with `timing`, or why this build cannot run it (Unicorn
+/// without the `unicorn` feature, or with a timing model it does not have).
+pub(crate) fn cpu_factory(cpu: Backend, timing: Timing) -> anyhow::Result<Box<CpuFactory<'static>>> {
+    cpu.factory_with(timing).map_err(anyhow::Error::msg)
 }
 
 fn round(value: f64) -> f64 {

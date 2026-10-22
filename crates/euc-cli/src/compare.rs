@@ -33,6 +33,9 @@ pub(crate) struct CompareArgs {
     /// feature).
     #[arg(long, default_value = "own", value_name = "own|unicorn")]
     cpu: euc_sim::cpu::Backend,
+    /// Instruction timing for both runs.
+    #[arg(long, value_name = "fixed|flash|flash-wN")]
+    timing: Option<euc_sim::cpu::Timing>,
     /// Settings preset both runs boot with (default: the scenario's).
     #[arg(long, value_name = "PRESET")]
     settings: Option<String>,
@@ -161,7 +164,8 @@ impl Run {
         settings: Option<&str>,
         args: &CompareArgs,
     ) -> anyhow::Result<Self> {
-        let cpu = cpu_factory(args.cpu)?;
+        let timing = args.timing.unwrap_or_else(|| args.cpu.default_timing());
+        let cpu = cpu_factory(args.cpu, timing)?;
         let wheel = &files.profile;
         let fw = load_firmware(ctx, files, spec)?;
         let (image, label, sha256, stock, map) = (fw.image, fw.label, fw.sha256, fw.stock, fw.map);
@@ -181,7 +185,7 @@ impl Run {
             injections,
             power_cycles: Vec::new(),
             cpi: euc_sim::DEFAULT_CPI,
-            exception_timing: euc_sim::ExceptionTiming::default(),
+            exception_timing: timing.exception_timing(),
             max_quantum: args.max_quantum,
             marker_window_s: 4.0,
         };

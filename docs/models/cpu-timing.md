@@ -1,10 +1,29 @@
 # CPU timing
 
-**Status: fixed-cost timing is implemented.** The CLI and app use CPI 2.0 with exception overhead.
-The instruction-level flash model remains future work. The study below records the earlier timing
-and its evidence.
+**Status: two instruction timings exist.**
+The fixed timing (stage A: CPI 2.0 plus exception costs) remains the shipped default.
+The flash timing (stage B: per-instruction Cortex-M3 costs behind the STM32F1 flash interface) is selectable.
+The owner's wheel favours the fixed timing; see [Validation against the owner's wheel](#validation-against-the-owners-wheel).
+The sections after the stage B results record the earlier timing studies and their evidence.
 
-## Current timing
+## Selecting the timing
+
+| Timing | Name | What sets a quantum's duration | Backends |
+|---|---|---|---|
+| Fixed (stage A, default) | `fixed` | retired instructions × `--cpi` (2.0) | own core, Unicorn |
+| Flash (stage B) | `flash`, or `flash-wN` for N wait states | the core's own model clock | own core only |
+
+- The CLI takes `euc sim run --timing ...` and `euc sim compare --timing ...`.
+  Without the flag, the own core uses `euc_sim::cpu::DEFAULT_TIMING` (fixed) and Unicorn uses fixed.
+- Rust callers use `Backend::factory_with(Timing)` and `Timing::exception_timing()`.
+  `Backend::factory()` keeps the default.
+- The JSON output names the timing in `timing`.
+  A recording header stores `timing`, and stores `cpi` only for the fixed timing.
+- Unicorn has no timing model, so `--cpu unicorn --timing flash` is refused.
+- Every timing keeps the exception costs below: 12 + W cycles for entry and return, 6 + W for a tail-chain.
+  W is 2 for the fixed timing and the flash timing's wait states otherwise.
+
+## Fixed timing (stage A)
 
 `euc sim run`, `sim compare`, `sim serve`, and the app share `DEFAULT_CPI = 2.0`.
 Both CPU backends use the same exception costs:
@@ -73,6 +92,108 @@ See [watchdog-and-overcurrent.md](../../firmware/docs/watchdog-and-overcurrent.m
 Evidence tags as elsewhere: **OBSERVED** = measured in the simulator or in a real recording;
 **INFERRED** = follows from the code or the measurements; **ESTIMATE** = a model or a figure from
 outside the project.
+
+## Flash timing (stage B)
+
+`euc_armv7m::Flash` and `FlashPipe` (`crates/euc-armv7m/src/timing.rs`) time every retired instruction.
+The core still counts its zero-wait Cortex-M3 TRM costs as before.
+The flash model then delays them as the STM32F1 flash interface does
+([RM0008](https://www.st.com/resource/en/reference_manual/rm0008-stm32f103xx-advanced-armbased-32bit-mcus-stmicroelectronics.pdf) section 3.3.3, "Read interface").
+The firmware sets `LATENCY` 2 and `PRFTBE` before it raises HCLK to 72 MHz (OBSERVED).
+The model applies two wait states from reset, because the engine also runs HCLK at 72 MHz from reset.
+
+| Rule | Source |
+|---|---|
+| The array reads one 64-bit line in W + 1 HCLK cycles and finishes a read once it has started. | RM0008 3.3.3 (latency); not aborting a started read is an **ESTIMATE** |
+| The prefetch buffer holds two lines: the current line and the next one. The next line is read back to back after a miss, otherwise when the core leaves the older line. | RM0008 3.3.3 ("2 blocks", "read request when at least one block is free") |
+| A taken branch into the current or the prefetched line is served from the buffer. Any other target is a demand read, which replaces a prefetch that has not started. | INFERRED from RM0008 3.3.3 |
+| Data reads from flash (literal pools, `TBB`/`TBH` tables, constants, data flash) go before a prefetch that has not started and wait for a read in progress. | RM0008 3.3.3 ("DCode accesses have priority over prefetch accesses") |
+| A line serves an instruction one decode cycle after its read completes, so W = 0 reproduces the TRM costs, including the refill P = 2. | Cortex-M3 TRM table 18-1; a unit test checks the equality |
+| Fetches and loads outside the flash array see no wait states. | RM0008 |
+| Exception entry and return cost 12 + W, a tail-chain 6 + W, charged by the engine as before. | Cortex-M3 TRM; the W is an **ESTIMATE** |
+
+The model is deterministic and uses only integer cycles.
+Its clock does not depend on how the engine splits a program into runs; a test checks this.
+With the model on, the machine gives each quantum a cycle limit at the next event instead of an instruction budget from the CPI.
+The quantum lasts the cycles that the model counted.
+The model changes no architectural result.
+The decoder, the executor and the lock-step results are those of the fixed timing.
+
+Not modelled: peripheral bus wait states (AHB to APB bridges), bus contention with DMA, and the Cortex-M3 core's own fetch queue.
+The real core's branch speculation changes the zero-wait refill P only, not the wait states a missed target adds.
+
+On the idle stock firmware with the owner's settings, the model gives these cycles per instruction.
+They were OBSERVED over 10 s with a private counter build, which is not in the tree.
+
+| Context | TRM, zero wait | Flash model, W = 2 | Stall per instruction: sequential, branch, data |
+|---|---:|---:|---|
+| Thread (`led_strip_effects`) | 1.64 | 2.00 | 0.10, 0.26, 0.01 |
+| RTC tick | 1.52 | 2.10 | 0.20, 0.29, 0.09 |
+| ADC1_2 and TIM8_UP | 1.71 | 2.22 | 0.08, 0.26, 0.17 |
+
+Taken branches miss the buffer in 64-84 % of cases.
+The thread code averages the fixed timing's CPI 2.0, but the interrupt code is 5-11 % slower than in the fixed timing.
+
+## Validation against the owner's wheel
+
+`crates/euc-armv7m/tests/stock_cadence.rs` boots the stock image idle with the owner's preset (`tarik-2026-10-15`, LED mode 1).
+It measures the tail-light breathing period from the LED strip output and the BLE frame-group period from the telemetry.
+The real references are one video cycle (2.1 ± 0.2 s, ESTIMATE) and the 25 s idle capture (76 groups, 309.6 ms, OBSERVED).
+Each simulated run lasts 30 s, so the means cover 8-15 breathing periods and about 90 groups.
+
+| Timing | Breathing period | BLE group period | Lost RTC ticks | Interrupt share |
+|---|---:|---:|---:|---:|
+| Fixed, CPI 1.8 | 1.619 s | 304.44 ms | 0 % | 50.0 % |
+| **Fixed, CPI 2.0 (default)** | **2.234 s** (2.18-2.32) | **307.45 ms** | 0.99 % | 55.3 % |
+| Fixed, CPI 2.2 | 2.787 s | 307.47 ms | 0.99 % | 60.7 % |
+| Flash, W = 0 | 1.474 s | 304.41 ms | 0 % | 45.9 % |
+| Flash, W = 1 | 1.776 s | 304.45 ms | 0.01 % | 51.1 % |
+| **Flash, W = 2** | **2.515 s** (2.48-2.59) | **307.45 ms** | 0.99 % | 60.0 % |
+| Flash, W = 3 | 4.454 s | 310.46 ms | 1.96 % | 72.1 % |
+| Owner's wheel | 2.1 ± 0.2 s | 309.6 ms | about 1.7 % | unknown |
+
+- **Breathing.** The fixed timing lies inside the video's band (+0.13 s).
+  The flash timing lies 0.42 s above it, about 20 % slow.
+  Its slower interrupt code takes main-loop time, and the breathing period scales with the main-loop passes per tick.
+- **BLE.** Both timings lose one RTC tick per display refresh and give the same 307.45 ms, 0.7 % short of the capture.
+  The capture implies about 1.7 lost ticks per 100.
+  The real display refresh must therefore last close to the two-tick threshold, longer than either model predicts.
+  W = 3 crosses that threshold, but it is not the hardware setting and makes the breathing twice as slow as the video.
+- **Decision.** The fixed timing is better validated, so it stays the default.
+  The flash timing stays selectable for timing studies and as a second timing estimate.
+  Neither model reproduces both measurements, and the flash model has no free parameter to fit: W = 2 is the firmware's setting.
+- **Data that would settle it.** A 20 s tripod video with the LED mode noted would give the breathing period to about 2 %.
+  A logic-analyser trace of one GPIO toggled by a test build would give the FOC and tick handler durations directly.
+  A second BLE capture would confirm the lost-tick rate.
+
+The cadence test asserts that the default timing stays inside the video band and within 1 % of the capture period.
+It prints both timings' numbers.
+
+## Scenario robustness on stock
+
+All 20 shipped scenarios ran on stock at quanta 4000, 3000 and 2000 with both timings, from `63801a2` plus these changes.
+The fixed-timing reports match the accepted baseline (`target/fw-scratch/resume-accepted/matrix/`) byte for byte, except wall time.
+
+| Result per quantum, both timings | Scenarios |
+|---|---|
+| Pass | `balance-60s`, `coasting-stop`, `downhill-cruise-2pct`, `full-effort-70kmh-stop-soc100`, `hall-loss-while-riding`, `hall-single-line-loss`, `hard-braking-30kmh`, `hill-climb-low-battery`, `low-battery-tiltback`, `overlean-no-pwm-tiltback`, `pothole-20kmh`, `pothole-5cm-20kmh`, `ride-20kmh-stop`, `rider-steps-off-15kmh`, `rider-steps-off-5kmh` |
+| Fail, as in the accepted baseline | `ble-service-cut-standing`, `full-effort-70kmh-stop-soc20`, `full-effort-70kmh-stop-soc50`, `overlean-top-speed`, `overlean-top-speed-30pct` |
+
+The flash timing therefore changes no stock verdict at any of the three quanta.
+Quanta 4000 and 2000 produce bit-identical reports in both timings (OBSERVED for every scenario).
+The three-quantum check therefore tests two distinct trajectories, not three.
+Quantum 3000 and the finer quanta in [the SOC50 study](soc50-full-run-equivalence.md) give distinct trajectories.
+
+## Unicorn and the flash timing
+
+Unicorn stays the instruction oracle.
+`crates/euc-armv7m/tests/lockstep.rs` adds `stock_image_keeps_lockstep_under_the_flash_timing_model`.
+In it, Unicorn executes, the shadow core runs the flash model, and the machine takes its time from the shadow's clock.
+Over 6 simulated seconds it compares 455,103 quanta and 173 M instructions with **0 divergences**.
+The fixed-timing lock-step tests also pass unchanged (30 s: 704,013 quanta, 1.66 G instructions, 0 divergences).
+A run with `--cpu unicorn` always uses the fixed timing, so its trajectory differs from a flash-timed own-core run.
+
+The flash model costs speed: the idle stock firmware runs at 3.04 times real time against 3.79 with the fixed timing (release build, loaded machine).
 
 ## Previous scenario validation
 
@@ -235,13 +356,16 @@ Not modeled, small (ESTIMATE, not checked): the RTC `RTOFF` wait after clearing 
 
 ## Next steps
 
-1. **Per-instruction model** in `euc-armv7m` (the flash model above), with the machine taking
-     quantum time from the core. It is more faithful when the code mix changes (delay loops,
-     soft-float, our own firmware). Unicorn has no model, so its timing would then differ from our
-     core's. It needs a cycle budget in `Cpu::run`, or a CPI estimate for the budget.
-2. Better real data: a 20 s video on a tripod with the LED mode noted (period to ±2 %), and a
-   second BLE capture. Both pin W between 2 and 3.
-3. If the project wants a profiler, add an `euc sim profile` command, built from the prototype.
+1. Done (stage B): the per-instruction model is in `euc-armv7m` with `Cpu::model_cycles` and
+   `Cpu::run_for`, and the machine takes quantum time from it. It is selectable, not the default; see
+   [Validation against the owner's wheel](#validation-against-the-owners-wheel). The stage B model
+   refines the prototype above: line-granular prefetch, buffer hits, and arbitration with reads in progress.
+2. Better real data: a 20 s video on a tripod with the LED mode noted (period to ±2 %), a second BLE
+   capture, and a logic-analyser trace of handler durations from a test build.
+3. MMIO accesses still see the quantum's start time (`System::now()`), with either timing. The flash
+   model's clock could time each access exactly. That change would alter every accepted baseline, so
+   it needs its own validation.
+4. If the project wants a profiler, add an `euc sim profile` command, built from the prototype.
 
 Prototype tools: private research repo, `research/timing-proto/` (the single-step profiler, the
 flash-model prototype and the analysis scripts, with a README on how to run them).

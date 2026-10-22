@@ -19,7 +19,7 @@ let cpu = unsafe { euc_armv7m::Armv7m::new(regions) }?;
 | `src/exec.rs` | one `Op`, following the A7 / B5.2 pseudocode; loads, stores and the bus |
 | `src/alu.rs` | `AddWithCarry`, `Shift_C`, `ThumbExpandImm_C`, `SignedSatQ`, `UnsignedSatQ` |
 | `src/it.rs` | condition codes and `ITSTATE` |
-| `src/timing.rs` | Cortex-M3 TRM r2p1 cycle counts (`Armv7m::cycles`) |
+| `src/timing.rs` | Cortex-M3 TRM r2p1 cycle counts (`Armv7m::cycles`), and the STM32F1 flash timing model (`Flash`, `FlashPipe`; on with `Armv7m::set_flash`) |
 | `src/mem.rs` | regions, the decode cache (one slot per halfword, invalidated by our own stores and by `Cpu::invalidate`), and the crate's only `unsafe` |
 | `src/lib.rs` | `Armv7m`, the run loop, register sync, exception returns, watches |
 
@@ -46,7 +46,9 @@ Choices where the ARM ARM leaves the behaviour to the implementation follow the 
 | Unit tests (`src/`) | `AddWithCarry`, `Shift_C` at 0/32/33, `ThumbExpandImm_C`, saturation, ITSTATE, decoder tables (encodings checked against `llvm-mc`) | 17 tests |
 | `tests/encodings.rs` | per-instruction behaviour from the ARM ARM: flags, shift edges, IT blocks across runs, `Align(PC, 4)`, alignment rules, LDM write-back, interworking, exception returns, multiply/divide, saturation, bit fields, special registers and stack banking, the monitor, the `Exit` contract, MMIO splitting, self-modifying code, watches, cycle counts | 28 tests |
 | `tests/fuzz_unicorn.rs` | differential fuzzing against Unicorn, one case = random state and RAM plus one instruction (half fully random, half from per-group templates), sometimes inside an IT block or as an `LDREX`/`STREX` pair; compares exit, all registers, flags, IT state, RAM and MMIO effects | final core: 10 M cases over ten seeds, 9.2 M compared (the rest UNPREDICTABLE encodings, skipped), **0 unexplained divergences**; about 0.96 M explained ones, all in the classes below |
-| `tests/lockstep.rs` | the stock Begode Extreme image boots on Unicorn while our core shadows every quantum on a copy of memory, with Unicorn's bus traffic replayed; registers, memory and bus traffic compared after each quantum | 30 s simulated: 701,930 quanta, 1.65 G instructions, 11.3 M bus calls, 1.19 M exception returns, **0 divergences** |
+| `tests/lockstep.rs` | the stock Begode Extreme image boots on Unicorn while our core shadows every quantum on a copy of memory, with Unicorn's bus traffic replayed; registers, memory and bus traffic compared after each quantum. A third test times the machine by the shadow core's flash model. | 30 s simulated: 704,013 quanta, 1.66 G instructions, 11.2 M bus calls, 1.19 M exception returns, **0 divergences**; flash-timed 6 s: 455,103 quanta, 173 M instructions, **0 divergences** |
+| `tests/flash_timing.rs` | the flash timing model: zero wait states equal the TRM costs, buffered loops, branch misses, D-Code reads, fetch-bound 32-bit code, cycle limits, and a clock independent of how runs are split | 8 tests |
+| `tests/stock_cadence.rs` | the stock image idle with the owner's settings under both timings: tail-light breathing and BLE frame-group periods against the owner's video and capture | fixed 2.234 s / 307.45 ms, flash 2.515 s / 307.45 ms (real 2.1 ± 0.2 s / 309.6 ms) |
 | `tests/stock_boot.rs` | the stock image on our core alone: the Unicorn backend's boot assertions (`main` at 0.069 ms, first frame at 2.00 s, `V` and `N` replies, 40 frames in 6 s), and 30 s with no blocker | pass |
 
 ```text
@@ -106,3 +108,9 @@ Apple M3 Max, release build:
 The cycle model is the Cortex-M3 TRM's at zero flash wait states, with three choices where the
 TRM gives a range: pipeline refill `P = 2`, early-terminating multiplies and divides spread over
 their operand sizes, and load/store single pipelining with a neighbour.
+
+`Armv7m::set_flash(Some(Flash::STM32F1_72MHZ))` adds the STM32F1 flash interface on top: two
+wait states, the two-line prefetch buffer, and D-Code reads. `Cpu::model_cycles` then reports its
+clock, and `Cpu::run_for` stops a run at a cycle limit. The engine selects it with
+`--timing flash`; the fixed CPI 2.0 stays the default ([CPU timing](../../docs/models/cpu-timing.md)).
+The model changes no architectural result and costs about 20 % of the interpreter's speed.
