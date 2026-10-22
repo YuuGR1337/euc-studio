@@ -6,15 +6,17 @@ import {
   BATCH_HEADER_BYTES,
   BATCH_MAGIC,
   BATCH_VERSION,
+  CH,
   CHANNELS,
   POSE_FLOATS,
 } from "../src/engine/telemetry.gen.ts";
 
-// The whole studio (LiveEngine, the visual frame, LiveBodies, the Ride scene) in a real WebGL
-// canvas. Only LiveEngine's transport is a controlled fixture (fixtures/live-wire.ts), so the
+// The whole studio (LiveEngine, LiveCompare, the visual frame, LiveBodies, the Ride scene) in a
+// real WebGL canvas. Only their transport is a controlled fixture (fixtures/live-wire.ts), so the
 // spec delivers messages and batches in the order Tauri does. Tauri runs a small batch (under
 // 1 KiB) at once but fetches a JSON message of 8 KiB or more: the stock run's body list is about
-// 8.5 KiB, so after a reload the one-sample batch of a finished run arrives before its bodies.
+// 8.5 KiB, so after a reload the one-sample batch of a finished run arrives before its bodies, and
+// a comparison's first batches arrive before its reset (both body lists, about 17 KiB).
 const root = fileURLToPath(new URL("..", import.meta.url));
 const fixture = fileURLToPath(new URL("./fixtures/live-wire.ts", import.meta.url));
 const IN_TAURI =
@@ -74,13 +76,19 @@ test.beforeAll(async () => {
         name: "controlled-live-engine",
         enforce: "pre",
         resolveId(id, importer) {
-          if (id === "@tauri-apps/api/core" && importer?.endsWith("/engine/live.ts"))
+          if (
+            id === "@tauri-apps/api/core" &&
+            (importer?.endsWith("/engine/live.ts") || importer?.endsWith("/engine/compareLive.ts"))
+          )
             return fixture;
         },
         transform(code, id) {
-          if (!id.endsWith("/src/engine/index.ts")) return;
-          // The live engine, as in the desktop app; the rest of the app stays a browser build.
-          if (!code.includes(IN_TAURI)) throw new Error("engine/index.ts changed its Tauri check.");
+          const engine = ["/src/engine/index.ts", "/src/engine/compare.ts"].find((f) =>
+            id.endsWith(f),
+          );
+          if (!engine) return;
+          // The live engines, as in the desktop app; the rest of the app stays a browser build.
+          if (!code.includes(IN_TAURI)) throw new Error(`${engine} changed its Tauri check.`);
           return code.replace(IN_TAURI, "const inTauri = true;");
         },
       },
@@ -107,17 +115,25 @@ function send(page: Page, message: unknown) {
   return page.evaluate((m) => window.liveWire.messages?.(m), message);
 }
 
-/** One sample at `t` with the poses of FINAL, as crates/euc-telemetry lays out a batch. */
-function sendBatch(page: Page, t: number) {
+/**
+ * One sample at `t` with the poses of FINAL and `speed` (other channels 0), as
+ * crates/euc-telemetry lays out a batch: to the ride's stream, or to a comparison's run A or B.
+ */
+function sendBatch(
+  page: Page,
+  t: number,
+  { to = "stream", speed = 0 }: { to?: "stream" | "a" | "b"; speed?: number } = {},
+) {
   const poses = BODIES.flatMap(([name]) => [...(FINAL[name] ?? [0, 0, 0]), 1, 0, 0, 0]);
   const layout = {
     header: [BATCH_MAGIC, BATCH_VERSION, BATCH_FLAG_POSES, BATCH_HEADER_BYTES],
     channels: CHANNELS.length,
+    speedLane: CH.speed_kmh,
     bodies: BODIES.length,
     poseFloats: POSE_FLOATS,
   };
   return page.evaluate(
-    ({ t, poses, layout }) => {
+    ({ t, poses, layout, to, speed }) => {
       const [magic, version, flags, headerBytes] = layout.header as [
         number,
         number,
@@ -136,11 +152,13 @@ function sendBatch(page: Page, t: number) {
       view.setUint32(20, 0, true);
       view.setUint32(24, 0, true);
       view.setFloat64(headerBytes, t, true);
-      new Float32Array(buffer, headerBytes + 8, layout.channels).fill(0);
+      const lanes = new Float32Array(buffer, headerBytes + 8, layout.channels).fill(0);
+      lanes[layout.speedLane] = speed;
       new Float32Array(buffer, headerBytes + 8 + 4 * layout.channels).set(poses);
-      window.liveWire.stream?.(buffer);
+      if (to === "stream") window.liveWire.stream?.(buffer);
+      else window.liveWire.compare?.[to](buffer);
     },
-    { t, poses, layout },
+    { t, poses, layout, to, speed },
   );
 }
 
@@ -220,4 +238,54 @@ test("hides bodies until a frame of them arrives, never at the origin", async ({
   expect((await drawnBodies(page)).find((b) => b.name === "left_foot")?.at).toEqual([
     80, 0.1, 0.307,
   ]);
+});
+
+/** What a comparison's runs hold: sample times, speeds and the latest frame's float count. */
+function compareRuns(page: Page) {
+  return page.evaluate(async (url) => {
+    type Ring = { toArray(): Float64Array };
+    type Run = { time: Ring; channels: { speed: Ring }; latest: { poses: Float32Array | null } };
+    // The app's own module instance: the dev server serves it once under this URL.
+    const { compare } = (await import(/* @vite-ignore */ url)) as { compare: { a: Run; b: Run } };
+    const read = (run: Run) => ({
+      t: Array.from(run.time.toArray()),
+      speed: Array.from(run.channels.speed.toArray()),
+      poses: run.latest.poses?.length ?? 0,
+    });
+    return { a: read(compare.a), b: read(compare.b) };
+  }, "/src/engine/compare.ts");
+}
+
+test("a comparison keeps the samples that came before its reset", async ({ page }) => {
+  await page.goto(base.replace("#/ride", "#/compare"));
+  await expect(page.getByTestId("compare-viewport")).toHaveAttribute("data-scene", "ready", {
+    timeout: 60_000,
+  });
+  await page.getByRole("button", { name: "Run", exact: true }).click();
+  await expect.poll(() => page.evaluate(() => !!window.liveWire.compare)).toBe(true);
+  // In real time a batch holds one sample (about 380 bytes) and runs at once; the reset, with
+  // both body lists, is fetched and comes after the first batches.
+  await sendBatch(page, 0.02, { to: "a", speed: 1 });
+  await sendBatch(page, 0.02, { to: "b", speed: 2 });
+  await sendBatch(page, 0.04, { to: "a", speed: 3 });
+  await page.evaluate((reset) => window.liveWire.compare?.messages(reset), {
+    type: "reset",
+    scenario: "ride-20kmh-stop",
+    duration_s: 40,
+    stream_hz: 50,
+    a: { spec: "stock", label: "Stock", sha256: "fixture-a", checks_skipped: [] },
+    b: { spec: "ours-compat", label: "Ours-compat", sha256: "fixture-b", checks_skipped: [] },
+    bodies_a: bodies,
+    bodies_b: bodies,
+    terrain: null,
+    tolerance_file: "fixture.toml",
+    tolerance_note: null,
+  });
+  await sendBatch(page, 0.06, { to: "a", speed: 5 });
+  await sendBatch(page, 0.04, { to: "b", speed: 4 });
+  const frame = BODIES.length * POSE_FLOATS;
+  expect(await compareRuns(page)).toEqual({
+    a: { t: [0.02, 0.04, 0.06], speed: [1, 3, 5], poses: frame },
+    b: { t: [0.02, 0.04], speed: [2, 4], poses: frame },
+  });
 });
