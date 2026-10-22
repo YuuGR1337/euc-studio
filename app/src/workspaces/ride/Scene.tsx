@@ -147,8 +147,9 @@ function Lights() {
         shadow-camera-bottom={-2}
         shadow-bias={-0.0004}
       />
-      {/* Warm rim from behind separates the dark shell from the black background. */}
-      <directionalLight position={[-2.5, 1.6, -2.2]} intensity={2.2} color="#FFB27A" />
+      {/* Rim from behind separates the dark shell from the black background; neutral, so the
+          model keeps the colours of the owner's photos. */}
+      <directionalLight position={[-2.5, 1.6, -2.2]} intensity={2.2} color="#FFFFFF" />
       <directionalLight position={[-1, 0.8, 3]} intensity={0.5} color="#CDE8FF" />
       {/* Studio softboxes built in-scene: no HDR download, works offline. */}
       <Environment resolution={256} frames={1}>
@@ -173,7 +174,7 @@ function Lights() {
           rotation-y={-Math.PI / 2}
           scale={[4, 1.5, 1]}
         />
-        <Lightformer form="ring" intensity={0.8} color="#FF7A1A" position={[0, 1, -5]} scale={2} />
+        <Lightformer form="ring" intensity={0.8} color="#FFFFFF" position={[0, 1, -5]} scale={2} />
       </Environment>
     </>
   );
@@ -234,8 +235,9 @@ export function Scene({ active, map, onReady, onFirstFrame }: SceneProps) {
       onCreated={({ gl, get }) => {
         // Dev builds: scripts and agents reach the scene (camera, controls) without clicks.
         if (import.meta.env.DEV) Object.assign(window, { __eucScene: get });
-        gl.toneMapping = THREE.ACESFilmicToneMapping;
-        gl.toneMappingExposure = 1.05;
+        // Neutral keeps hues: ACES turned the orange handle red (measured against the owner's photos).
+        gl.toneMapping = THREE.NeutralToneMapping;
+        gl.toneMappingExposure = 1.5;
         const renderer = rendererName(gl.getContext());
         const chosen = chooseQuality(renderer, override);
         setQuality(chosen);

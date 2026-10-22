@@ -301,7 +301,9 @@ the scan (the tools live in the private research folder):
    frame top (x -113 mm) up through the roller axis to the grip bolt, with three through-windows on
    the lower part and a blind pocket on the upper part; the windows, the foot and the grip (63.5 mm
    past the roller axis) are MEASURED on the cover-off photo (camera pose from scan points), the
-   outer face at |y| 58.7 mm on the scan, the black grip bar (26 mm) is an ESTIMATE. The scanned faces these models
+   outer face at |y| 58.7 mm on the scan, the black grip bar (26 mm) is an ESTIMATE. The physics'
+   collision solid for the grip (`[collision] rear_handle_grip`) keeps the earlier estimate, about
+   30 mm higher than the photo's grip; the rider rarely touches it. The scanned faces these models
    replace are removed; what remains of the scan there (brackets, a sloped base plate) is cleaned
    (loose flaps under 150 mm2 dropped, holes closed, smoothed). The roller is cut out of the seat
    before decimation, and its end caps (speakers) are modelled from their measured profile.
@@ -317,7 +319,12 @@ the scan (the tools live in the private research folder):
    (a tileable grain normal map on LOD0 and LOD1), black rubber tire, matte black motor covers, orange
    flange ring, textured matte black linkage plates, smoked grey tail-light sleeves (they glow with
    the LEDs in the studio), satin aluminium handle tube, black anodised pedals with gold pins,
-   smoked display window. Ambient occlusion is baked into the vertex colours.
+   smoked display window. Ambient occlusion is baked into the vertex colours. The anodised orange
+   is set from the owner's photo (mean sRGB 184, 91, 47 on the handle). Under the studio's lights
+   (neutral tone mapping, neutral rim light) the handle, the chrome bolt heads and the shell render
+   within 26, 51 and 13 sRGB units of the photo's mean colours in the same view; with the earlier
+   ACES tone mapping and warm lights they were 91, 206 and 43 units off (the handle red, the chrome
+   copper, the shell brown).
 
 ## Open
 
