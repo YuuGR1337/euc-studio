@@ -81,6 +81,13 @@ The case reaches the specified stopping band, rather than a permanently motionle
 Clean never starts a full-battery braking phase in this matrix.
 Its timeout proves neither a cutoff nor successful braking.
 
+The compat full-battery verdict is borderline.
+The matrix above ran on macOS arm64.
+On the Linux x86-64 CI runner at the default quantum, compat cut during braking at 21.51 s.
+Stock completed all five gates on that runner.
+Even the passing macOS runs differ by 3.9 km/h and 26° of pitch during braking.
+The compare tolerance file therefore skips verdict equality for this case and judges samples only through 9.0 s.
+
 ### The unresolved 50% SOC difference
 
 | Quantum | Stock | Compat | Clean |
