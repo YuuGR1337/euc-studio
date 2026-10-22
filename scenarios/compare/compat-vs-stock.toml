@@ -105,8 +105,8 @@ until_s = 19.5
 same_checks = false
 
 [scenario.pothole-5cm-20kmh]
-note = "As pothole-20kmh with a 5 cm hole: the far edge (about 19.8 s) parts the runs within 0.1 s (pitch up to 4.9° apart at 20.03 s). Judged until the impact; both ride through on a clipped gyro, and the checks still compare."
-until_s = 19.5
+note = "As pothole-20kmh with a 5 cm hole, judged until the impact; both ride through on a clipped gyro, and the checks still compare. The impact starts at 19.46 s: the suspension compresses and the currents and the pack voltage part from there (Linux x86-64 CI, constant linkage ratio 1.7, articulated rider: battery 0.92 V apart at 19.47 s; macOS arm64 with the rocker curve: 0.60 km/h and 0.64 V at quanta 4000 and 2000). Until 19.45 s the runs stay within 0.23 km/h and 0.08 V, so the window ends there. The far edge (about 19.8 s) parts them further (pitch up to 4.9 degrees apart at 20.03 s)."
+until_s = 19.45
 
 [scenario.rider-steps-off-15kmh]
 note = "After the step-off at 15 s the riderless wheel tips over on its own, and a few cycles of timing change how it rolls (roll up to 15° apart). Judged until the step-off; the checks (cut, roll past 40°) still compare."
