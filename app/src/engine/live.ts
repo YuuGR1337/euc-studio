@@ -209,6 +209,21 @@ export class LiveEngine implements EngineClient {
     return this.poseHistory.sample(out, wallNowMs, this.measuredRtf());
   }
 
+  /**
+   * A new body list or run starts the visual history again, from the newest raw frame when it
+   * fits the bodies. That frame can come first: Tauri fetches a JSON message of 8 KiB or more
+   * (the stock body list) but runs a small batch at once, and the pump sends the status after a
+   * tick's batch. A finished or paused run sends no other frame.
+   */
+  private restartPoses(): void {
+    this.poseHistory.reset(this.bodies.length);
+    this.poseBatchSeq = null;
+    this.poseStepPending = false;
+    const raw = this.latest.poses;
+    if (raw && raw.length === this.bodies.length * POSE_FLOATS)
+      this.poseHistory.push(this.latest.t, raw, 0, performance.now());
+  }
+
   private async connect(): Promise<void> {
     const stream = new Channel<ArrayBuffer>((buffer) => this.onBatch(buffer));
     const messages = new Channel<Message>((message) => this.onMessage(message));
@@ -311,9 +326,7 @@ export class LiveEngine implements EngineClient {
         break;
       case "status": {
         if (this.status.runEpoch !== undefined && this.status.runEpoch !== m.run_epoch) {
-          this.poseHistory.reset(this.bodies.length);
-          this.poseBatchSeq = null;
-          this.poseStepPending = false;
+          this.restartPoses();
         }
         this.status = {
           runMode: m.run_mode,
@@ -357,9 +370,7 @@ export class LiveEngine implements EngineClient {
         break;
       case "bodies":
         this.bodies = m.bodies;
-        this.poseHistory.reset(this.bodies.length);
-        this.poseBatchSeq = null;
-        this.poseStepPending = false;
+        this.restartPoses();
         break;
       case "display":
         this.display = m.layout;
