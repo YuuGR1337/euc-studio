@@ -286,11 +286,11 @@ static uint8_t at_full_brightness(uint8_t colour)
 static void test_pattern_1_matches_72_wheel_steps_at_every_ring_position(void)
 {
     static const uint8_t side_a[12] = {8U, 9U, 10U, 11U, 12U, 1U, 2U, 3U, 4U, 5U, 6U, 7U};
-    for (int16_t ring = 0; ring <= 73; ring++) {
+    for (uint16_t ring = 0U; ring <= 73U; ring++) {
         struct euc_strip_state state;
         euc_strip_init(&state);
         state.update = true;
-        state.ring = ring;
+        state.ring = (int16_t)ring;
         for (uint32_t render = 0U; render < 3U; render++) {
             const struct euc_strip_render_in in = {(uint16_t)(10U + render), 15U, 0.0F, 1U};
             euc_strip_render(&state, &in);
