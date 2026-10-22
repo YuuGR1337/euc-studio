@@ -1,15 +1,24 @@
 // The Begode Extreme's rear linkage in its plane (the model's frame: x forward, y up, metres): the
 // current one from the owner's photos; the scan shows an older system. The carriage carries the
-// shock's bottom eye and, above it, the link's lower pin; the link joins that pin to the rocker
-// pin, and the rocker turns about its frame pivot and carries the shock's top eye.
-// docs/hardware/geometry.md ("Rear linkage") has the evidence (both carriage points are INFERRED);
-// the positions are geometry.toml's `[suspension] linkage_pivots_xz_m` and the GLB's node origins.
+// shock's bottom eye; the rocker turns about its frame pivot and carries the shock's top eye; a
+// link joins the rocker pin to a lower pin. docs/hardware/suspension-linkage.md keeps two readings
+// open until a seat-press video: the lower pin rides on the carriage and the rocker turns (a), or
+// it is on the frame and the rocker is a fixed shock bracket (b). The positions are geometry.toml's
+// `[suspension] linkage_pivots_xz_m` and the GLB's node origins.
 
 import * as THREE from "three";
 
 const DEG = Math.PI / 180;
 /** The slider rods lean 0.13° with the top to the rear (geometry.toml `[suspension]`). */
 const ROD_LEAN = -0.13 * DEG;
+
+/**
+ * Which reading the drawing follows: "turning" (a: the link's lower pin rides on the carriage, the
+ * rocker turns) or "fixed" (b: the lower pin is on the frame, only the shock's bottom eye moves).
+ * Switch here once the seat-press video decides.
+ */
+export type LinkageReading = "turning" | "fixed";
+export const LINKAGE_READING: LinkageReading = "turning";
 
 /** A point in the linkage plane: x forward, y up, metres. */
 export type P2 = readonly [number, number];
@@ -24,7 +33,7 @@ export interface LinkageRest {
   topEye: P2;
   /** Shock bottom eye, on the carriage. */
   bottomEye: P2;
-  /** Link lower pin, on the carriage (moves with the bottom eye). */
+  /** Link lower pin: on the carriage in the turning reading, on the frame in the fixed one. */
   linkBottom: P2;
 }
 
@@ -53,17 +62,34 @@ function turn(p: P2, about: P2, by: number): P2 {
 }
 
 /**
- * The linkage with the axle `travel` metres up the rods from full extension: the rocker pin is
- * where the circle about the rocker pivot meets the circle of the link's length about the moved
- * link pin, on the same side as at rest. Null when the link cannot reach.
+ * The linkage with the axle `travel` metres up the rods from full extension. Turning: the rocker
+ * pin is where the circle about the rocker pivot meets the circle of the link's length about the
+ * moved link pin, on the same side as at rest; null when the link cannot reach. Fixed: the rocker
+ * and the link stay, and the shock spans the fixed top eye and the moved bottom eye.
  */
-export function poseLinkage(rest: LinkageRest, travel: number): LinkagePose | null {
+export function poseLinkage(
+  rest: LinkageRest,
+  travel: number,
+  reading: LinkageReading = LINKAGE_READING,
+): LinkagePose | null {
   const { pivot, rockerPin, topEye, bottomEye, linkBottom } = rest;
   const up = (p: P2): P2 => [
     p[0] + travel * Math.sin(ROD_LEAN),
     p[1] + travel * Math.cos(ROD_LEAN),
   ];
   const bottom = up(bottomEye);
+  if (reading === "fixed") {
+    return {
+      rocker: 0,
+      rockerPin,
+      topEye,
+      bottomEye: bottom,
+      linkBottom,
+      link: 0,
+      shock: angle(bottom, topEye) - angle(bottomEye, topEye),
+      length: distance(bottom, topEye),
+    };
+  }
   const lower = up(linkBottom);
   const r1 = distance(pivot, rockerPin);
   const r2 = distance(linkBottom, rockerPin);
@@ -99,9 +125,9 @@ const spin = new THREE.Quaternion();
  * The model's linkage parts, all children of "body". The contract with the GLB (its README):
  * "shock" has its origin on the top eye and its local +y from the bottom eye to the top eye;
  * "shock_mount" (the carriage's rear arm) has its origin on the bottom eye, "rocker" on its frame
- * pivot, "link" on the rocker pin and the empty "link_bottom" on the link's lower pin (a model
- * without it has the link on the bottom eye's shaft). Their rest positions are the linkage at full
- * extension.
+ * pivot, "link" on the rocker pin and "link_bottom" (the lower pin and its plates) on the link's
+ * lower pin (a model without it has the link on the bottom eye's shaft). Their rest positions are
+ * the linkage at full extension.
  */
 export interface ShockRig {
   root: THREE.Object3D;
@@ -152,22 +178,22 @@ export function shockRig(root: THREE.Object3D): ShockRig | null {
 
 /**
  * Poses the linkage for the axle travel (metres from full extension): the carriage's clevis slides
- * up the rods, the rocker turns, the link follows, and the shock spans its two eyes. Its length is
- * the drawn linkage's; it matches the engine's shock channel only once the profile's ratio_curve
- * is this linkage's curve (until then they differ by up to 9 mm). Travel the link cannot reach
- * keeps the last pose.
+ * up the rods, the rocker turns (turning reading), the link follows, and the shock spans its two
+ * eyes. Its length is the drawn linkage's; it matches the engine's shock channel only once the
+ * profile's ratio_curve is this linkage's curve (until then they differ by up to 9 mm in the
+ * turning reading). Travel the link cannot reach keeps the last pose.
  */
-export function poseShock(rig: ShockRig, travelM: number) {
-  const pose = poseLinkage(rig.rest, travelM);
+export function poseShock(
+  rig: ShockRig,
+  travelM: number,
+  reading: LinkageReading = LINKAGE_READING,
+) {
+  const pose = poseLinkage(rig.rest, travelM, reading);
   if (!pose) return;
   const { mount, rocker, link, shock, rest } = rig;
   const [dx, dy] = [pose.bottomEye[0] - rest.bottomEye[0], pose.bottomEye[1] - rest.bottomEye[1]];
   mount.position.set(rig.mountRest.x + dx, rig.mountRest.y + dy, rig.mountRest.z);
-  rig.linkBottom?.position.set(
-    rest.linkBottom[0] + dx,
-    rest.linkBottom[1] + dy,
-    rig.linkBottom.position.z,
-  );
+  rig.linkBottom?.position.set(pose.linkBottom[0], pose.linkBottom[1], rig.linkBottom.position.z);
   rocker.quaternion.copy(spin.setFromAxisAngle(Z, pose.rocker)).multiply(rig.rockerRest);
   link.position.set(pose.rockerPin[0], pose.rockerPin[1], link.position.z);
   link.quaternion.copy(spin.setFromAxisAngle(Z, pose.link)).multiply(rig.linkRest);

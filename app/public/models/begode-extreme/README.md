@@ -69,7 +69,7 @@ begode-extreme
    ├─ shock_links        the rocker's pivot pin and its two frame blocks (static)
    ├─ shock_mount        the carriage's clevis and bottom shaft, the plates and pin for the link:
    │                     moves with the axle
-   ├─ link_bottom        empty: on the link's lower pin (moves with shock_mount)
+   ├─ link_bottom        the link's lower pin and its plates, origin on the pin
    ├─ rocker             both rocker plates, the top-eye and rocker-pin cross tubes and spacers,
    │                     chrome bolt heads: turns about z
    ├─ link               both link plates: turns about z on the rocker pin
@@ -85,12 +85,14 @@ begode-extreme
   `shock_mount` has its origin on the bottom eye, `link_bottom` on the link's lower pin, `rocker`
   on its frame pivot and `link` on the rocker pin; at rest the five origins are the linkage at full
   extension (`profiles/begode-extreme/geometry.toml` `[suspension] linkage_pivots_xz_m`). With the
-  axle `t` metres up the rods, `shock_mount` and `link_bottom` move by `t` up the rods (0.13
-  degrees rearward), the rocker turns about z until the link's length fits between the rocker pin
-  and the link's lower pin, the link turns to point at that pin, and the shock spans the two eyes.
-  The studio does this from the Suspension channel (`app/src/workspaces/ride/shockLinkage.ts`).
-  The physics keeps a constant ratio, so the drawn shock length can differ from the engine's shock
-  channel (up to 8.4 mm).
+  axle `t` metres up the rods, `shock_mount` moves by `t` up the rods (0.13 degrees rearward). In
+  the turning reading (the default) `link_bottom` moves with it, the rocker turns about z until the
+  link's length fits between the rocker pin and the link's lower pin, and the link turns to point
+  at that pin; in the fixed reading the rocker, the link and `link_bottom` stay still. The shock
+  spans the two eyes. The studio does this from the Suspension channel
+  (`app/src/workspaces/ride/shockLinkage.ts`, `LINKAGE_READING`). The physics keeps a constant
+  ratio, so the drawn shock length can differ from the engine's shock channel (up to 8.4 mm in the
+  turning reading).
 - **Pedals.** `pedal_left` folds up with rotation.x = +90 degrees, `pedal_right` with -90 degrees.
   Their shape and size: see above.
 - **Display.** On `display_window`, u and v run from 0 to 1 across the 82.6 x 55.2 mm LED panel of

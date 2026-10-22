@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import * as THREE from "three";
 import {
+  type LinkageReading,
   type LinkageRest,
   type P2,
   distance,
@@ -78,8 +79,8 @@ function linkageBody(lod: number): THREE.Object3D {
   return body;
 }
 
-function pose(rest: LinkageRest, travel: number) {
-  const p = poseLinkage(rest, travel);
+function pose(rest: LinkageRest, travel: number, reading: LinkageReading = "turning") {
+  const p = poseLinkage(rest, travel, reading);
   if (!p) throw new Error(`the link cannot reach at ${travel} m`);
   return p;
 }
@@ -121,7 +122,7 @@ describe("rear linkage", () => {
     const travelMm = strokeMm * ratio;
     let last = 0;
     for (let axleMm = 5; axleMm <= travelMm; axleMm += 5) {
-      const drawn = (0.2 - pose(rest, axleMm / 1000).length) * 1000;
+      const drawn = (0.2 - pose(rest, axleMm / 1000, "turning").length) * 1000;
       expect(drawn, `at ${axleMm} mm`).toBeGreaterThan(last);
       expect(drawn, `at ${axleMm} mm`).toBeLessThan(strokeMm);
       expect(Math.abs(drawn - axleMm / ratio), `at ${axleMm} mm`).toBeLessThan(9);
@@ -145,40 +146,54 @@ describe("rear linkage", () => {
     }
   });
 
-  it("keeps the model's parts joined as it poses them", () => {
-    const body = linkageBody(1);
-    const rig = shockRig(body);
-    if (!rig) throw new Error("the model has no linkage nodes");
-    // Rest points in each part's own frame: the link's lower hole, the rocker's top eye and pin.
-    const local = (o: THREE.Object3D, p: P2) => o.worldToLocal(new THREE.Vector3(p[0], p[1], 0));
-    const linkLower = local(rig.link, rig.rest.linkBottom);
-    const mountPin = local(rig.mount, rig.rest.linkBottom);
-    const rockerEye = local(rig.rocker, rig.rest.topEye);
-    const rockerPin = local(rig.rocker, rig.rest.rockerPin);
-    const close = (a: THREE.Vector3, b: THREE.Vector3, what: string) =>
-      expect(Math.hypot(a.x - b.x, a.y - b.y), what).toBeLessThan(1e-6);
-    for (const travel of [0, 0.03, 0.06, 0.1]) {
-      poseShock(rig, travel);
-      body.updateMatrixWorld(true);
-      const bottomEye = rig.mount.getWorldPosition(new THREE.Vector3());
-      // The shock's bottom eye, its top eye on the rocker, the link on the pin and the shaft.
-      const shockBottom = rig.shock.localToWorld(new THREE.Vector3(0, -rig.length, 0));
-      close(shockBottom, bottomEye, `bottom eye at ${travel}`);
-      close(rig.rocker.localToWorld(rockerEye.clone()), rig.shock.position, `top eye at ${travel}`);
-      close(
-        rig.rocker.localToWorld(rockerPin.clone()),
-        rig.link.position,
-        `rocker pin at ${travel}`,
-      );
-      // The link's lower hole on the carriage's pin, and the marker on it.
-      const pin = rig.mount.localToWorld(mountPin.clone());
-      close(rig.link.localToWorld(linkLower.clone()), pin, `link lower hole at ${travel}`);
-      close(
-        rig.linkBottom?.getWorldPosition(new THREE.Vector3()) ?? pin,
-        pin,
-        `link pin at ${travel}`,
-      );
-      expect(bottomEye.y - rest.bottomEye[1]).toBeCloseTo(travel, 5);
+  it("holds the rocker and the link still in the fixed reading", () => {
+    for (const travel of [0.02, 0.05, 0.08]) {
+      const p = pose(rest, travel, "fixed");
+      expect(p.rocker).toBe(0);
+      expect(p.link).toBe(0);
+      expect(p.linkBottom).toEqual(rest.linkBottom);
+      expect(p.bottomEye[1] - rest.bottomEye[1]).toBeCloseTo(travel, 5);
+      expect(p.length).toBeCloseTo(distance(rest.topEye, p.bottomEye), 12);
+      expect(p.length).toBeLessThan(0.2);
     }
   });
+
+  for (const reading of ["turning", "fixed"] as const) {
+    it(`keeps the model's parts joined as it poses them (${reading})`, () => {
+      const body = linkageBody(1);
+      const rig = shockRig(body);
+      if (!rig) throw new Error("the model has no linkage nodes");
+      // Rest points in each part's own frame: the link's lower hole, the rocker's top eye and pin.
+      const local = (o: THREE.Object3D, p: P2) => o.worldToLocal(new THREE.Vector3(p[0], p[1], 0));
+      const linkLower = local(rig.link, rig.rest.linkBottom);
+      const rockerEye = local(rig.rocker, rig.rest.topEye);
+      const rockerPin = local(rig.rocker, rig.rest.rockerPin);
+      const close = (a: THREE.Vector3, b: THREE.Vector3, what: string) =>
+        expect(Math.hypot(a.x - b.x, a.y - b.y), what).toBeLessThan(1e-6);
+      for (const travel of [0, 0.03, 0.06, 0.08]) {
+        poseShock(rig, travel, reading);
+        body.updateMatrixWorld(true);
+        const bottomEye = rig.mount.getWorldPosition(new THREE.Vector3());
+        // The shock's bottom eye, its top eye on the rocker, the link on the pin and on its lower pin.
+        const shockBottom = rig.shock.localToWorld(new THREE.Vector3(0, -rig.length, 0));
+        close(shockBottom, bottomEye, `bottom eye at ${travel}`);
+        close(
+          rig.rocker.localToWorld(rockerEye.clone()),
+          rig.shock.position,
+          `top eye at ${travel}`,
+        );
+        close(
+          rig.rocker.localToWorld(rockerPin.clone()),
+          rig.link.position,
+          `rocker pin at ${travel}`,
+        );
+        const pin = rig.linkBottom?.getWorldPosition(new THREE.Vector3());
+        if (!pin) throw new Error("the model has no link_bottom node");
+        close(rig.link.localToWorld(linkLower.clone()), pin, `link lower hole at ${travel}`);
+        const pinMoves = reading === "turning" ? travel : 0;
+        expect(pin.y - rest.linkBottom[1], `link pin at ${travel}`).toBeCloseTo(pinMoves, 5);
+        expect(bottomEye.y - rest.bottomEye[1]).toBeCloseTo(travel, 5);
+      }
+    });
+  }
 });

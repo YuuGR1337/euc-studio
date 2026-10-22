@@ -292,7 +292,7 @@ Wheel (`[body]` in `plant.toml`, Begode Extreme values):
 | `suspension.stroke_mm` | 55 mm | ESTIMATE: 200 mm DNM coil-overs come with 50-57 mm of stroke |
 | `suspension.eye_to_eye_mm` | 200 mm | MEASURED (owner; drawing only); the scan's older shock was 204 mm |
 | `suspension.linkage_ratio` | 1.7 | ESTIMATE from the owner's sag (1.6-1.9 with 0-2 mm preload); used while `ratio_curve` is empty |
-| `suspension.ratio_curve` | none | the rocker's leverage along the travel; the located linkage (`docs/hardware/geometry.md`, "Rear linkage") gives 2.3 at rest falling to 1.7 at 93.5 mm (INFERRED), waiting for a seat-press video and the spring preload |
+| `suspension.ratio_curve` | none | the rocker's leverage along the travel; if the rocker turns (reading (a), `docs/hardware/suspension-linkage.md`) 2.3 at rest falling to 1.7 at 93.5 mm (INFERRED); if it is fixed (b) a constant near 1.5-1.7; a seat-press video decides |
 | `suspension.damping_n_s_per_m` | 2200 N·s/m | ESTIMATE: damping ratio about 0.18 for the sprung 100 kg |
 
 With these values an 80 kg rider sags the suspension 18 mm (19 % of the 93.5 mm axle travel), and
