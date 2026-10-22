@@ -1,0 +1,31 @@
+[package]
+name = "euc-ble"
+description = "The OTA path's BLE side: the outbound byte guard, the real-write policy and a gated CoreBluetooth central"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[features]
+# Nothing by default: the guard and the write policy only, no Bluetooth.
+default = []
+# The CoreBluetooth central that talks to a real wheel (macOS; other systems get a stub that
+# reports Unsupported). No default build and no shipped binary enables it, and even with it every
+# write is refused unless the documented override names the wheel (SAFETY.md, docs/spec/flasher.md).
+central = ["dep:dispatch2", "dep:objc2", "dep:objc2-core-bluetooth", "dep:objc2-foundation"]
+
+[dependencies]
+euc-ymodem.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+dispatch2 = { workspace = true, optional = true }
+objc2 = { workspace = true, optional = true }
+objc2-core-bluetooth = { workspace = true, optional = true, features = ["CBCentralManager", "CBPeripheral"] }
+objc2-foundation = { workspace = true, optional = true, features = ["NSValue"] }
+
+[lints]
+workspace = true

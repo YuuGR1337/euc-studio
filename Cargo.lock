@@ -438,6 +438,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "euc-ble"
+version = "0.1.0"
+dependencies = [
+ "dispatch2",
+ "euc-ymodem",
+ "objc2",
+ "objc2-core-bluetooth",
+ "objc2-foundation",
+ "serde",
+ "thiserror",
+]
+
+[[package]]
 name = "euc-ble-radio"
 version = "0.1.0"
 dependencies = [
@@ -458,7 +471,9 @@ dependencies = [
  "anstyle",
  "anyhow",
  "clap",
+ "directories",
  "euc-ble-radio",
+ "euc-flasher",
  "euc-fwsource",
  "euc-image",
  "euc-physics",
@@ -506,6 +521,22 @@ dependencies = [
  "euc-image",
  "euc-profile",
  "serde",
+ "thiserror",
+]
+
+[[package]]
+name = "euc-flasher"
+version = "0.1.0"
+dependencies = [
+ "euc-ble",
+ "euc-flash-sim",
+ "euc-image",
+ "euc-profile",
+ "euc-proto-begode",
+ "euc-ymodem",
+ "serde",
+ "serde_json",
+ "tempfile",
  "thiserror",
 ]
 
@@ -626,6 +657,14 @@ dependencies = [
  "thiserror",
  "toml",
  "unicorn-engine",
+]
+
+[[package]]
+name = "euc-ymodem"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "thiserror",
 ]
 
 [[package]]

@@ -1,0 +1,32 @@
+[package]
+name = "euc-flasher"
+description = "The gated OTA flasher: gates 1-7, the flashing state machine, recovery, a JSONL byte log, and a simulated wheel with an emulated bootloader"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[features]
+default = []
+# `BleTransport` over euc-ble's CoreBluetooth central. Off in every default build; even with it,
+# writes stay refused unless the documented override names the wheel (SAFETY.md).
+ble = ["euc-ble/central"]
+
+[dependencies]
+euc-ble.workspace = true
+euc-flash-sim.workspace = true
+euc-image.workspace = true
+euc-profile.workspace = true
+euc-proto-begode.workspace = true
+euc-ymodem.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

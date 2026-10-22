@@ -4,6 +4,7 @@ mod ble;
 mod compare;
 mod fetch;
 mod firmware;
+mod flash;
 mod image;
 mod paths;
 mod rec;
@@ -58,6 +59,9 @@ enum Command {
     Rec(rec::Command),
     /// Play a BLE capture back as a wheel, on this Mac's Bluetooth or a TCP bridge (docs/ble-radio.md).
     Replay(replay::Args),
+    /// Flash firmware through the gated flasher: the simulated wheel (--sim), the offline gates
+    /// (--dry-run) or the fault campaign (--campaign). This build cannot flash a real wheel.
+    Flash(flash::Args),
 }
 
 /// Whether a command's verdict was positive. Errors are separate: they abort with a message.
@@ -86,6 +90,7 @@ fn main() -> ExitCode {
         Command::Sim(command) => sim::run(&ctx, command),
         Command::Rec(command) => rec::run(&ctx, command),
         Command::Replay(args) => replay::run(&ctx, &args),
+        Command::Flash(args) => flash::run(&ctx, &args),
     };
     match result {
         Ok(Verdict::Ok) => ExitCode::SUCCESS,

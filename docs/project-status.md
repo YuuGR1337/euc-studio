@@ -105,6 +105,15 @@ Seven scenarios pin the rigid rider because their checks or documented numbers d
 The compat-vs-stock comparison passes on all twenty scenarios after three wider speed limits, each with a rider-model note.
 See [the comparison](models/scenarios.md#rigid-and-articulated-riders-2026-10-22) and [articulated acceptance](models/articulated-acceptance.md#default-rider-and-foot-contact-2026-10-22).
 
+## Flasher evidence (M6)
+
+The fault campaign ran 320 seeded simulated flashes with up to three injected faults each.
+None ended unrecoverable: 108 flashed, 35 restored the stock image, and 177 stopped safely.
+Of the safe stops, 138 were gate refusals, 26 left the old application running, and 13 stopped and then took a clean stock restore.
+Two further campaigns of 2,000 runs each also had no unrecoverable run.
+The verdicts rest on the emulated bootloader's assumptions; see [the flasher spec](spec/flasher.md).
+No build can flash a real wheel. Real writes need a feature no build enables and a per-wheel override.
+
 ## Open limits
 
 Suspension geometry, tire behavior, motor values, and rider parameters still include estimates.
