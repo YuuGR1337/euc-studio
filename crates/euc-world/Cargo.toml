@@ -1,0 +1,26 @@
+[package]
+name = "euc-world"
+description = "A seeded, infinite, chunked world for free ride: city streets, curbs, stairs, potholes and surfaces"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[features]
+# The map preview binary (`euc-world-preview`): a PNG encoder. The library itself needs neither.
+preview = ["dep:crc32fast", "dep:miniz_oxide"]
+
+[dependencies]
+crc32fast = { workspace = true, optional = true }
+miniz_oxide = { version = "0.8", optional = true, default-features = false, features = ["with-alloc"] }
+serde.workspace = true
+
+[[bin]]
+name = "euc-world-preview"
+path = "src/bin/preview.rs"
+required-features = ["preview"]
+
+[lints]
+workspace = true

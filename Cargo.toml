@@ -19,6 +19,7 @@ default-members = [
     "crates/euc-proto-begode",
     "crates/euc-sim",
     "crates/euc-stm32f1",
+    "crates/euc-world",
     "crates/euc-ymodem",
 ]
 # The Tauri app has its own workspace until the engine crates it embeds settle. The Python bindings
@@ -55,6 +56,7 @@ euc-sim = { path = "crates/euc-sim" }
 euc-stm32f1 = { path = "crates/euc-stm32f1" }
 euc-telemetry = { path = "crates/euc-telemetry" }
 euc-unicorn = { path = "crates/euc-unicorn" }
+euc-world = { path = "crates/euc-world" }
 euc-ymodem = { path = "crates/euc-ymodem" }
 
 anstream = "1.0"

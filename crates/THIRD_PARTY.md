@@ -9,10 +9,11 @@ license policy in `deny.toml` for the whole dependency tree; this list is the hu
 | anstyle | 1.0 | MIT OR Apache-2.0 | euc-cli | terminal styles |
 | anyhow | 1.0 | MIT OR Apache-2.0 | euc-cli | error reporting in the binary |
 | clap | 4.6 | MIT OR Apache-2.0 | euc-cli | command-line parsing |
-| crc32fast | 1.5 | MIT OR Apache-2.0 | euc-image, euc-telemetry | CRC-32/ISO-HDLC of sealed images and recording chunks |
+| crc32fast | 1.5 | MIT OR Apache-2.0 | euc-image, euc-telemetry, euc-world (`preview`) | CRC-32/ISO-HDLC of sealed images, recording chunks and preview PNG chunks |
 | directories | 6.0 | MIT OR Apache-2.0 | euc-fwsource | per-user cache folder |
 | encoding_rs | 0.8 | (Apache-2.0 OR MIT) AND BSD-3-Clause | euc-proto-begode | GBK text the firmware sends |
 | hex | 0.4 | MIT OR Apache-2.0 | euc-profile | sha256 text form |
+| miniz_oxide | 0.8 | MIT OR Zlib OR Apache-2.0 (its adler2: 0BSD OR MIT OR Apache-2.0) | euc-world (`preview` only) | deflate for the map preview's PNG files |
 | mujoco-rs | =5.0.0 | MIT OR Apache-2.0 | euc-physics | Rust bindings of MuJoCo 3.9.0 (the native library, Apache-2.0, comes from `tools/fetch-mujoco`) |
 | object | 0.40 | Apache-2.0 OR MIT | euc-image | reading firmware ELF files |
 | pyo3 | =0.29.3 | MIT OR Apache-2.0 | euc-python | in-process Python bindings and the Python 3.11 stable ABI |
