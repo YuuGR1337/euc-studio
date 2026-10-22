@@ -16,6 +16,9 @@ builds in `firmware/build/target-*/`, found in the current folder or above it), 
 `.elf` next to it names our variables), or an `.elf` file (flattened at its load address; its symbol
 table names our variables). `euc sim run --firmware` and `euc sim serve --firmware` take the same, so
 scenario checks that read firmware variables work on our builds too.
+`ours-sil` runs our firmware as a host library instead of an image ([SIL](sil.md)), with its quirks
+switched at run time: `--a compat --b ours-sil:compat`, or `--a ours-sil:clean --b ours-sil:clean-NO_WATCHDOG`
+for two quirk sets. `--quirks` gives the quirks of every SIL side that does not name its own.
 `--settings` overrides the scenario's preset for both runs. `--json` prints the report as JSON; `--out`
 writes the same JSON to a file and still prints the table.
 
@@ -23,7 +26,9 @@ In the studio, the Compare workspace (⌘3) runs the same comparison: both runs 
 100 samples per simulated second, the same module (`euc_sim::compare`) and
 `scenarios/compare/compat-vs-stock.toml`, so it shows the numbers this command prints. It streams both
 runs while they go (run B as a ghost over run A, A solid and B dashed on the scopes) and recomputes the
-summary every half second; the last summary adds the BLE streams and the scenario's checks.
+summary every half second; the last summary adds the BLE streams and the scenario's checks. A side set
+to **Ours-custom** runs the SIL library, and the Quirks tab switches its quirks one at a time; the next
+run takes them.
 
 ## What is compared
 
@@ -101,6 +106,7 @@ One object (also what `--out` writes):
 | `samples`, `duration_s`, `sample_skew_us`, `compared_until_s` | samples compared, simulated seconds, largest sample-time difference, the window's end (null: the whole run) |
 | `first_divergence` | null, or `{t_s, kind: "channel" \| "var" \| "ble", name, a, b}` (values as text) |
 | `channels`, `vars` | one entry per series: `name`, `unit`, `max_abs`, `rms`, `at_max_s`, `a_at_max`, `b_at_max`, `tolerance` and `rms_tolerance` (null: not judged), `first_s` (null: never), `within` |
+| `channels_unavailable` | channels a run states it does not measure and has no value for, where no tolerance judges them: listed here instead of in `channels`. Today this is only the ISR load of a machine without exception timing (a SIL run). Without that statement, a channel that is `NaN` on one side only is a difference |
 | `vars_unpaired` | variable names only one run has |
 | `ble` | `bytes_a`, `bytes_b`, `frames_a`, `frames_b`, `frames_identical`, `first_frame` (null, or `{index, t_a, t_b, field, a, b}` with the frames as hex), `max_frame_skew_us`, `text_bytes_a`, `text_bytes_b`, `text_identical` |
 | `within_tolerance` | every judged series within its tolerance (and the frames identical when `ble_identical`) |

@@ -30,7 +30,7 @@ backup) are in place.
 |---|---|---|
 | `core/` | control logic: math, protocol, attitude, balance, FOC, settings | Pure C. No HAL calls, no mutable globals: each module takes an `in` struct and a `state` struct and fills an `out` struct. Builds unchanged for target and host. |
 | `ports/stm32f1/` | reset path, vector table, clock, register-level drivers (`include/stm32f1/port.h`) | Own register definitions (`regs.h`) on CMSIS-Core, written from RM0008; no ST SPL or ST motor-control library code. Core never includes it; the app passes driver results into core. |
-| `ports/sim/` | SIL library: C ABI for the simulator engine | Owns the run-time quirk mask; the simulator drives the core modules through it. |
+| `ports/sim/` | SIL library (`libeuc_sil`): the C ABI (`include/euc/sil.h`), `port.h` on the engine's board bus (`port.c`), thread mode and the interrupt contexts (`host.c`) | Owns the run-time quirk mask. `port.c` repeats the register sequences of `ports/stm32f1`: a driver change there needs the same change here. See [docs/sil.md](../docs/sil.md). |
 | `boards/<board>/` | `board.h` constants, `link_app.ld` memory map, stock tuning | Facts about one PCB. No code. |
 | `apps/<board>/` | `main`, init order, task table (TIM8 / ADC / RTC / main-loop contexts) | Composes core modules with a port and a board, and schedules them. |
 | `config/quirks.def` | compat / clean quirk list | See [Profiles and quirks](#profiles-and-quirks). |
@@ -60,7 +60,7 @@ cmake --workflow --preset host-sil        # build/host-sil/libeuc_sil.{dylib,so}
 | `target-compat` | image, compat profile | `-Os`, `-ffunction-sections -fdata-sections`, `--gc-sections`, `-nostdlib` + libgcc |
 | `target-clean` | image, clean profile | same flags |
 | `host-debug` | unit tests | Debug, `-fsanitize=address,undefined` |
-| `host-sil` | SIL shared library + tests | RelWithDebInfo, runtime quirk profile |
+| `host-sil` | SIL shared library + tests | RelWithDebInfo, runtime quirk profile; the app and core built for the host, the storage pages aliased to host arrays |
 
 Every build uses `-ffp-contract=off` (no fused multiply-add), so host and target round floats the same way,
 and `-Wall -Wextra -Wpedantic -Wconversion -Wshadow -Wdouble-promotion -Werror` plus a few more.
@@ -103,7 +103,8 @@ if (EUC_QUIRK(ASIN_ACCEL)) { /* stock behaviour */ } else { /* clean behaviour *
 - `target-compat` and `target-clean`: `EUC_QUIRK(ID)` is a compile-time constant, so the unused branch is
   not in the image.
 - `host-sil`: `EUC_QUIRK(ID)` reads a mask the simulator sets through `euc_sil_quirk_set_mask()`, so the
-  studio can switch one quirk at a time.
+  studio can switch one quirk at a time (`euc sim run --firmware ours-sil --quirks clean+ASIN_ACCEL`, or
+  Ours-custom in the studio; [docs/sil.md](../docs/sil.md)).
 
 Neither profile changes telemetry frame bytes, command letters, the `!@` update entry, the flash map or
 USART1. After editing the list, run `cmake --build --preset <any> --target quirks-doc`.
@@ -196,7 +197,8 @@ flash, a failed build above 48 KiB of flash or 16 KiB of static RAM (`.data` + `
 map names (`speed_cms`, `alerts`, the cut-off flags, ...), so scenario checks and `euc sim compare` read both
 firmwares the same way. `tools/gen_probes.py` writes it from `offsetof()` compiled by the target compiler; the
 image build fails when the file no longer matches `struct app`. After a change, run
-`cmake --build --preset target-clean --target probes`.
+`cmake --build --preset target-clean --target probes`. The SIL library builds the same list into itself
+(`gen_probes.py --emit-sil`) with its own offsets, and the engine copies those variables into emulated SRAM.
 
 ## Style and static analysis
 

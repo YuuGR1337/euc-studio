@@ -58,7 +58,9 @@ In the window:
   `firmware/build/target-*/`, or a `.bin`/`.elf` you pick) and streams both: run B is a ghost over
   run A, the scopes draw A solid and B dashed, and the summary is `euc sim compare`'s, judged by
   `scenarios/compare/compat-vs-stock.toml`. The Quirks tab lists which stock behaviours each
-  firmware keeps (read only: quirk switches need the SIL build in the engine).
+  firmware keeps. A side set to Ours-custom runs the SIL library (`firmware/build/host-sil/`),
+  and its quirks switch one at a time for the next run; built images stay read only. Tune's
+  Quirks tab restarts the ride with Ours-custom and the chosen quirks ([SIL](../docs/sil.md)).
   While Compare is shown the run bar steps aside, and a comparison pauses the ride until it is
   over and Compare is left.
 

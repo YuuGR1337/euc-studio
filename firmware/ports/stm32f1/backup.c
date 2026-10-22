@@ -126,23 +126,24 @@ static void flash_program_unlocked(uint32_t address, const uint16_t *halfwords, 
     FLASH->CR &= ~FLASH_CR_PG;
 }
 
-void stm32f1_flash_erase_page(uint32_t address)
+void stm32f1_flash_erase_page(const uint16_t *page)
 {
     flash_unlock();
-    flash_erase_unlocked(address);
+    flash_erase_unlocked((uint32_t)(uintptr_t)page);
     FLASH->CR |= FLASH_CR_LOCK;
 }
 
-void stm32f1_flash_program(uint32_t address, const uint16_t *halfwords, uint32_t count)
+void stm32f1_flash_program(const uint16_t *destination, const uint16_t *halfwords, uint32_t count)
 {
     flash_unlock();
-    flash_program_unlocked(address, halfwords, count);
+    flash_program_unlocked((uint32_t)(uintptr_t)destination, halfwords, count);
     FLASH->CR |= FLASH_CR_LOCK;
 }
 
-void stm32f1_flash_rewrite(uint32_t address, const uint16_t *halfwords, uint32_t count)
+void stm32f1_flash_rewrite(const uint16_t *destination, const uint16_t *halfwords, uint32_t count)
 {
     static uint16_t page[FLASH_PAGE_HALFWORDS];
+    const uint32_t address = (uint32_t)(uintptr_t)destination;
     const uint32_t page_address = address & ~(FLASH_PAGE_BYTES - 1U);
     const volatile uint16_t *flash_page = (const volatile uint16_t *)page_address;
     for (uint32_t i = 0U; i < FLASH_PAGE_HALFWORDS; i++) {

@@ -48,7 +48,8 @@ export const CHANNEL_IDS = Object.keys(CHANNELS) as ChannelId[];
 export const SAMPLE_RATE = 60;
 export const HISTORY_SECONDS = 30;
 
-export type FirmwareId = "stock" | "ours-compat" | "ours-clean";
+/** `ours-custom`: our firmware as the host SIL library, with a quirk mask (`EngineClient.quirks`). */
+export type FirmwareId = "stock" | "ours-compat" | "ours-clean" | "ours-custom";
 export type WheelButton = "power" | "handle";
 
 export interface FirmwareInfo {
@@ -303,6 +304,8 @@ export interface EngineClient {
   readonly playing: boolean;
   readonly targetRtf: number;
   readonly firmware: FirmwareId;
+  /** For `ours-custom`: the quirks the run keeps (IDs of quirks.def); null for other firmware. */
+  readonly quirks: readonly string[] | null;
   readonly scenarioId: string;
 
   firmwares(): FirmwareInfo[];
@@ -320,7 +323,8 @@ export interface EngineClient {
   setPlaying(playing: boolean): void;
   togglePlaying(): void;
   setTargetRtf(rtf: number): void;
-  setFirmware(id: FirmwareId): void;
+  /** Switches firmware (a restart). `quirks` is the mask for `ours-custom`; without it, the last one. */
+  setFirmware(id: FirmwareId, quirks?: readonly string[]): void;
   setScenario(id: string): void;
   restart(): void;
   /** Advances by one fixed step while paused (live engine; the demo steps 1/60 s). */

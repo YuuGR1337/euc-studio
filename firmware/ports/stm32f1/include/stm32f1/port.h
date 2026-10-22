@@ -87,10 +87,12 @@ void stm32f1_backup_init(void);
 uint16_t stm32f1_backup_read(uint32_t index); /* DR1..DR42 */
 void stm32f1_backup_write(uint32_t index, uint16_t value);
 
-void stm32f1_flash_erase_page(uint32_t address);
-void stm32f1_flash_program(uint32_t address, const uint16_t *halfwords, uint32_t count);
+/* Flash writes name their place by a pointer into a storage page (the ld_*_page linker symbols), not by an
+ * address: the host SIL port keeps the pages in host memory, where an address does not fit 32 bits. */
+void stm32f1_flash_erase_page(const uint16_t *page);
+void stm32f1_flash_program(const uint16_t *destination, const uint16_t *halfwords, uint32_t count);
 /* The stock read-erase-rewrite of a 2 KiB page, for writing over halfwords that are not erased. */
-void stm32f1_flash_rewrite(uint32_t address, const uint16_t *halfwords, uint32_t count);
+void stm32f1_flash_rewrite(const uint16_t *destination, const uint16_t *halfwords, uint32_t count);
 
 void stm32f1_watchdog_start(uint32_t timeout_ms);
 void stm32f1_watchdog_reload(void);

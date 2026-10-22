@@ -19,7 +19,7 @@
 #include "euc/sensors/sensors.h"
 #include "euc/settings/settings.h"
 #include "euc/settings/storage.h"
-#include "stm32f1/device.h"
+#include "stm32f1/irqn.h"
 #include "stm32f1/port.h"
 
 #define BKP_TRIP         1U
@@ -128,12 +128,11 @@ static void load_settings(void)
     struct euc_storage_write write;
     euc_storage_load(&app.storage, ld_settings_page, backup, &app.settings, &write);
     if (write.erase_page) {
-        stm32f1_flash_erase_page((uint32_t)(uintptr_t)ld_settings_page);
+        stm32f1_flash_erase_page(ld_settings_page);
     }
     if (write.program_slot) {
-        stm32f1_flash_program(
-            (uint32_t)(uintptr_t)&ld_settings_page[(uint32_t)write.slot * EUC_SETTINGS_RECORD_HALFWORDS],
-            write.record, EUC_SETTINGS_RECORD_HALFWORDS);
+        const uint32_t first = (uint32_t)write.slot * EUC_SETTINGS_RECORD_HALFWORDS;
+        stm32f1_flash_program(&ld_settings_page[first], write.record, EUC_SETTINGS_RECORD_HALFWORDS);
     }
 }
 
@@ -206,10 +205,10 @@ static void imu_calibrate(void)
         means[i] = (uint16_t)signed_means[i];
     }
     static const uint16_t marker[2] = {0x0055U, 0x00AAU};
-    stm32f1_flash_rewrite((uint32_t)(uintptr_t)ld_calibrated_page, marker, 2U);
+    stm32f1_flash_rewrite(ld_calibrated_page, marker, 2U);
     if (euc_sensors_imu_calibration_valid(signed_means)) {
-        stm32f1_flash_erase_page((uint32_t)(uintptr_t)ld_imu_offsets_page);
-        stm32f1_flash_program((uint32_t)(uintptr_t)ld_imu_offsets_page, means, 6U);
+        stm32f1_flash_erase_page(ld_imu_offsets_page);
+        stm32f1_flash_program(ld_imu_offsets_page, means, 6U);
     }
     /* The button switches the wheel off once it was seen released, as in the stock calibration mode. */
     uint32_t released_polls = 0U;
@@ -225,7 +224,7 @@ static void imu_calibrate(void)
     }
 }
 
-static void init(void)
+void app_init(void)
 {
     if (!stm32f1_clock_init()) {
         /* Clean: no crystal, no control. The latch stays low, so the wheel goes off with the button. */
@@ -308,7 +307,7 @@ static void init(void)
 
 int main(void)
 {
-    init();
+    app_init();
     for (;;) {
         app_main_loop_pass();
     }

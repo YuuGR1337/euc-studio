@@ -11,7 +11,8 @@ See [the rider change](#rider-default-2026-10-22) below.
 | Area | Current behavior | Remaining work |
 | --- | --- | --- |
 | Rider | Six-joint articulated rider (the default), lean from the ankles, opt-in independent foot contact, lean-to-turn, command delay, and high-speed yaw damping | Centre-of-pressure-aware lean control (then contact feet by default), lateral balance without aids, and measured human calibration |
-| Desktop | Ride, Tune, Claude Compare, scenario import, manual controls, generated maps, native sound, lights, and buttons | Runtime gain edits and runtime quirk toggles |
+| Desktop | Ride, Tune, Claude Compare, scenario import, manual controls, generated maps, native sound, lights, and buttons; quirk switches for the Ours-custom firmware in Tune and Compare | Runtime gain edits |
+| SIL | Our firmware as a host library (`ours-sil`, Ours-custom in the studio) on the same machine, peripherals, plant and rider; every quirk switches at run time | Instruction timing (fixed estimated costs, no ISR load), a first CI run on Linux (`--defsym` link), Windows (refused with a clear message), and the library in the app bundle |
 | Recordings | One .eucrec format across desktop, CLI, and Python; capture, save, open, seek, and playback | Precise audio playback and complete historical profile snapshots |
 | Recording integrity | Limits apply before decoding; duplicate indexes, inconsistent counts, and invalid sample bounds fail | Broader storage-failure injection |
 | Recording context | Actual rider model, external aids, scenario text, and generated Free Ride map; CLI scenario recordings too | Complete parameter preset snapshots |
@@ -100,6 +101,15 @@ Against the owner's wheel it gives a 2.515 s breathing period (video 2.1 ± 0.2 
 Both timings give 307.45 ms BLE groups (capture 309.6 ms).
 The fixed timing therefore stays the default.
 On stock, both timings give the same 15 passes and 5 expected failures at quanta 4000, 3000 and 2000.
+
+## SIL evidence (M5)
+
+The SIL library runs our compat and clean firmware within the compat-vs-stock tolerance of the emulated images.
+This holds on balance-60s, ride-20kmh-stop and hall-loss-while-riding (to the fault), with the default rider.
+The largest speed difference is 0.63 km/h (clean, ride-20kmh-stop; limit 0.8 km/h).
+Every scenario check gives the same verdict on both sides.
+The SIL has no instruction timing, so the balance acts up to about 1 ms sooner than on the image.
+See [SIL](sil.md#validation) for the numbers and the remaining differences.
 
 ## Rider default, 2026-10-22
 

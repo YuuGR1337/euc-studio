@@ -24,6 +24,10 @@ vi.mock("@tauri-apps/api/core", () => ({
         backend: "unicorn",
         scenarios: [{ id: "balance-60s", label: "Balance", detail: "" }],
         commands: [{ id: "horn", name: "horn", pattern: "b", safety: "comfort" }],
+        firmwares: [
+          { id: "stock", label: "Stock", detail: "" },
+          { id: "ours-custom", label: "Ours (custom quirks)", detail: "" },
+        ],
         perf_seconds: null,
       };
     }
@@ -51,6 +55,39 @@ describe("LiveEngine", () => {
     expect(e.scenarios().map((s) => s.id)).toEqual(["balance-60s"]);
     expect(e.scenarioId).toBe("balance-60s");
     expect(e.status.backend).toBe("unicorn");
+  });
+
+  it("runs Ours (custom quirks) with its mask and reads the mask back from the status", async () => {
+    const e = new LiveEngine();
+    await vi.waitFor(() => expect(e.firmwares().map((f) => f.id)).toContain("ours-custom"));
+    e.setFirmware("ours-custom", ["KEIL_FTZ", "ASIN_ACCEL"]);
+    expect(calls.at(-1)).toEqual({
+      cmd: "engine_set_firmware",
+      args: { firmware: "ours-custom:ASIN_ACCEL,KEIL_FTZ" },
+    });
+    channels.messages?.onmessage({
+      type: "status",
+      run_epoch: 1,
+      state: "running",
+      message: "",
+      backend: "own",
+      scenario: "balance-60s",
+      firmware: "ours-custom:ASIN_ACCEL,KEIL_FTZ",
+      t_s: 1,
+      rtf: 1,
+      target_rtf: 1,
+      playing: true,
+    });
+    expect(e.firmware).toBe("ours-custom");
+    expect(e.quirks).toEqual(["ASIN_ACCEL", "KEIL_FTZ"]);
+    // The same mask again is no restart; another one is.
+    const sent = calls.length;
+    e.setFirmware("ours-custom", ["ASIN_ACCEL", "KEIL_FTZ"]);
+    expect(calls.length).toBe(sent);
+    e.setFirmware("ours-custom", []);
+    expect(calls.at(-1)?.args).toEqual({ firmware: "ours-custom:" });
+    e.setFirmware("stock");
+    expect(calls.at(-1)?.args).toEqual({ firmware: "stock" });
   });
 
   it("takes physical button readiness from the native input gate", async () => {

@@ -17,7 +17,7 @@ use euc_sim::{Machine, MachineConfig, PlantState, Session, WheelFiles};
 use euc_telemetry::EventKind;
 
 use crate::ble::{BleArgs, WheelLink};
-use crate::sim::{BLANK, board_with, cpu_factory, injection, load_firmware, load_scenario};
+use crate::sim::{BLANK, board_with, injection, load_firmware, load_scenario};
 use crate::tcp::{Client, address};
 use crate::ui::{self, BAD, DIM, GOOD, STRONG, WARN};
 use crate::{Context, Verdict};
@@ -38,9 +38,13 @@ pub(crate) struct ServeArgs {
     /// `rider` or `push` message takes the rider over.
     #[arg(long, value_name = "FILE")]
     scenario: Option<PathBuf>,
-    /// `stock` or a firmware file.
+    /// `stock`, `compat` or `clean` (our image builds), `ours-sil[:QUIRKS]` (our firmware as the host
+    /// SIL library, docs/sil.md) or a firmware file.
     #[arg(long, default_value = "stock")]
     firmware: String,
+    /// With `--firmware ours-sil`: its quirks (`compat` by default, `clean`, a mask or names).
+    #[arg(long, value_name = "QUIRKS")]
+    quirks: Option<String>,
     /// Settings preset the wheel boots with (profiles/<wheel>/settings.toml), or `blank`.
     /// Default: the scenario's, else `neutral`.
     #[arg(long, value_name = "PRESET")]
@@ -164,7 +168,7 @@ pub(crate) fn serve(ctx: &Context, args: &ServeArgs) -> anyhow::Result<Verdict> 
 impl Server {
     /// Builds the wheel with a live plant, on its stand at power-on.
     fn new(ctx: &Context, args: &ServeArgs) -> anyhow::Result<Self> {
-        let cpu = cpu_factory(args.cpu, args.cpu.default_timing())?;
+        let timing = args.cpu.default_timing();
         let scenario = args.scenario.as_deref().map(load_scenario).transpose()?;
         let wheel_id = match (&args.wheel, &scenario) {
             (Some(wheel), _) => wheel.clone(),
@@ -173,7 +177,8 @@ impl Server {
         };
         let files = WheelFiles::load(&ctx.profiles(), &wheel_id)?;
         let wheel = &files.profile;
-        let fw = load_firmware(ctx, &files, &args.firmware)?;
+        let fw = load_firmware(ctx, &files, &args.firmware, args.quirks.as_deref())?;
+        let cpu = fw.factory(args.cpu, timing)?;
         let (image, label, stock) = (&fw.image, fw.label.clone(), fw.stock);
         let injections = scenario
             .iter()
@@ -197,7 +202,7 @@ impl Server {
             injections,
             power_cycles: Vec::new(),
             cpi: euc_sim::DEFAULT_CPI,
-            exception_timing: euc_sim::ExceptionTiming::default(),
+            exception_timing: fw.exception_timing(timing),
             max_quantum: 4000,
             marker_window_s: 4.0,
         };

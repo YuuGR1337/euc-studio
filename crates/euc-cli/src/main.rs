@@ -10,6 +10,7 @@ mod paths;
 mod rec;
 mod replay;
 mod serve;
+mod sil;
 mod sim;
 mod tcp;
 mod ui;

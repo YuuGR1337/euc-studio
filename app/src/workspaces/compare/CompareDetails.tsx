@@ -6,8 +6,10 @@ import {
   compare,
   useCompareVersion,
 } from "../../engine/compare.ts";
+import { profileQuirks, sameQuirks, setQuirk } from "../../engine/quirkMask.ts";
 import { cx } from "../../lib/cx.ts";
 import { readStored, writeStored } from "../../lib/storage.ts";
+import { Button } from "../../ui/Button.tsx";
 import { Diverge, ScrollText } from "../../ui/icons.tsx";
 import { Panel } from "../../ui/Panel.tsx";
 import { Pill, type PillTone } from "../../ui/Pill.tsx";
@@ -113,6 +115,17 @@ function SummaryTable({ summary }: { summary: CompareSummary }) {
           <Tooltip content={summary.vars_unpaired.join(", ")}>
             <span className="ml-8 cursor-default underline decoration-hairline-strong underline-offset-4">
               {summary.vars_unpaired.length} variables only one run names
+            </span>
+          </Tooltip>
+        )}
+        {(summary.channels_unavailable?.length ?? 0) > 0 && (
+          <Tooltip
+            content={`${summary.channels_unavailable?.join(", ")}: a run states it does not measure it (a SIL run has no instruction timing, so no ISR load)`}
+          >
+            <span className="ml-8 cursor-default underline decoration-hairline-strong underline-offset-4">
+              {summary.channels_unavailable?.length === 1
+                ? "1 channel only one run measures"
+                : `${summary.channels_unavailable?.length} channels only one run measures`}
             </span>
           </Tooltip>
         )}
@@ -236,20 +249,101 @@ function QuirkCell({ value }: { value: boolean | null }) {
   );
 }
 
-function QuirksBody({ a, b }: { a: CompareFirmwareId; b: CompareFirmwareId }) {
+/** The quirks each side keeps when it runs "Ours (custom quirks)". */
+export interface SideQuirks {
+  a: string[];
+  b: string[];
+}
+
+/** One side's switch for one quirk: on keeps the stock behaviour, off fixes it. */
+function QuirkSwitch({
+  quirk,
+  side,
+  on,
+  onChange,
+}: {
+  quirk: Quirk;
+  side: "A" | "B";
+  on: boolean;
+  onChange: (on: boolean) => void;
+}) {
+  return (
+    <Toggle
+      className="w-[36px]"
+      label={
+        <span className="sr-only">
+          {quirk.id} in run {side}: {on ? "stock behaviour" : "fixed"}
+        </span>
+      }
+      checked={on}
+      onCheckedChange={onChange}
+    />
+  );
+}
+
+/** Sets a custom side's quirks to a profile's in one go. */
+function Presets({ side, onSet }: { side: "A" | "B"; onSet: (ids: string[]) => void }) {
+  return (
+    <span className="flex shrink-0 items-center gap-4" aria-label={`Quirk presets for run ${side}`}>
+      <span className="label w-[16px] text-center">{side}</span>
+      <Button size="sm" variant="ghost" onClick={() => onSet(profileQuirks("compat"))}>
+        Compat
+      </Button>
+      <Button size="sm" variant="ghost" onClick={() => onSet(profileQuirks("clean"))}>
+        Clean
+      </Button>
+    </span>
+  );
+}
+
+function QuirksBody({
+  a,
+  b,
+  quirks,
+  onQuirks,
+}: {
+  a: CompareFirmwareId;
+  b: CompareFirmwareId;
+  quirks: SideQuirks;
+  onQuirks: (side: "a" | "b", ids: string[]) => void;
+}) {
   const [onlyDiff, setOnlyDiff] = useState(() => readStored("compare.quirksOnlyDiff", true));
-  const differs = (q: Quirk) => hasQuirk(a, q) !== hasQuirk(b, q);
+  const custom = { a: a === "ours-custom", b: b === "ours-custom" };
+  const editable = custom.a || custom.b;
+  const has = (q: Quirk) => [hasQuirk(a, q, quirks.a), hasQuirk(b, q, quirks.b)] as const;
+  const differs = (q: Quirk) => has(q)[0] !== has(q)[1];
   const shown = QUIRKS.filter((q) => !onlyDiff || differs(q));
   const count = QUIRKS.filter(differs).length;
   const groups = [...new Set(shown.map((q) => q.group))];
+  // A custom side whose quirks changed since the run on screen started.
+  const request = compare.request;
+  const pending = (["a", "b"] as const).some((side) => {
+    const ran = request?.[side];
+    return custom[side] && ran?.kind === "ours-custom" && !sameQuirks(ran.quirks, quirks[side]);
+  });
+  const cell = (side: "a" | "b", q: Quirk) =>
+    custom[side] ? (
+      <QuirkSwitch
+        quirk={q}
+        side={side === "a" ? "A" : "B"}
+        on={quirks[side].includes(q.id)}
+        onChange={(on) => onQuirks(side, setQuirk(quirks[side], q.id, on))}
+      />
+    ) : (
+      <QuirkCell value={has(q)[side === "a" ? 0 : 1]} />
+    );
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex shrink-0 items-center gap-16 border-b border-hairline px-16 py-8">
-        <Pill tone="info">Read only</Pill>
+        <Pill tone={editable ? "accent" : "info"}>{editable ? "Switchable" : "Read only"}</Pill>
         <span className="min-w-0 flex-1 text-12 text-pretty text-fg-2">
-          Quirks are fixed when an image is built: the engine runs images on the emulated
-          controller. Switching one quirk at a time needs the SIL build in the engine.
+          {editable
+            ? "On keeps the stock behaviour, off fixes it. Ours-custom applies them at the next run."
+            : "Built images have their quirks fixed. Pick Ours-custom for a side to switch them one at a time."}
         </span>
+        {pending && <Pill tone="caution">Run again to apply</Pill>}
+        {custom.a && <Presets side="A" onSet={(ids) => onQuirks("a", ids)} />}
+        {custom.b && <Presets side="B" onSet={(ids) => onQuirks("b", ids)} />}
         <Toggle
           className="shrink-0"
           label={
@@ -279,16 +373,17 @@ function QuirksBody({ a, b }: { a: CompareFirmwareId; b: CompareFirmwareId }) {
                 <div
                   key={q.id}
                   role="row"
+                  data-quirk={q.id}
                   className="grid h-[32px] grid-cols-[208px_72px_72px_minmax(0,1fr)] items-center gap-8 border-b border-hairline px-16 live:hover:bg-raised"
                 >
                   <span role="cell" className="num truncate text-12 text-fg">
                     {q.id}
                   </span>
-                  <span role="cell">
-                    <QuirkCell value={hasQuirk(a, q)} />
+                  <span role="cell" data-side="a">
+                    {cell("a", q)}
                   </span>
-                  <span role="cell">
-                    <QuirkCell value={hasQuirk(b, q)} />
+                  <span role="cell" data-side="b">
+                    {cell("b", q)}
                   </span>
                   <Tooltip content={q.stockRef}>
                     <span role="cell" className="cursor-default truncate text-12 text-fg-2">
@@ -305,7 +400,17 @@ function QuirksBody({ a, b }: { a: CompareFirmwareId; b: CompareFirmwareId }) {
 }
 
 /** The Compare workspace's bottom dock: the summary of the differences, and the quirk list. */
-export function CompareDetails({ a, b }: { a: CompareFirmwareId; b: CompareFirmwareId }) {
+export function CompareDetails({
+  a,
+  b,
+  quirks,
+  onQuirks,
+}: {
+  a: CompareFirmwareId;
+  b: CompareFirmwareId;
+  quirks: SideQuirks;
+  onQuirks: (side: "a" | "b", ids: string[]) => void;
+}) {
   useCompareVersion();
   const [tab, setTab] = useState<Tab>(() =>
     readStored<Tab>("compare.tab", "summary") === "quirks" ? "quirks" : "summary",
@@ -330,7 +435,11 @@ export function CompareDetails({ a, b }: { a: CompareFirmwareId; b: CompareFirmw
       icon={tab === "summary" ? <Diverge /> : <ScrollText />}
       bodyClassName="flex flex-col overflow-hidden"
     >
-      {tab === "summary" ? <SummaryBody /> : <QuirksBody a={a} b={b} />}
+      {tab === "summary" ? (
+        <SummaryBody />
+      ) : (
+        <QuirksBody a={a} b={b} quirks={quirks} onQuirks={onQuirks} />
+      )}
     </Panel>
   );
 }

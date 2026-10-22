@@ -18,7 +18,8 @@ import { Select, type SelectOption } from "../../ui/Select.tsx";
 import { Tooltip } from "../../ui/Tooltip.tsx";
 import { Wait } from "../../ui/Wait.tsx";
 import { LOW_FPS, type Quality } from "../ride/quality.ts";
-import { CompareDetails } from "./CompareDetails.tsx";
+import { normalizeQuirks, profileQuirks } from "../../engine/quirkMask.ts";
+import { CompareDetails, type SideQuirks } from "./CompareDetails.tsx";
 import { CompareScene } from "./CompareScene.tsx";
 import { CompareScopes } from "./CompareScopes.tsx";
 import { divergenceText, formatTime, overallVerdict } from "./summaryFormat.ts";
@@ -32,25 +33,46 @@ interface Setup {
   b: CompareFirmwareId;
   scenario: string;
   pace: Pace;
+  /** The quirks each side keeps when it runs "Ours (custom quirks)". */
+  quirks: SideQuirks;
 }
 
-/** What the run uses for a side: a built-in firmware, or the file picked for it. */
-function firmwareOf(id: CompareFirmwareId, file: Picked): CompareFirmware | null {
+/** What the run uses for a side: a built-in firmware, our firmware with its quirks, or a file. */
+function firmwareOf(id: CompareFirmwareId, file: Picked, quirks: string[]): CompareFirmware | null {
+  if (id === "ours-custom") return { kind: id, quirks: normalizeQuirks(quirks) };
   if (id !== "file") return { kind: id };
   return file ? { kind: "file", name: file.name, bytes: file.bytes } : null;
 }
 
+/** A side's custom quirks from a stored or requested list (compat when there is none). */
+function quirksOf(value: unknown): string[] {
+  return Array.isArray(value)
+    ? normalizeQuirks(value.filter((q): q is string => typeof q === "string"))
+    : profileQuirks("compat");
+}
+
 function initialSetup(): Setup {
+  const stored = readStored<Partial<Setup>>("compare.setup", {});
+  const quirks = { a: quirksOf(stored.quirks?.a), b: quirksOf(stored.quirks?.b) };
   const r = compare.request;
   if (r) {
-    return { a: r.a.kind, b: r.b.kind, scenario: r.scenario, pace: r.fast ? "fast" : "real" };
+    return {
+      a: r.a.kind,
+      b: r.b.kind,
+      scenario: r.scenario,
+      pace: r.fast ? "fast" : "real",
+      quirks: {
+        a: r.a.kind === "ours-custom" ? quirksOf(r.a.quirks) : quirks.a,
+        b: r.b.kind === "ours-custom" ? quirksOf(r.b.quirks) : quirks.b,
+      },
+    };
   }
-  const stored = readStored<Partial<Setup>>("compare.setup", {});
   return {
     a: stored.a && stored.a !== "file" ? stored.a : "stock",
     b: stored.b && stored.b !== "file" ? stored.b : "ours-compat",
     scenario: stored.scenario ?? "",
     pace: stored.pace === "fast" ? "fast" : "real",
+    quirks,
   };
 }
 
@@ -136,8 +158,8 @@ function SetupBar({
     ? setup.scenario
     : (scenarios[0]?.id ?? "");
   const running = compare.status.state === "starting" || compare.status.state === "running";
-  const a = firmwareOf(setup.a, files.a);
-  const b = firmwareOf(setup.b, files.b);
+  const a = firmwareOf(setup.a, files.a, setup.quirks.a);
+  const b = firmwareOf(setup.b, files.b, setup.quirks.b);
   const disabled = (id: CompareFirmwareId) =>
     compare.firmwares().find((f) => f.id === id)?.disabledReason;
   const why = !scenario
@@ -449,7 +471,14 @@ export function CompareWorkspace({ active }: { active: boolean }) {
         </div>
       }
       right={<CompareScopes />}
-      bottom={<CompareDetails a={setup.a} b={setup.b} />}
+      bottom={
+        <CompareDetails
+          a={setup.a}
+          b={setup.b}
+          quirks={setup.quirks}
+          onQuirks={(side, ids) => onSetup({ quirks: { ...setup.quirks, [side]: ids } })}
+        />
+      }
     />
   );
 }

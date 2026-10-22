@@ -104,6 +104,10 @@ extern const uint16_t ld_calibrated_page[];
 extern const uint16_t ld_imu_offsets_page[];
 extern const uint16_t ld_update_request_page[];
 
+/* Start-up in the stock order, up to the main loop (main.c). The target's main() calls it once; the host SIL
+ * library calls it at power-on. */
+void app_init(void);
+
 /* PB15 low. */
 bool app_power_button_pressed(void);
 

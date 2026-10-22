@@ -11,7 +11,6 @@
 #include "euc/math/fixed.h"
 #include "euc/math/float_ops.h"
 #include "euc/quirks.h"
-#include "stm32f1/device.h"
 #include "stm32f1/port.h"
 
 #define BKP_TRIP              1U
@@ -612,12 +611,12 @@ static void storage_write(const struct euc_storage_write *write)
             stm32f1_backup_write(BKP_SETTINGS + i, write->record[i]);
         }
     }
-    const uint32_t page = (uint32_t)(uintptr_t)ld_settings_page;
     if (write->erase_page) {
-        stm32f1_flash_erase_page(page);
+        stm32f1_flash_erase_page(ld_settings_page);
     }
     if (write->program_slot) {
-        const uint32_t slot = page + ((uint32_t)write->slot * EUC_SETTINGS_RECORD_HALFWORDS * 2U);
+        const uint32_t first = (uint32_t)write->slot * EUC_SETTINGS_RECORD_HALFWORDS;
+        const uint16_t *slot = &ld_settings_page[first];
         if (write->rewrite_page) {
             stm32f1_flash_rewrite(slot, write->record, EUC_SETTINGS_RECORD_HALFWORDS);
         } else {
@@ -648,7 +647,7 @@ void app_main_loop_pass(void)
     }
     if (app.erase_calibration_request) {
         app.erase_calibration_request = false;
-        stm32f1_flash_erase_page((uint32_t)(uintptr_t)ld_calibrated_page);
+        stm32f1_flash_erase_page(ld_calibrated_page);
     }
     if (app.power_off_request) {
         app.power_off_request = false;
@@ -660,7 +659,7 @@ void app_main_loop_pass(void)
     if (app.bootloader_request) {
         /* Motor already off (service). The bootloader finds the erased request page and waits for the image.
          */
-        stm32f1_flash_erase_page((uint32_t)(uintptr_t)ld_update_request_page);
+        stm32f1_flash_erase_page(ld_update_request_page);
         stm32f1_delay_ms(SERVICE_WAIT_MS);
         stm32f1_system_reset();
     }

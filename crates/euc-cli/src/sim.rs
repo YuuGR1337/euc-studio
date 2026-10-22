@@ -46,9 +46,16 @@ pub(crate) struct Args {
     /// With --scenario: samples per simulated second in the recording and the checks.
     #[arg(long, default_value_t = 100.0, requires = "scenario")]
     sample_hz: f64,
-    /// `stock` (the current official build, fetched if it is not cached) or a firmware file.
+    /// `stock` (the current official build, fetched if it is not cached), `compat` or `clean` (our
+    /// image builds in firmware/build/target-*/), `ours-sil[:QUIRKS]` (our firmware as the host SIL
+    /// library in firmware/build/host-sil/, docs/sil.md) or a firmware file.
     #[arg(long, default_value = "stock")]
     firmware: String,
+    /// With `--firmware ours-sil` (or a `libeuc_sil` file): the quirks it runs with: `compat` (the
+    /// default), `clean`, `none`, a mask (`0x1f`), or quirk names added to or removed from a base
+    /// (`clean+ASIN_ACCEL`, `compat,-NO_WATCHDOG`).
+    #[arg(long, value_name = "QUIRKS")]
+    quirks: Option<String>,
     /// Settings preset the wheel boots with (profiles/<wheel>/settings.toml), or `blank`.
     /// Default: the scenario's, else blank (the reference harness's state).
     #[arg(long, value_name = "PRESET")]
@@ -126,6 +133,9 @@ struct FirmwareOut {
     label: String,
     sha256: Sha256,
     bytes: usize,
+    /// The SIL library's quirk mask, as `--quirks` reads it (SIL runs only).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    quirks: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -151,18 +161,10 @@ pub(crate) fn run(ctx: &Context, command: Command) -> anyhow::Result<Verdict> {
     if let (Some(scenario), Some(model)) = (&mut scenario, args.rider_model) {
         scenario.rider.model = model;
     }
-    let wheel_id = match (&args.wheel, &scenario) {
-        (Some(wheel), Some(scenario)) if *wheel != scenario.wheel => {
-            bail!("the scenario is for {}, not {wheel}", scenario.wheel)
-        }
-        (Some(wheel), _) => wheel.clone(),
-        (None, Some(scenario)) => scenario.wheel.clone(),
-        (None, None) => bail!("name a wheel profile, or give a --scenario"),
-    };
     let source = ctx.profiles();
-    let files = WheelFiles::load(&source, &wheel_id)?;
+    let files = WheelFiles::load(&source, &wheel_id(args.wheel.as_deref(), scenario.as_ref())?)?;
     let wheel = &files.profile;
-    let fw = load_firmware(ctx, &files, &args.firmware)?;
+    let fw = load_firmware(ctx, &files, &args.firmware, args.quirks.as_deref())?;
     let (image, label, sha256, stock) = (&fw.image, fw.label.clone(), fw.sha256, fw.stock);
     let mut injections =
         args.injections.iter().enumerate().map(|(i, spec)| injection(spec, i)).collect::<anyhow::Result<Vec<_>>>()?;
@@ -194,19 +196,19 @@ pub(crate) fn run(ctx: &Context, command: Command) -> anyhow::Result<Verdict> {
         exception_timing: if args.no_exception_timing {
             euc_sim::ExceptionTiming::REFERENCE
         } else {
-            timing.exception_timing()
+            fw.exception_timing(timing)
         },
         max_quantum: args.max_quantum,
         marker_window_s: 4.0,
     };
-    let firmware_out = FirmwareOut { label, sha256, bytes: image.len() };
+    let firmware_out = FirmwareOut { label, sha256, bytes: image.len(), quirks: fw.quirks() };
     if let Some(scenario) = scenario {
         let live = files.live_on(scenario.rider, scenario.assist, scenario.terrain.clone())?;
-        let machine = Machine::new_live(&config, &euc_sim::registry(), cpu_factory(cpu, timing)?, live)?;
+        let machine = Machine::new_live(&config, &euc_sim::registry(), fw.factory(cpu, timing)?, live)?;
         let session = Session::new(machine, fw.map.as_ref(), args.sample_hz);
         return ride(ctx, &args, &source, &files, &scenario, session, firmware_out, cpu, timing);
     }
-    let mut machine = Machine::new(&config, &euc_sim::registry(), cpu_factory(cpu, timing)?)?;
+    let mut machine = Machine::new(&config, &euc_sim::registry(), fw.factory(cpu, timing)?)?;
 
     let total = (args.seconds * hclk as f64) as u64;
     let warm = total.min((args.warmup * hclk as f64) as u64);
@@ -222,8 +224,8 @@ pub(crate) fn run(ctx: &Context, command: Command) -> anyhow::Result<Verdict> {
     let output = RunOutput {
         wheel: &wheel.id,
         firmware: firmware_out,
-        cpu: cpu.name(),
-        timing: timing.name(),
+        cpu: fw.cpu_name(cpu),
+        timing: fw.timing_name(timing),
         wall_seconds: round(wall),
         realtime_factor: round(report.sim_seconds / wall),
         steady_state: Steady {
@@ -242,6 +244,18 @@ pub(crate) fn run(ctx: &Context, command: Command) -> anyhow::Result<Verdict> {
         print(wheel, &output);
     }
     Ok(if report.halted.is_some() { Verdict::Refused } else { Verdict::Ok })
+}
+
+/// The wheel a run is for: the one named, which must be the scenario's, or the scenario's.
+fn wheel_id(wheel: Option<&str>, scenario: Option<&Scenario>) -> anyhow::Result<String> {
+    match (wheel, scenario) {
+        (Some(wheel), Some(scenario)) if wheel != scenario.wheel => {
+            bail!("the scenario is for {}, not {wheel}", scenario.wheel)
+        }
+        (Some(wheel), _) => Ok(wheel.to_owned()),
+        (None, Some(scenario)) => Ok(scenario.wheel.clone()),
+        (None, None) => bail!("name a wheel profile, or give a --scenario"),
+    }
 }
 
 /// The JSON a scenario run prints.
@@ -300,8 +314,13 @@ fn ride(
     let mut recorder = match &args.record {
         Some(path) => {
             let mut header = recording::header(PRODUCER, source, files, &session, &firmware.label, &firmware.sha256);
-            header.cpu = Some(cpu.name().to_owned());
-            recording::set_timing(&mut header, timing, args.cpi);
+            if firmware.quirks.is_some() {
+                header.cpu = Some(SIL_CPU.to_owned());
+                header.timing = Some(SIL_CPU.to_owned());
+            } else {
+                header.cpu = Some(cpu.name().to_owned());
+                recording::set_timing(&mut header, timing, args.cpi);
+            }
             header.scenario = Some(scenario.name.clone());
             header.scenario_toml = args.scenario.as_deref().and_then(|p| fs::read_to_string(p).ok());
             header.settings = args
@@ -344,9 +363,9 @@ fn ride(
     let passed = outcome.passed() && halted.is_none();
     let output = RideOutput {
         wheel: &wheel.id,
+        cpu: if firmware.quirks.is_some() { SIL_CPU } else { cpu.name() },
+        timing: if firmware.quirks.is_some() { SIL_CPU.to_owned() } else { timing.name() },
         firmware,
-        cpu: cpu.name(),
-        timing: timing.name(),
         scenario: &scenario.name,
         sim_seconds: round(sim_seconds),
         wall_seconds: round(wall),
@@ -448,25 +467,75 @@ pub(crate) fn firmware(ctx: &Context, wheel: &WheelProfile, spec: &str) -> anyho
     Ok((fs::read(&path)?, current.label.clone()))
 }
 
+/// What reports and recordings call the CPU and the timing of a SIL run.
+const SIL_CPU: &str = "sil";
+
 /// A firmware image to run, and what names its RAM variables.
 pub(crate) struct Firmware {
     /// Flash bytes from the app base up.
     pub(crate) image: Vec<u8>,
     /// For people: the stock build's label, or the file name.
     pub(crate) label: String,
-    /// Of `image`.
+    /// Of `image` (of the library file for a SIL run).
     pub(crate) sha256: Sha256,
     /// The pinned stock build the stock map describes.
     pub(crate) stock: bool,
     /// Names of its RAM variables: the stock map for the stock build, our probes resolved against
     /// the ELF for our builds; `None` when neither applies.
     pub(crate) map: Option<StockMap>,
+    /// For our firmware as the host SIL library: the library and its quirks (`image` is then only
+    /// the vector table that routes interrupts to it).
+    pub(crate) sil: Option<crate::sil::SilChoice>,
+}
+
+impl Firmware {
+    /// The CPU it runs on: the SIL library with its quirks, or the `cpu` backend with `timing`.
+    pub(crate) fn factory(&self, cpu: Backend, timing: Timing) -> anyhow::Result<Box<CpuFactory<'static>>> {
+        match &self.sil {
+            Some(sil) => Ok(sil.library.factory(sil.mask)),
+            None => cpu_factory(cpu, timing),
+        }
+    }
+
+    /// The exception switch costs that go with it: none for the SIL library, which has no
+    /// instruction timing.
+    pub(crate) fn exception_timing(&self, timing: Timing) -> euc_sim::ExceptionTiming {
+        if self.sil.is_some() { euc_sim::sil::EXCEPTION_TIMING } else { timing.exception_timing() }
+    }
+
+    /// `sil`, or the backend's name.
+    pub(crate) fn cpu_name(&self, cpu: Backend) -> &'static str {
+        if self.sil.is_some() { SIL_CPU } else { cpu.name() }
+    }
+
+    /// `sil`, or the timing's name.
+    pub(crate) fn timing_name(&self, timing: Timing) -> String {
+        if self.sil.is_some() { SIL_CPU.to_owned() } else { timing.name() }
+    }
+
+    /// The SIL library's quirks, as `--quirks` reads them.
+    pub(crate) fn quirks(&self) -> Option<String> {
+        self.sil.as_ref().map(|sil| sil.library.describe(sil.mask))
+    }
 }
 
 /// Loads `spec`: `stock` (the current pinned build, fetched if needed), `compat` or `clean` (our
-/// builds in `firmware/build/target-*/`, here or above), a `.bin` (its `.elf` next to it names our
-/// variables) or an `.elf` (flattened; its symbols name our variables).
-pub(crate) fn load_firmware(ctx: &Context, files: &WheelFiles, spec: &str) -> anyhow::Result<Firmware> {
+/// builds in `firmware/build/target-*/`, here or above), `ours-sil[:QUIRKS]` or a `libeuc_sil` file
+/// (our firmware as the host SIL library, with `quirks` unless the spec names its own), a `.bin`
+/// (its `.elf` next to it names our variables) or an `.elf` (flattened; its symbols name our
+/// variables).
+pub(crate) fn load_firmware(
+    ctx: &Context,
+    files: &WheelFiles,
+    spec: &str,
+    quirks: Option<&str>,
+) -> anyhow::Result<Firmware> {
+    if let Some((path, inline)) = crate::sil::library(spec)? {
+        return crate::sil::load(files, &path, inline.or(quirks));
+    }
+    if quirks.is_some() {
+        bail!("--quirks needs our firmware as the SIL library: --firmware {}", crate::sil::OURS_SIL);
+    }
     let wheel = &files.profile;
     let (bytes, label, path) = match spec {
         "stock" => {
@@ -512,7 +581,7 @@ pub(crate) fn load_firmware(ctx: &Context, files: &WheelFiles, spec: &str) -> an
             _ => None,
         }
     };
-    Ok(Firmware { image, label, sha256, stock, map })
+    Ok(Firmware { image, label, sha256, stock, map, sil: None })
 }
 
 /// Our firmware build `profile` (`compat` or `clean`) for `wheel`, from `firmware/build/` in the

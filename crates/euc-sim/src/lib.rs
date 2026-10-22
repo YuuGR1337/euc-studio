@@ -25,6 +25,7 @@ mod report;
 pub mod scenario;
 mod session;
 pub mod settings;
+pub mod sil;
 mod system;
 mod wheel;
 

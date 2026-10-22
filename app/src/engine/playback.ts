@@ -72,6 +72,7 @@ export class PlaybackEngine implements PlaybackClient {
   readonly recordedMap?: HeightMap;
   readonly beeps = 0;
   readonly firmware: FirmwareId = "stock";
+  readonly quirks = null;
   readonly scenarioId: string;
   status: EngineStatus;
   playing = false;

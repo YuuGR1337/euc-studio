@@ -48,5 +48,9 @@ EUC_QUIRK_DEF(DEBUG_PRINTF, 0, 0, "printf on USART1", "Stock prints debug text."
     expect(hasQuirk("ours-compat", ftz)).toBe(true);
     expect(hasQuirk("ours-clean", ftz)).toBe(false);
     expect(hasQuirk("file", ftz)).toBeNull();
+    // Ours (custom quirks) keeps what its mask names.
+    expect(hasQuirk("ours-custom", ftz, ["KEIL_FTZ"])).toBe(true);
+    expect(hasQuirk("ours-custom", ftz, ["ASIN_ACCEL"])).toBe(false);
+    expect(hasQuirk("ours-custom", ftz)).toBe(false);
   });
 });

@@ -1,7 +1,8 @@
 // Demo Compare engine (browser builds, tests): two synthetic rides of a demo scenario, so the
 // workspace has something honest to show without the Rust engine. Both sides draw the same noise
 // from the same seed. Stock and ours-compat ride identically; ours-clean starts its speed tiltback
-// at 18 km/h, so the runs part ways when the target speed passes it. The summary follows the
+// at 18 km/h, so the runs part ways when the target speed passes it. Ours (custom quirks) rides
+// like compat with the compat quirks and like clean with any other mask. The summary follows the
 // definitions of euc-sim's compare module (largest |A - B|, RMS, first sample beyond tolerance);
 // the live engine computes it with that module itself.
 
@@ -16,6 +17,7 @@ import type {
 } from "../engine/compareTypes.ts";
 import { LANE_KEYS } from "../engine/compareTypes.ts";
 import { RunBuffers } from "../engine/compareLive.ts";
+import { describeQuirks } from "../engine/quirkMask.ts";
 import { CHANNELS, CHANNEL_IDS, type ChannelId, type ScenarioInfo } from "../engine/types.ts";
 import { onFrameEarly } from "../lib/frameloop.ts";
 import { SCENARIOS, type Scenario, prng, scenarioTarget } from "./synthetic.ts";
@@ -39,7 +41,18 @@ export const DEMO_COMPARE_FIRMWARES: CompareFirmwareChoice[] = [
   { id: "stock", label: "Stock", detail: "Begode Extreme, official image" },
   { id: "ours-compat", label: "Ours-compat", detail: "Our C rewrite, stock behaviour" },
   { id: "ours-clean", label: "Ours-clean", detail: "Our C rewrite, quirks fixed" },
+  {
+    id: "ours-custom",
+    label: "Ours-custom",
+    detail: "Ours (custom quirks): our C rewrite on the host, quirks switched below",
+  },
 ];
+
+/** Whether a side rides the demo's clean behaviour. */
+function ridesClean(side: CompareRequest["a"]): boolean {
+  if (side.kind === "ours-clean") return true;
+  return side.kind === "ours-custom" && describeQuirks(side.quirks) !== "compat";
+}
 
 /** One synthetic ride, stepped at 50 Hz. */
 class Ride {
@@ -212,13 +225,17 @@ export class DemoCompare implements CompareClient {
     const samples = Math.ceil(duration * HZ) + 2;
     const info = (side: CompareRequest["a"]) => {
       const choice = DEMO_COMPARE_FIRMWARES.find((f) => f.id === side.kind);
-      return { spec: side.kind, label: choice?.label ?? side.kind, sha256: "", checks_skipped: [] };
+      const label =
+        side.kind === "ours-custom"
+          ? `ours-sil (${describeQuirks(side.quirks)})`
+          : (choice?.label ?? side.kind);
+      return { spec: side.kind, label, sha256: "", checks_skipped: [] };
     };
     this.a.reset(samples, info(request.a), []);
     this.b.reset(samples, info(request.b), []);
     this.rides = [
-      new Ride(scenario, request.a.kind === "ours-clean", 7),
-      new Ride(scenario, request.b.kind === "ours-clean", 7),
+      new Ride(scenario, ridesClean(request.a), 7),
+      new Ride(scenario, ridesClean(request.b), 7),
     ];
     this.request = request;
     this.summary = null;

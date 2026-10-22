@@ -55,6 +55,8 @@ pub enum FirmwareSpec {
     OursCompat,
     /// Our clean build in `firmware/build/target-clean/`.
     OursClean,
+    /// Our firmware as the host SIL library (`firmware/build/host-sil/`), with these quirks on.
+    OursCustom { quirks: Vec<String> },
     /// A `.bin` or `.elf` the user picked (an ELF names our variables through `probes.toml`).
     File { name: String, bytes: Vec<u8> },
 }
@@ -65,6 +67,7 @@ impl FirmwareSpec {
             Self::Stock => "stock",
             Self::OursCompat => "ours-compat",
             Self::OursClean => "ours-clean",
+            Self::OursCustom { .. } => "ours-custom",
             Self::File { .. } => "file",
         }
     }
@@ -218,6 +221,12 @@ pub fn compare_info() -> CompareInfo {
                 detail: "Our C rewrite, quirks fixed".into(),
                 disabled_reason: ours("clean"),
             },
+            FirmwareChoice {
+                id: "ours-custom",
+                label: "Ours-custom",
+                detail: "Ours (custom quirks): our C rewrite on the host, quirks switched below".into(),
+                disabled_reason: super::images::sil_library().err(),
+            },
         ],
         scenarios: scenarios::infos(),
         tolerance_file: TOLERANCE_FILE,
@@ -306,6 +315,8 @@ struct Firmware {
     sha256: Sha256,
     stock: bool,
     map: Option<StockMap>,
+    /// Our firmware as the SIL library: the library and its quirk mask.
+    sil: Option<super::images::SilRun>,
 }
 
 /// One side while it runs.
@@ -343,7 +354,7 @@ impl Side {
         Ok(Self {
             info: RunInfo { spec: spec.id().to_owned(), label: fw.label, sha256: fw.sha256, checks_skipped },
             scenario,
-            trace: Trace::new(files.hclk()),
+            trace: Trace::of_session(&session),
             session,
             ride,
         })
@@ -511,6 +522,20 @@ fn load_firmware(files: &WheelFiles, spec: &FirmwareSpec, progress: &mut dyn FnM
             let elf = if elf.is_file() { Some(read(&elf)?) } else { None };
             (read(&path)?, format!("ours-{profile}"), elf)
         }
+        FirmwareSpec::OursCustom { quirks } => {
+            let choice = format!("{}:{}", super::images::OURS_CUSTOM, quirks.join(","));
+            super::images::validate_choice(&choice)?;
+            let loaded = super::images::load(files, &choice, progress)?;
+            let sha256 = Sha256::digest(&loaded.image);
+            return Ok(Firmware {
+                image: loaded.image,
+                label: loaded.label,
+                sha256,
+                stock: false,
+                map: loaded.map,
+                sil: loaded.sil,
+            });
+        }
         FirmwareSpec::File { name, bytes } => (bytes.clone(), name.clone(), None),
     };
     let (image, elf) = if bytes.starts_with(b"\x7fELF") {
@@ -539,7 +564,7 @@ fn load_firmware(files: &WheelFiles, spec: &FirmwareSpec, progress: &mut dyn FnM
         }
     };
     let label = if stock && !matches!(spec, FirmwareSpec::Stock) { format!("{label} (stock build)") } else { label };
-    Ok(Firmware { image, label, sha256, stock, map })
+    Ok(Firmware { image, label, sha256, stock, map, sil: None })
 }
 
 /// A session at power-on that rides `scenario` with `fw`, sampled as `euc sim compare` samples.
@@ -558,12 +583,20 @@ fn ride_session(files: &WheelFiles, scenario: &Scenario, fw: &Firmware) -> Resul
         injections: scenario.inject.iter().map(|i| (i.at_s, i.bytes.bytes().collect())).collect(),
         power_cycles: Vec::new(),
         cpi: euc_sim::DEFAULT_CPI,
-        exception_timing: euc_sim::ExceptionTiming::default(),
+        exception_timing: if fw.sil.is_some() {
+            euc_sim::sil::EXCEPTION_TIMING
+        } else {
+            euc_sim::ExceptionTiming::default()
+        },
         max_quantum: 4000,
         marker_window_s: 4.0,
     };
     let live = files.live_on(scenario.rider, scenario.assist, scenario.terrain.clone()).map_err(|e| e.to_string())?;
-    let machine = Machine::new_live(&config, &euc_sim::registry(), cpu::factory()?, live).map_err(|e| e.to_string())?;
+    let factory = match &fw.sil {
+        Some(sil) => sil.library.factory(sil.mask),
+        None => cpu::factory()?,
+    };
+    let machine = Machine::new_live(&config, &euc_sim::registry(), factory, live).map_err(|e| e.to_string())?;
     Ok(Session::new(machine, fw.map.as_ref(), SAMPLE_HZ))
 }
 
@@ -587,6 +620,10 @@ mod tests {
         assert_eq!((spec.a.id(), spec.b.id()), ("stock", "file"));
         let compat: FirmwareSpec = serde_json::from_str(r#"{"kind":"ours-compat"}"#).unwrap();
         assert_eq!(compat.id(), "ours-compat");
+        let custom: FirmwareSpec =
+            serde_json::from_str(r#"{"kind":"ours-custom","quirks":["ASIN_ACCEL","KEIL_FTZ"]}"#).unwrap();
+        assert_eq!(custom.id(), "ours-custom");
+        assert!(matches!(custom, FirmwareSpec::OursCustom { quirks } if quirks == ["ASIN_ACCEL", "KEIL_FTZ"]));
     }
 
     /// The web view reads these shapes (src/engine/compareLive.ts, compareTypes.ts).

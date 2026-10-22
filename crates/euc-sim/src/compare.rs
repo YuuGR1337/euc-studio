@@ -8,7 +8,7 @@
 
 use std::collections::BTreeMap;
 
-use euc_telemetry::{CHANNELS, Event, Signals};
+use euc_telemetry::{CHANNELS, Channel, Event, Signals};
 use serde::{Deserialize, Serialize};
 
 /// One run, as the comparison needs it.
@@ -26,12 +26,24 @@ pub struct Trace {
     pub hclk: u64,
     /// The run's events.
     pub events: Vec<Event>,
+    /// Channels the run states it does not measure: the ISR load of a machine without exception
+    /// timing (a SIL run). Only this statement excuses a channel that is `NaN` on one side; see
+    /// [`Trace::of_session`].
+    pub unmeasured: Vec<Channel>,
 }
 
 impl Trace {
     /// An empty trace for an engine of `hclk` cycles per second.
     pub fn new(hclk: u64) -> Self {
         Self { hclk, ..Self::default() }
+    }
+
+    /// An empty trace of `session`'s run: its clock, and the channels its machine states it does not
+    /// measure (the ISR load needs exception timing: [`crate::Machine::isr_metrics_available`]).
+    pub fn of_session(session: &crate::Session) -> Self {
+        let machine = session.machine();
+        let unmeasured = if machine.isr_metrics_available() { Vec::new() } else { vec![Channel::IsrLoadPct] };
+        Self { hclk: machine.hclk(), unmeasured, ..Self::default() }
     }
 
     /// Adds one sample: its time, telemetry and the variables read now.
@@ -266,6 +278,9 @@ pub struct Comparison {
     pub first_divergence: Option<Divergence>,
     /// Telemetry channels, in channel id order.
     pub channels: Vec<SeriesDiff>,
+    /// Channels a run states it does not measure ([`Trace::unmeasured`]: the ISR load of a SIL run)
+    /// and has no value for, where no tolerance judges them: left out of `channels`.
+    pub channels_unavailable: Vec<String>,
     /// Firmware variables both runs name, sorted.
     pub vars: Vec<SeriesDiff>,
     /// Variables only one run names.
@@ -292,14 +307,23 @@ pub fn compare(a: &Trace, b: &Trace, tol: &Tolerances) -> Result<Comparison, Str
         return Err(format!("sample {i} is at {} s in A and {} s in B", a.t[i], b.t[i]));
     }
     let times = &a.t[..count];
+    let mut channels_unavailable = Vec::new();
     let channels: Vec<SeriesDiff> = CHANNELS
         .iter()
-        .map(|spec| {
+        .filter_map(|spec| {
             let column =
                 |trace: &Trace| trace.signals[..count].iter().map(|s| f64::from(s.get(spec.channel))).collect();
             let (ca, cb): (Vec<f64>, Vec<f64>) = (column(a), column(b));
             let limits = (tol.channels.of(spec.key), tol.channels_rms.of(spec.key));
-            series(spec.key, spec.unit, times, &ca, &cb, limits)
+            // Left out only where a run states it does not measure the channel and has no value for it;
+            // any other `NaN` on one side is a difference (a regression can look exactly like it).
+            let unmeasured =
+                |trace: &Trace, c: &[f64]| trace.unmeasured.contains(&spec.channel) && c.iter().all(|v| v.is_nan());
+            if limits == (None, None) && (unmeasured(a, &ca) || unmeasured(b, &cb)) {
+                channels_unavailable.push(spec.key.to_owned());
+                return None;
+            }
+            Some(series(spec.key, spec.unit, times, &ca, &cb, limits))
         })
         .collect();
     let vars: Vec<SeriesDiff> = a
@@ -361,6 +385,7 @@ pub fn compare(a: &Trace, b: &Trace, tol: &Tolerances) -> Result<Comparison, Str
         duration_s: times.last().copied().unwrap_or(0.0),
         first_divergence: first,
         channels,
+        channels_unavailable,
         vars,
         vars_unpaired,
         ble,
@@ -609,6 +634,39 @@ mod tests {
                 .unwrap_err()
                 .contains("no such telemetry channel")
         );
+    }
+
+    #[test]
+    fn only_a_run_that_states_it_does_not_measure_a_channel_excuses_its_nan() {
+        let mut a = trace(&[1.0, 2.0], &[]);
+        for s in &mut a.signals {
+            s.isr_load_pct = 40.0;
+        }
+        let silent = trace(&[1.0, 2.0], &[]);
+        let isr = |c: &Comparison| c.channels.iter().find(|s| s.name == "isr_load_pct").map(|s| s.max_abs);
+
+        // No statement: the missing ISR load is a difference, as any other channel's.
+        let c = compare(&a, &silent, &Tolerances::default()).unwrap();
+        assert_eq!(c.channels_unavailable, Vec::<String>::new());
+        assert!(isr(&c).is_some_and(f64::is_infinite));
+        assert_eq!(c.first_divergence.as_ref().map(|d| d.name.as_str()), Some("isr_load_pct"));
+
+        // The run says it has no ISR load (a SIL run): listed, not compared.
+        let stated = Trace { unmeasured: vec![Channel::IsrLoadPct], ..silent.clone() };
+        let c = compare(&a, &stated, &Tolerances::default()).unwrap();
+        assert_eq!(c.channels_unavailable, ["isr_load_pct"]);
+        assert!(isr(&c).is_none() && c.first_divergence.is_none());
+        let c = compare(&stated, &a, &Tolerances::default()).unwrap();
+        assert_eq!(c.channels_unavailable, ["isr_load_pct"]);
+
+        // A statement excuses only that channel, and a tolerance on it still judges it.
+        let mut slow = stated.clone();
+        slow.signals[1].speed_kmh = f32::NAN;
+        let c = compare(&a, &slow, &Tolerances::default()).unwrap();
+        assert!(c.channels[0].max_abs.is_infinite());
+        let judged = Tolerances::from_toml("[channels]\nisr_load_pct = 5.0").unwrap();
+        let c = compare(&a, &stated, &judged).unwrap();
+        assert_eq!((c.channels_unavailable, c.within_tolerance), (Vec::<String>::new(), false));
     }
 
     #[test]
