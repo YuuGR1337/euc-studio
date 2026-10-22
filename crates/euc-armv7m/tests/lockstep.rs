@@ -71,13 +71,16 @@ struct Stats {
     own_seconds: f64,
 }
 
-/// Unicorn drives the machine; our core shadows each quantum.
+/// Unicorn drives the machine; our core shadows each quantum. With `timed`, the shadow runs the
+/// flash timing model and the machine takes its time from that model's clock, so the instructions
+/// are checked under the flash model's quanta too (Unicorn itself has no timing model).
 struct LockStep {
     reference: UnicornCpu,
     own: Armv7m,
     memory: Vec<Shadowed>,
     log: Vec<Call>,
     stats: Rc<RefCell<Stats>>,
+    timed: bool,
 }
 
 /// Records the reference run's bus calls and what the engine wrote to memory during each.
@@ -270,7 +273,7 @@ impl LockStep {
     /// # Safety
     ///
     /// As for `UnicornCpu::new`.
-    unsafe fn new(regions: &[Region], stats: Rc<RefCell<Stats>>) -> Result<Self, String> {
+    unsafe fn new(regions: &[Region], stats: Rc<RefCell<Stats>>, timed: bool) -> Result<Self, String> {
         // SAFETY: forwarded from this function's contract.
         let reference = unsafe { UnicornCpu::new(regions) }.map_err(|e| e.to_string())?;
         let mut memory = Vec::new();
@@ -290,8 +293,11 @@ impl LockStep {
         }
         // SAFETY: the copies are boxed (they never move) and live in `self.memory` next to the
         // core; they are only touched between runs or by the replaying bus during a run.
-        let own = unsafe { Armv7m::new(&shadow_regions) }.map_err(|e| e.to_string())?;
-        Ok(Self { reference, own, memory, log: Vec::new(), stats })
+        let mut own = unsafe { Armv7m::new(&shadow_regions) }.map_err(|e| e.to_string())?;
+        if timed {
+            own.set_flash(Some(euc_armv7m::Flash::STM32F1_72MHZ));
+        }
+        Ok(Self { reference, own, memory, log: Vec::new(), stats, timed })
     }
 }
 
@@ -398,27 +404,44 @@ impl Cpu for LockStep {
         self.reference.invalidate(addr, len);
         self.own.invalidate(addr, len);
     }
+
+    fn model_cycles(&self) -> Option<u64> {
+        if self.timed { self.own.model_cycles() } else { None }
+    }
+
+    /// Unicorn cannot stop on a cycle count, so the quantum gets at most one instruction per two
+    /// cycles of the limit (the model's CPI on this firmware is above 2), and never fewer than one.
+    fn run_for(&mut self, bus: &mut dyn Bus, max_instr: u32, max_cycles: u64) -> Exit {
+        let budget = (max_cycles / 2).clamp(1, u64::from(max_instr)) as u32;
+        self.run(bus, budget)
+    }
 }
 
 #[test]
 fn stock_image_runs_in_lockstep_with_unicorn() {
     let seconds = common::seconds("EUC_LOCKSTEP_SECONDS", 30.0);
-    check_stock_lockstep(seconds, 1.25, euc_sim::ExceptionTiming::REFERENCE);
+    check_stock_lockstep(seconds, 1.25, euc_sim::ExceptionTiming::REFERENCE, false);
 }
 
 #[test]
 fn stock_image_keeps_lockstep_with_shipped_exception_timing() {
-    check_stock_lockstep(6.0, euc_sim::DEFAULT_CPI, euc_sim::ExceptionTiming::default());
+    check_stock_lockstep(6.0, euc_sim::DEFAULT_CPI, euc_sim::ExceptionTiming::default(), false);
 }
 
-fn check_stock_lockstep(seconds: f64, cpi: f64, exception_timing: euc_sim::ExceptionTiming) {
+/// The machine timed by the flash model (on the shadow core): the instructions still agree.
+#[test]
+fn stock_image_keeps_lockstep_under_the_flash_timing_model() {
+    check_stock_lockstep(6.0, euc_sim::DEFAULT_CPI, euc_sim::ExceptionTiming::with_flash_wait_states(2), true);
+}
+
+fn check_stock_lockstep(seconds: f64, cpi: f64, exception_timing: euc_sim::ExceptionTiming, timed: bool) {
     let Some((wheel, image)) = common::stock() else { return };
     let stats = Rc::new(RefCell::new(Stats::default()));
     let shared = Rc::clone(&stats);
     let cpu = Box::new(move |regions: &[Region]| {
         // SAFETY: `Machine::new` owns the memory behind every region in boxed buffers that never
         // move and outlive the CPU, and touches it during a run only from bus callbacks.
-        let cpu = unsafe { LockStep::new(regions, shared) }?;
+        let cpu = unsafe { LockStep::new(regions, shared, timed) }?;
         Ok(Box::new(cpu) as Box<dyn Cpu>)
     });
     let common::Run { report, wall, .. } =

@@ -1,10 +1,14 @@
 ---
 # clang-tidy for firmware C code. Runs while compiling when configured with -DEUC_CLANG_TIDY=ON.
 # Every finding is an error. Suppress a single line only with a NOLINT comment that says why.
+# bugprone-signed-bitwise is off: LLVM 23 added it to bugprone-* (it was hicpp-signed-bitwise, never enabled
+# here), and cppcheck's MISRA C:2012 rule 10.1 already checks signed bitwise operands, with the recorded
+# deviations (fixed-point helpers in core/include/euc/math/fixed.h, fdlibm-derived code in core/math/libm.c).
 Checks: >
   -*,
   bugprone-*,
   -bugprone-easily-swappable-parameters,
+  -bugprone-signed-bitwise,
   cert-*,
   readability-avoid-const-params-in-decls,
   readability-braces-around-statements,

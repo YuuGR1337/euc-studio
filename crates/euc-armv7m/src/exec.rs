@@ -130,6 +130,7 @@ impl Armv7m {
     fn read(&mut self, bus: &mut dyn Bus, addr: u32, n: u32) -> Result<u32, Stop> {
         for ram in &self.mem.rams {
             if let Some(off) = ram.offset(addr, n) {
+                self.flash_reads += u32::from(ram.flash);
                 return Ok(ram.read(off, n));
             }
         }
@@ -146,7 +147,10 @@ impl Armv7m {
         let mut value = 0;
         for (at, size) in pieces(addr, n) {
             let piece = match self.mem.find(at, size) {
-                Some((r, off)) => self.mem.rams[r].read(off, size),
+                Some((r, off)) => {
+                    self.flash_reads += u32::from(self.mem.rams[r].flash);
+                    self.mem.rams[r].read(off, size)
+                }
                 None => self.bus_read(bus, at, size)?,
             };
             value |= piece << (8 * at.wrapping_sub(addr));
@@ -160,6 +164,8 @@ impl Armv7m {
         }
         bus.note_pc(self.r[15].wrapping_sub(4));
         self.bus_touched = true;
+        // Data flash sits behind the bus but reads through the same flash interface.
+        self.flash_reads += u32::from(self.flash.is_some_and(|flash| flash.contains(addr)));
         bus.read(addr, size_of(n)).map_err(|fault| abort(Fault::Bus(fault)))
     }
 

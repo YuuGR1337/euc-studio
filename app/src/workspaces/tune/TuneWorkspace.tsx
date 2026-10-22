@@ -13,6 +13,7 @@ import { ProbeScope } from "./ProbeScope.tsx";
 import { useTune } from "./useTune.ts";
 import { TriggerControls } from "./TriggerControls.tsx";
 import { HandlerTable } from "./HandlerTable.tsx";
+import { QuirkPanel } from "./QuirkPanel.tsx";
 import { captureKey, type TriggerConfig, type TriggerMode } from "./triggers.ts";
 
 export function TuneWorkspace({ active }: { active: boolean }) {
@@ -24,7 +25,7 @@ export function TuneWorkspace({ active }: { active: boolean }) {
   const [thresholdText, setThresholdText] = useState("0");
   const [postSeconds, setPostSeconds] = useState(5);
   const [includeHandlers, setIncludeHandlers] = useState(true);
-  const [instrument, setInstrument] = useState<"scopes" | "handlers">("scopes");
+  const [instrument, setInstrument] = useState<"scopes" | "handlers" | "quirks">("scopes");
   const [layout] = useState(() =>
     readStored<Layout>("layout.tune.probes", { variables: 30, instruments: 70 }),
   );
@@ -82,7 +83,7 @@ export function TuneWorkspace({ active }: { active: boolean }) {
     <div className="flex h-full min-h-0 flex-col gap-8 overflow-hidden p-8">
       <header className="flex shrink-0 flex-wrap items-center gap-8 px-8">
         <h1 className="text-15 font-semibold">Tune</h1>
-        <Pill tone="info">Read only</Pill>
+        <Pill tone="info">Probes read only</Pill>
         <Pill tone={demo || reason ? "caution" : "neutral"}>
           {demo ? (playback ? "Playback" : "Demo") : (run?.state ?? engine.status.state)}
         </Pill>
@@ -152,8 +153,9 @@ export function TuneWorkspace({ active }: { active: boolean }) {
                   one sample per simulation time.
                 </p>
                 <p>
-                  New sessions clear previous scope data. Memory writes, register bit fields, gain
-                  editing, and runtime quirks are unavailable.
+                  New sessions clear previous scope data. Memory writes, register bit fields and
+                  gain editing are unavailable. The Quirks tab restarts the run with Ours-custom and
+                  the quirks switched there.
                 </p>
                 <p>
                   Triggers capture up to 15 simulation seconds after a sampled crossing. Each
@@ -326,6 +328,7 @@ export function TuneWorkspace({ active }: { active: boolean }) {
               tabs={[
                 { value: "scopes", label: "Scopes", count: selected.length },
                 { value: "handlers", label: "ISR handlers" },
+                { value: "quirks", label: "Quirks" },
               ]}
               aria-label="Tune instruments"
               className="flex h-full min-h-0 flex-col overflow-hidden rounded-12 border border-hairline bg-card [&>[role=tablist]]:h-(--dock-header) [&>[role=tablist]]:shrink-0 [&>[role=tablist]]:border-b [&>[role=tablist]]:border-hairline [&>[role=tablist]]:px-16"
@@ -447,6 +450,12 @@ export function TuneWorkspace({ active }: { active: boolean }) {
                     </section>
                   )}
                 </div>
+              </TabPanel>
+              <TabPanel
+                value="quirks"
+                className="flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden"
+              >
+                <QuirkPanel />
               </TabPanel>
               <TabPanel value="handlers" className="min-h-0 flex-1 data-[state=inactive]:hidden">
                 <HandlerTable

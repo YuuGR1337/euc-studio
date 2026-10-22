@@ -19,6 +19,7 @@ default-members = [
     "crates/euc-proto-begode",
     "crates/euc-sim",
     "crates/euc-stm32f1",
+    "crates/euc-world",
     "crates/euc-ymodem",
 ]
 # The Tauri app has its own workspace until the engine crates it embeds settle. The Python bindings
@@ -55,18 +56,24 @@ euc-sim = { path = "crates/euc-sim" }
 euc-stm32f1 = { path = "crates/euc-stm32f1" }
 euc-telemetry = { path = "crates/euc-telemetry" }
 euc-unicorn = { path = "crates/euc-unicorn" }
+euc-world = { path = "crates/euc-world" }
 euc-ymodem = { path = "crates/euc-ymodem" }
 
 anstream = "1.0"
 anstyle = "1.0"
 anyhow = "1.0"
 clap = { version = "4.6", features = ["derive", "env"] }
+# Stackful coroutines: the host SIL library's thread mode runs on its own stack, so the engine can pause it in
+# the middle of a busy wait (euc-sim `sil`).
+corosensei = "0.3"
 crc32fast = "1.5"
 directories = "6.0"
 # CoreBluetooth for the BLE radio (euc-ble-radio, macOS only): objc2's generated bindings.
 dispatch2 = { version = "0.3", default-features = false, features = ["std", "objc2"] }
 encoding_rs = "0.8"
 hex = "0.4"
+# Loads the host SIL library (libeuc_sil) at run time.
+libloading = "0.8"
 # MuJoCo 3.9.0 (Apache-2.0), linked dynamically from the official release that tools/fetch-mujoco
 # downloads; the `+mj-` suffix must match its VERSION.
 mujoco-rs = { version = "=5.0.0", default-features = false }

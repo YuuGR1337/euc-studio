@@ -172,9 +172,14 @@ feet and the rigid rider, so it changes no verdict of the default or the baselin
 compat-vs-stock verdict.
 
 The compat-vs-stock comparison (`.github/workflows/compare.yml`, run as there) passes on all twenty
-scenarios. Three needed wider speed limits, each written in the tolerance file's notes: the
-articulated rider sways for a few seconds after a push or a stop (about 0.4 Hz, pitch about ±0.4°),
-where the rigid rider settles, so a few cycles of timing part the two firmwares' runs more:
+scenarios. Three needed wider speed limits, each written in the tolerance file's notes. The
+articulated rider sways for a few seconds after a push or a stop (pitch about ±0.4°, a cycle of
+about 3 s), where the rigid rider settles, so a few cycles of timing part the two firmwares' runs
+more. In `balance-60s` the sway is firmware hunting (PRELIMINARY): at standstill the firmware does
+not compensate the inverter dead time, so small commands give almost no torque, and the articulated
+rider's ankle damping keeps the hunting going
+([stock finding 11](../findings/stock-firmware.md#11-no-dead-time-compensation-the-pedals-hunt-at-standstill-preliminary)).
+The stops of the other two scenarios were not tested for it.
 
 | Scenario | Largest difference, articulated | Rigid | New limit |
 |---|---|---|---|

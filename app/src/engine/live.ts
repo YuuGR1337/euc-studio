@@ -10,6 +10,13 @@ import { readBatch } from "./batch.ts";
 import type { Tone } from "./buzzerAudio.ts";
 import { POSE_MAX_BODIES, PoseHistory } from "./poseHistory.ts";
 import {
+  customFirmware,
+  sameQuirks,
+  splitFirmware,
+  storeCustomQuirks,
+  storedCustomQuirks,
+} from "./quirkMask.ts";
+import {
   type BodyInfo,
   CH,
   type Outputs,
@@ -49,7 +56,8 @@ interface BackendStatus {
   build: string | null;
   backend: string;
   scenario: string;
-  firmware: FirmwareId;
+  /** A FirmwareId, or `ours-custom:ID,ID` with the quirks of a custom run. */
+  firmware: string;
   t_s: number;
   rtf: number;
   target_rtf: number;
@@ -112,6 +120,12 @@ const FIRMWARES: FirmwareInfo[] = [
     detail: "Our C rewrite, quirks fixed",
     disabledReason: "Loading firmware availability",
   },
+  {
+    id: "ours-custom",
+    label: "Ours-custom",
+    detail: "Ours (custom quirks): our firmware on the host, quirks switched in Tune",
+    disabledReason: "Loading firmware availability",
+  },
 ];
 
 export class LiveEngine implements EngineClient {
@@ -154,6 +168,7 @@ export class LiveEngine implements EngineClient {
   playing = true;
   targetRtf = 1;
   firmware: FirmwareId = "stock";
+  quirks: string[] | null = null;
   private firmwareList: FirmwareInfo[] = FIRMWARES;
   /** The file "Record this run" writes, while it does. */
   scenarioId = "";
@@ -315,7 +330,11 @@ export class LiveEngine implements EngineClient {
         this.targetRtf = m.target_rtf;
         this.rtf = m.rtf;
         this.scenarioId = m.scenario;
-        this.firmware = m.firmware;
+        if (typeof m.firmware === "string") {
+          const { id, quirks } = splitFirmware(m.firmware);
+          this.firmware = id as FirmwareId;
+          this.quirks = quirks;
+        }
         break;
       }
       case "reset":
@@ -493,9 +512,16 @@ export class LiveEngine implements EngineClient {
     this.emit();
   }
 
-  setFirmware(id: FirmwareId): void {
-    if (id === this.firmware || this.firmwareList.find((f) => f.id === id)?.disabledReason) return;
-    this.call("engine_set_firmware", { firmware: id });
+  setFirmware(id: FirmwareId, quirks?: readonly string[]): void {
+    if (this.firmwareList.find((f) => f.id === id)?.disabledReason) return;
+    if (id !== "ours-custom") {
+      if (id !== this.firmware) this.call("engine_set_firmware", { firmware: id });
+      return;
+    }
+    const mask = quirks ?? this.quirks ?? storedCustomQuirks();
+    if (quirks) storeCustomQuirks(quirks);
+    if (this.firmware === "ours-custom" && this.quirks && sameQuirks(mask, this.quirks)) return;
+    this.call("engine_set_firmware", { firmware: customFirmware(mask) });
   }
 
   setScenario(id: string): void {

@@ -18,6 +18,13 @@ import type {
   SimEvent,
 } from "../engine/types.ts";
 import { CHANNEL_IDS, HISTORY_SECONDS, SAMPLE_RATE } from "../engine/types.ts";
+import {
+  describeQuirks,
+  normalizeQuirks,
+  sameQuirks,
+  storeCustomQuirks,
+  storedCustomQuirks,
+} from "../engine/quirkMask.ts";
 import type { BodyInfo } from "../engine/telemetry.gen.ts";
 import { RingBuffer } from "../lib/ring.ts";
 
@@ -39,6 +46,11 @@ export const FIRMWARES: FirmwareInfo[] = [
   { id: "stock", label: "Stock", detail: "Begode Extreme, official image" },
   { id: "ours-compat", label: "Ours-compat", detail: "Our C rewrite, stock behaviour" },
   { id: "ours-clean", label: "Ours-clean", detail: "Our C rewrite, quirks fixed" },
+  {
+    id: "ours-custom",
+    label: "Ours-custom",
+    detail: "Ours (custom quirks): our firmware on the host, quirks switched in Tune",
+  },
 ];
 
 export type ScenarioId = "idle" | "ride-20" | "hill" | "brake";
@@ -209,6 +221,8 @@ export class DemoEngine implements EngineClient {
   /** Requested real-time factor. */
   targetRtf = 1;
   firmware: FirmwareId = "stock";
+  /** For `ours-custom`: the quirks it keeps. The demo rides like clean when any is off. */
+  quirks: string[] | null = null;
   scenario: Scenario = SCENARIOS[0] as Scenario;
 
   private seed: number;
@@ -271,9 +285,13 @@ export class DemoEngine implements EngineClient {
     this.emit();
   }
 
-  setFirmware(id: FirmwareId): void {
-    if (this.firmware === id) return;
+  setFirmware(id: FirmwareId, quirks?: readonly string[]): void {
+    const mask =
+      id === "ours-custom" ? normalizeQuirks(quirks ?? this.quirks ?? storedCustomQuirks()) : null;
+    if (this.firmware === id && (mask === null || sameQuirks(mask, this.quirks ?? []))) return;
+    if (id === "ours-custom" && quirks) storeCustomQuirks(quirks);
     this.firmware = id;
+    this.quirks = mask;
     this.reset();
     this.emit();
   }
@@ -445,7 +463,9 @@ export class DemoEngine implements EngineClient {
     this.lastLoop = loop;
 
     const target = scenarioTarget(s, lt);
-    const clean = this.firmware === "ours-clean";
+    const clean =
+      this.firmware === "ours-clean" ||
+      (this.firmware === "ours-custom" && describeQuirks(this.quirks ?? []) !== "compat");
     // By hand, the lean sets how fast the speed changes; a rider who stepped off lets it stop.
     if (this.manual) {
       this.manualSpeed = clamp(

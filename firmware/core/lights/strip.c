@@ -44,11 +44,11 @@
 #define FULL_BRIGHTNESS 100U
 #define COLOUR_MAX      255U
 
-#define WHEEL_STEPS   72U
-#define WHEEL_STEP    21U
-#define WHEEL_UP_TOP  231U /* past this a rising channel saturates */
-#define WHEEL_DOWN_LO 24U  /* under this a falling channel drops to 0 */
-#define WHEEL_FULL    0xFFU
+#define WHEEL_STEPS      72U /* one turn of the colour wheel */
+#define WHEEL_SIXTH      12U /* steps from one corner colour to the next */
+#define WHEEL_STEP       21U
+#define WHEEL_FULL       0xFFU
+#define WHEEL_LAST_PHASE 6U /* green falling, back to red */
 
 /* Ring position (1..12) to LED (1-based), per side. */
 static uint32_t side_a_led(uint32_t position)
@@ -238,73 +238,71 @@ static void draw_pattern_0(struct euc_strip_state *state, const struct euc_strip
     }
 }
 
-static uint8_t wheel_up(uint8_t value)
+/*
+ * The colour wheel of pattern 1: red, magenta, blue, cyan, green, yellow and back to red, one channel moving
+ * by 21 per step, 12 steps per sixth. A rising channel goes 21, 42 .. 231 and then saturates at 255; a
+ * falling one goes 234, 213 .. 24 and then drops to 0. The stock render steps the wheel 72 times, one full
+ * turn, so every render starts from red and its i-th step always has the same colour: wheel_colour(i).
+ */
+static uint8_t wheel_rising(uint32_t k)
 {
-    const uint8_t next = (uint8_t)(value + WHEEL_STEP);
-    return (next > WHEEL_UP_TOP) ? (uint8_t)WHEEL_FULL : next;
+    return (k >= (WHEEL_SIXTH - 1U)) ? (uint8_t)WHEEL_FULL : (uint8_t)(WHEEL_STEP * (k + 1U));
 }
 
-static uint8_t wheel_down(uint8_t value)
+static uint8_t wheel_falling(uint32_t k)
 {
-    const uint8_t next = (uint8_t)(value - WHEEL_STEP);
-    return (next < WHEEL_DOWN_LO) ? 0U : next;
+    return (k >= (WHEEL_SIXTH - 1U)) ? 0U : (uint8_t)(WHEEL_FULL - (WHEEL_STEP * (k + 1U)));
 }
 
-/* One step of the colour wheel: red, magenta, blue, cyan, green, yellow, red, 12 steps each. */
-static void wheel_step(struct euc_strip_state *state)
+/* The colour after step + 1 steps from red (step 0..71). */
+static struct euc_strip_pixel wheel_colour(uint32_t step)
 {
-    const uint8_t g = state->wheel_green;
-    const uint8_t r = state->wheel_red;
-    const uint8_t b = state->wheel_blue;
-    uint8_t phase = state->wheel_phase;
-    if ((g == 0U) && (b == 0U)) {
-        phase = 1U;
-    } else if ((b == WHEEL_FULL) && (r == WHEEL_FULL)) {
-        phase = 2U;
-    } else if ((r == 0U) && (g == 0U)) {
-        phase = 3U;
-    } else if ((g == WHEEL_FULL) && (b == WHEEL_FULL)) {
-        phase = 4U;
-    } else if ((b == 0U) && (r == 0U)) {
-        phase = 5U;
-    } else if ((r == WHEEL_FULL) && (g == WHEEL_FULL)) {
-        phase = 6U;
-    } else {
-        /* between corners: keep going */
-    }
-    switch (phase) {
-    case 1U:
-        state->wheel_blue = wheel_up(b);
+    const uint32_t k = step % WHEEL_SIXTH;
+    struct euc_strip_pixel colour;
+    switch (step / WHEEL_SIXTH) {
+    case 0U: /* blue rises: red to magenta */
+        colour = (struct euc_strip_pixel){WHEEL_FULL, 0U, wheel_rising(k)};
         break;
-    case 2U:
-        state->wheel_red = wheel_down(r);
+    case 1U: /* red falls: to blue */
+        colour = (struct euc_strip_pixel){wheel_falling(k), 0U, WHEEL_FULL};
         break;
-    case 3U:
-        state->wheel_green = wheel_up(g);
+    case 2U: /* green rises: to cyan */
+        colour = (struct euc_strip_pixel){0U, wheel_rising(k), WHEEL_FULL};
         break;
-    case 4U:
-        state->wheel_blue = wheel_down(b);
+    case 3U: /* blue falls: to green */
+        colour = (struct euc_strip_pixel){0U, WHEEL_FULL, wheel_falling(k)};
         break;
-    case 5U:
-        state->wheel_red = wheel_up(r);
+    case 4U: /* red rises: to yellow */
+        colour = (struct euc_strip_pixel){wheel_rising(k), WHEEL_FULL, 0U};
         break;
-    default:
-        state->wheel_green = wheel_down(g);
+    default: /* green falls: back to red */
+        colour = (struct euc_strip_pixel){WHEEL_FULL, wheel_falling(k), 0U};
         break;
     }
-    state->wheel_phase = phase;
+    return colour;
 }
 
+/*
+ * Step i of the turn draws ring position (i + ring) % 72 + 1, and only positions 1..12 have LEDs, so each LED
+ * is drawn once per render, by step (position - 1 - ring) mod 72. Drawing those 12 steps directly gives the
+ * stock pixels without the other 60 steps (the 24 kHz FOC interrupt preempts this tick, which runs in the
+ * 496 Hz RTC interrupt, so its length matters).
+ */
 static void draw_pattern_1(struct euc_strip_state *state, const struct euc_strip_render_in *in)
 {
     const uint32_t brightness = (state->standstill == STANDSTILL_BREATHING) ? state->breath : FULL_BRIGHTNESS;
-    for (uint32_t i = 0U; i < WHEEL_STEPS; i++) {
-        const uint32_t position = ((i + ring_start(state)) % WHEEL_STEPS) + 1U;
-        wheel_step(state);
-        const struct euc_strip_pixel colour = {state->wheel_red, state->wheel_green, state->wheel_blue};
+    const uint32_t ring = ring_start(state) % WHEEL_STEPS;
+    for (uint32_t position = 1U; position <= RING_LEDS; position++) {
+        const uint32_t step = ((position - 1U) + WHEEL_STEPS - ring) % WHEEL_STEPS;
+        const struct euc_strip_pixel colour = wheel_colour(step);
         set_led(state, side_b_led(position), brightness, colour);
         set_led(state, side_a_led(position), brightness, colour);
     }
+    /* Where the wheel stands after the turn, as the stock steps leave it: red, in its last sixth. */
+    state->wheel_red = WHEEL_FULL;
+    state->wheel_green = 0U;
+    state->wheel_blue = 0U;
+    state->wheel_phase = WHEEL_LAST_PHASE;
     const bool moving = in->display_speed >= STILL_KMH;
     if (moving && (in->roll_deg < -TURN_ROLL_DEG)) {
         turn_flash(state, 1U, in->time_base, TURN_OFF_NEGATIVE);

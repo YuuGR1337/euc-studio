@@ -52,9 +52,9 @@ The simulator reproduces the observed interfaces. Unknown hardware values remain
 | M0 Foundation | Repository, CI, vendor guard, fetch and image gates | Maintain these gates for new features |
 | M1 Stock boots | Stock boots and sends telemetry on the Rust engine | Broader hardware calibration |
 | M2 Stock rides in 3D | Live electrical/body physics, terrain, display, telemetry and Ride workspace | Measured battery, motor and suspension limits |
-| M3 Own CPU core | Own ARMv7-M core and reference lockstep checks | Detailed flash timing; Tune memory writes, gain editing, and runtime quirks |
+| M3 Own CPU core | Own ARMv7-M core and reference lockstep checks | Detailed flash timing; Tune memory writes and gain editing |
 | M4 Human rider | Rigid and articulated rider control, fall release, scenarios, .eucrec recordings, Python bindings, generated-map free ride, and recorded map context | Independent foot contact, calibrated human response, exact audio playback, and broader physical validation |
-| M5 Our firmware | Compat and clean run in the simulator, desktop, and CLI | Known cut-off edge cases; hardware validation |
+| M5 Our firmware | Compat and clean run in the simulator, desktop, and CLI; the SIL library switches every quirk at run time ([SIL](docs/sil.md)) | Known cut-off edge cases; hardware validation |
 | M6 Flasher | Image gate; separate simulation/sealing foundation patches | OTA protocol, complete safety gates and fault-recovery evidence |
 | M7 Release | Desktop source builds, local package tooling, and wheel onboarding work | Final integrated package checks, public signing, docs site, browser firmware demo and a second wheel |
 | M8 Bench | Safety procedure only | Authorized controlled bench work and trace comparison |

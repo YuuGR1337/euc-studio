@@ -305,3 +305,12 @@ In the other sixteen shipped scenarios the contact rider leaves the pedals only 
 Lateral balance and twisting still come from the external aids.
 Welded feet pass the controller's whole ankle torque to the shell, more than real soles carry.
 The segment fractions, joint gains, sole size and friction remain estimates.
+
+Standing still after a push, the default rider sways for several seconds (pedal pitch about ±0.4°).
+After the backward push of `balance-60s` it does not settle within 15 s, where the rigid rider settles in 8.5 s.
+The sway is firmware hunting sustained by the ankle damping.
+The drive does not compensate the inverter dead time, so at standstill small motor commands give almost no torque
+([stock finding 11](../findings/stock-firmware.md#11-no-dead-time-compensation-the-pedals-hunt-at-standstill-preliminary)).
+The ankle damping (60 N·m·s/rad per ankle, an estimate) couples the pedals to the legs and keeps the hunting going.
+With no dead time in the plant the rider settles in 7.5 s, and with no ankle damping in 11.5 s (2026-10-22).
+The ankle damping stays as it is: no measurement supports a lower value.

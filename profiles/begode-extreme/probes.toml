@@ -11,7 +11,7 @@
 
 schema = 1
 
-layout = 0x9ffb88a1  # id of the measured layout; the image carries it as euc_probe_layout
+layout = 0x80eb644b  # id of the measured layout; the image carries it as euc_probe_layout
 
 [[var]]
 name = "telemetry_pause"
@@ -183,3 +183,19 @@ offset = 804  # app.strip.breath
 size = 1
 kind = "u8"
 note = "breathing brightness, 0..131"
+
+[[var]]
+name = "strip_jobs_dropped"
+symbol = "app"
+offset = 2052  # app.strip_jobs_dropped
+size = 4
+kind = "u32"
+note = "ticks whose strip inputs found the queue full; 0"
+
+[[var]]
+name = "strip_jobs_most_waiting"
+symbol = "app"
+offset = 2056  # app.strip_jobs_most_waiting
+size = 4
+kind = "u32"
+note = "the most ticks ever waiting for the main loop to render the strip (queue of 32)"

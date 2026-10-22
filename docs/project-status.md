@@ -11,13 +11,14 @@ See [the rider change](#rider-default-2026-10-22) below.
 | Area | Current behavior | Remaining work |
 | --- | --- | --- |
 | Rider | Six-joint articulated rider (the default), lean from the ankles, opt-in independent foot contact, lean-to-turn, command delay, and high-speed yaw damping | Centre-of-pressure-aware lean control (then contact feet by default), lateral balance without aids, and measured human calibration |
-| Desktop | Ride, Tune, Claude Compare, scenario import, manual controls, generated maps, native sound, lights, and buttons | Runtime gain edits and runtime quirk toggles |
+| Desktop | Ride, Tune, Claude Compare, scenario import, manual controls, generated maps, native sound, lights, and buttons; quirk switches for the Ours-custom firmware in Tune and Compare | Runtime gain edits |
+| SIL | Our firmware as a host library (`ours-sil`, Ours-custom in the studio) on the same machine, peripherals, plant and rider; every quirk switches at run time | Instruction timing (fixed estimated costs, no ISR load), a first CI run on Linux (`--defsym` link), Windows (refused with a clear message), and the library in the app bundle |
 | Recordings | One .eucrec format across desktop, CLI, and Python; capture, save, open, seek, and playback | Precise audio playback and complete historical profile snapshots |
 | Recording integrity | Limits apply before decoding; duplicate indexes, inconsistent counts, and invalid sample bounds fail | Broader storage-failure injection |
 | Recording context | Actual rider model, external aids, scenario text, and generated Free Ride map; CLI scenario recordings too | Complete parameter preset snapshots |
 | Python | Existing euc_studio API, typed Session, phase results, reset, recording save, and recording import | Linux and Windows package verification |
-| Engine | RTC correction, battery bounds, supply-state handling, output telemetry, image seal, and flash simulation | Complete OTA transport and recovery proof |
-| Firmware | Earlier approved clean cutoff and headroom changes remain | System-level stock/compat equivalence beyond limited comparison windows |
+| Engine | RTC correction, battery bounds, supply-state handling, output telemetry, image seal, flash simulation, and a selectable per-instruction flash timing model (fixed CPI 2.0 stays the default) | Complete OTA transport and recovery proof; exact MMIO timestamps inside a quantum |
+| Firmware | Earlier approved clean cutoff and headroom changes remain; a bit-identical speed-up and the LED strip rendered in the main loop, as stock does, cut compat's RTC tick from about 77,900 to 45,500 cycles and its interrupt load from about 95 % to 67 % (clean: 92 % to 68 %) | Compat's tick is still 1.2 times stock's, almost all before the command store (libgcc's double add, float comparison calls), and the SOC50 regime still differs |
 | Distribution | Local package tooling and development app | Final release packaging, public signing, and notarization |
 
 ## Checks completed
@@ -85,6 +86,42 @@ No production code, firmware image, physical input, or acceptance limit changes 
 The [follow-up](models/soc50-high-speed-investigation.md) confirms the launch Hall transition and rules out the actuator cap in two stock counterfactuals.
 Sixteen additional quantum studies expose timing sensitivity down to one instruction per quantum.
 Both one-instruction cases cut before 70 km/h; full-run equivalence remains open.
+
+The [third SOC50 study](models/soc50-full-run-equivalence.md) (2026-10-22, base `63801a2`, rigid rider) finds the systematic cause.
+Compat performs stock's arithmetic, but its RTC tick takes about 75,000 cycles against stock's 37,000.
+Its libgcc double divide costs 528 instructions per call against stock's 75.
+Compat therefore publishes the motor command about 0.6 ms later in each tick.
+It stays voltage-limited longer at high speed and builds more PWM tiltback and pitch oscillation (p ≤ 0.001 over 12-16 distinct runs).
+A private causal test that swaps only the tick cost swaps the two regimes, and also the SOC20 cutoff times.
+The SOC50 cutoff time itself is chaotic: numerical perturbations alone spread it by more than 2 s.
+No firmware image, tolerance or window changed; the speed-up is a firmware item for the lead.
+
+The [speed-up](models/soc50-full-run-equivalence.md#the-speed-up-2026-10-22-not-yet-sufficient) follows (base `0575f14`).
+An own double divide and float comparisons replace libgcc's through the linker's `--wrap`, and `euc_sqrt` becomes an exact integer root.
+The LED strip and the FOC step lose work that changes no output, and the strip renders in the main loop from a queue of tick inputs, as stock's does.
+Each change is checked bit for bit against the code it replaces: 1 M operand pairs per routine on the Cortex-M3 core, exhaustive checks where the input space allows, and 17.7 M strip calls.
+The strip queue dropped no tick in 72 runs, and the SIL library gives the same ride before and after.
+The full firmware gate, the CI compare loop and sil's six SIL compares pass.
+Compat's tick drops to about 45,500 cycles (stock 37,700) and the FOC handler to 632 cycles (stock 671).
+Over 29 runs per group the SOC50 regime still differs from stock (p = 0.001-0.005); at stock's tick cost it does not.
+SOC20's cutoffs now overlap stock's range, and SOC100 agrees at quanta 4000, 3000 and 2000 on macOS.
+Both comparison exceptions stay: SOC50's verdicts still differ at quantum 3000, and CI checks SOC100 on Linux when this lands.
+Before the speed-up both compat and clean ran at 90-98 % interrupt load, a real-hardware risk of main-loop starvation, not only a simulator effect.
+
+The [stage B timing model](models/cpu-timing.md#flash-timing-stage-b) is selectable with `--timing flash`.
+Against the owner's wheel it gives a 2.515 s breathing period (video 2.1 ± 0.2 s; fixed timing 2.234 s).
+Both timings give 307.45 ms BLE groups (capture 309.6 ms).
+The fixed timing therefore stays the default.
+On stock, both timings give the same 15 passes and 5 expected failures at quanta 4000, 3000 and 2000.
+
+## SIL evidence (M5)
+
+The SIL library runs our compat and clean firmware within the compat-vs-stock tolerance of the emulated images.
+This holds on balance-60s, ride-20kmh-stop and hall-loss-while-riding (to the fault), with the default rider.
+The largest speed difference is 0.63 km/h (clean, ride-20kmh-stop; limit 0.8 km/h).
+Every scenario check gives the same verdict on both sides.
+The SIL has no instruction timing, so the balance acts up to about 1 ms sooner than on the image.
+See [SIL](sil.md#validation) for the numbers and the remaining differences.
 
 ## Rider default, 2026-10-22
 

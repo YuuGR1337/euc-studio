@@ -32,12 +32,14 @@ Implementation, controlled browser checks, and native firmware acceptance are se
 | Variable scopes                   | Implemented. Four selected scopes keep bounded history.                   |
 | Source and build identity         | Implemented. Replies report runner identity and Session map availability. |
 | Raw memory inspector and writes   | Incomplete. No raw memory API enters this change.                         |
-| Runtime quirk switches            | Incomplete. The desktop has no supported runtime SIL quirk interface.     |
+| Runtime quirk switches            | Implemented. The Quirks tab restarts the run on Ours-custom (SIL).        |
 | Firmware gain editing             | Incomplete. Named reads do not establish safe parameter writes.           |
 | Persistent tuning presets         | Incomplete. No write path or preset storage enters this change.           |
 | Compare workspace                 | Separate workspace with its own A/B runner and acceptance checks.         |
 
-Register bit fields, gain editing, memory writes, and runtime quirks remain incomplete.
+Register bit fields, gain editing, and memory writes remain incomplete.
+Quirk switches need the Ours-custom firmware, which runs the SIL library; built images keep their quirks.
+A switch never changes the running firmware: "Restart with these quirks" starts a new run with them.
 Sampled triggers, a shared cursor, and per-handler ISR intervals now appear in [EXTENSIONS.md](EXTENSIONS.md).
 The UI lists those limits explicitly.
 The probe API does not expose a firmware hash or exact map file.
@@ -101,7 +103,7 @@ It calculates interval load from two snapshots and preserves exact 64-bit cycle 
 Paused or completed runs do not produce false zero-load intervals.
 Demo and recording playback show explicit unavailability.
 Bounded sampled post-trigger acquisition is implemented; see EXTENSIONS.md for limits and evidence.
-Memory writes and runtime quirks remain unsupported.
+Memory writes remain unsupported. Quirk switches restart the run on Ours-custom ([docs/sil.md](../../../../docs/sil.md)).
 
 ## Verification
 

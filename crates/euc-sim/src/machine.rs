@@ -6,7 +6,9 @@
 //! quantum cut short by a poll fast-forward, a reset or a halt costing one cycle plus the skip.
 //! Exception entry, return and tail-chaining add the configured context-switch costs.
 //! A quantum's cycles come from the instructions the backend retired, which an exact backend
-//! makes equal to the budget and a block-granular one makes at most one block more.
+//! makes equal to the budget and a block-granular one makes at most one block more. A backend
+//! with its own timing model ([`Cpu::model_cycles`], our core with the flash model) instead ends
+//! each quantum at the next event by its own clock, and the quantum lasts the cycles it counted.
 
 use std::collections::HashMap;
 
@@ -47,13 +49,20 @@ impl ExceptionTiming {
     /// The Python reference harness charges no exception overhead. Only reference comparisons
     /// should use this, together with CPI 1.25.
     pub const REFERENCE: Self = Self { entry: 0, exit: 0, tail_chain: 0 };
+
+    /// Cortex-M3 switch costs with zero-wait memory (12 cycles for entry and return, 6 for a
+    /// tail-chain), each plus `wait_states` for the flash fetch that starts the next context.
+    pub const fn with_flash_wait_states(wait_states: u8) -> Self {
+        let w = wait_states as u64;
+        Self { entry: 12 + w, exit: 12 + w, tail_chain: 6 + w }
+    }
 }
 
 impl Default for ExceptionTiming {
     fn default() -> Self {
-        // Cortex-M3: 12 cycles for entry/exit and 6 for tail-chaining with zero-wait memory.
-        // An extra 2 cycles for flash is an ESTIMATE, not a bus-level flash model.
-        Self { entry: 14, exit: 14, tail_chain: 8 }
+        // Two wait states at 72 MHz: 14/14/8. The extra 2 cycles are an ESTIMATE; the flash
+        // timing model in `euc-armv7m` counts the same costs for the fetch they stand for.
+        Self::with_flash_wait_states(2)
     }
 }
 
@@ -302,9 +311,14 @@ impl Machine {
                 continue;
             }
             let next = self.sys.next_event().map_or(end, |at| at.min(end));
-            let budget = ((next as f64 - self.cycles as f64) / self.cpi) as i64;
-            let budget = budget.clamp(1, i64::from(self.max_quantum)) as u32;
-            self.run_quantum(budget, end);
+            if self.cpu.model_cycles().is_some() {
+                // The core's timing model ends the quantum at the next event itself.
+                self.run_quantum_until(self.max_quantum, next.saturating_sub(self.cycles).max(1), end);
+            } else {
+                let budget = ((next as f64 - self.cycles as f64) / self.cpi) as i64;
+                let budget = budget.clamp(1, i64::from(self.max_quantum)) as u32;
+                self.run_quantum(budget, end);
+            }
         }
         self.sys.chunk_start = self.cycles;
         self.sys.skip = 0;
@@ -313,12 +327,23 @@ impl Machine {
 
     /// Executes and accounts for a quantum, including exception returns and early skips.
     fn run_quantum(&mut self, budget: u32, end: u64) {
+        self.run_quantum_until(budget, u64::MAX, end);
+    }
+
+    /// [`Self::run_quantum`], ending early once a CPU timing model has counted `cycle_limit`
+    /// cycles. With a model, the quantum lasts the model's cycles; otherwise `cpi` per instruction.
+    fn run_quantum_until(&mut self, budget: u32, cycle_limit: u64, end: u64) {
         let cycle_start = self.cycles;
         let slept_start = self.slept_cycles;
         let handler = self.sys.exc.active().last().copied();
         self.sys.begin_quantum(self.cycles);
         let before = self.cpu.retired();
-        let exit = self.cpu.run(&mut self.sys, budget);
+        let model_before = self.cpu.model_cycles();
+        let exit = if model_before.is_some() {
+            self.cpu.run_for(&mut self.sys, budget, cycle_limit)
+        } else {
+            self.cpu.run(&mut self.sys, budget)
+        };
         let executed = self.cpu.retired() - before;
         self.quanta += 1;
         self.handle(exit);
@@ -330,7 +355,11 @@ impl Machine {
             self.cycles = self.sys.chunk_start + self.sys.skip + 1;
         } else {
             self.instr += executed;
-            self.cycles = self.sys.chunk_start + (executed as f64 * self.cpi) as u64 + self.sys.skip;
+            let spent = match (model_before, self.cpu.model_cycles()) {
+                (Some(before), Some(after)) => after - before,
+                _ => (executed as f64 * self.cpi) as u64,
+            };
+            self.cycles = self.sys.chunk_start + spent + self.sys.skip;
             if matches!(exit, Exit::WaitForInterrupt | Exit::WaitForEvent) {
                 self.sleep(end);
             }

@@ -51,6 +51,10 @@ euc_add_unit_test(test_math
     SOURCES unit/test_math.c
     LIBRARIES euc_port_sim)
 
+euc_add_unit_test(test_soft_float
+    SOURCES unit/test_soft_float.c
+    LIBRARIES euc_port_sim)
+
 euc_add_unit_test(test_attitude
     SOURCES unit/test_attitude.c
     LIBRARIES euc_port_sim)

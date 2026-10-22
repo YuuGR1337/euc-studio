@@ -13,6 +13,7 @@ publish.workspace = true
 unicorn = ["dep:euc-unicorn"]
 
 [dependencies]
+corosensei.workspace = true
 euc-armv7m.workspace = true
 euc-core.workspace = true
 euc-devices.workspace = true
@@ -23,6 +24,7 @@ euc-proto-begode.workspace = true
 euc-stm32f1.workspace = true
 euc-telemetry.workspace = true
 euc-unicorn = { workspace = true, optional = true }
+libloading.workspace = true
 object.workspace = true
 serde.workspace = true
 serde_json.workspace = true

@@ -34,6 +34,7 @@ add_library(euc_core STATIC
     lights/lights.c
     lights/strip.c
     math/libm.c
+    math/soft_float.c
     motor/current.c
     motor/foc_math.c
     motor/hall.c
@@ -53,6 +54,9 @@ euc_target_defaults(euc_core)
 target_link_libraries(euc_core PUBLIC euc_core_headers)
 if(CMAKE_CROSSCOMPILING)
     target_link_libraries(euc_core PUBLIC euc_profile)
+    # The linker's --wrap (cmake/image.cmake) needs __wrap___aeabi_* as ordinary object symbols: from an
+    # LTO object the linker cannot resolve the compiler's helper calls to them.
+    set_source_files_properties(math/soft_float.c PROPERTIES COMPILE_OPTIONS "-fno-lto")
 else()
     target_compile_definitions(euc_core PUBLIC EUC_PROFILE_RUNTIME=1)
     set_target_properties(euc_core PROPERTIES

@@ -90,8 +90,11 @@ Without `[body.suspension]` the carriage is left out and the wheel hinges straig
   suspension carriage (in the shell without a suspension). The spin inertia is set directly; the other
   two axes are half of it (a ring).
 - **Suspension.** The Extreme's motor axle slides up into the frame on two vertical rods, held down
-  by a coil-over shock at the rear through a rocker linkage (per side: carriage, link, triangular
-  rocker, shock). In the model the carriage (stator, axle clamps, slider blocks: `unsprung_mass_kg`)
+  by a coil-over shock at the rear through a rocker linkage (per side, from the owner's photos: the
+  shock runs forward and down from its top eye on the rocker, under the rear roller, to its bottom
+  eye on the carriage, and a link joins the rocker's lower pin to the carriage; the rocker's frame
+  pivot is not yet located, `docs/hardware/geometry.md`, "Rear linkage"). In the model the carriage
+  (stator, axle clamps, slider blocks: `unsprung_mass_kg`)
   slides on a joint along `axis_forward_deg` from the shell's vertical, and the wheel spins on the
   carriage, so the motor's reaction torque still reaches the shell. The joint counts compression
   from full extension (the scanned state, where the shell's heights are measured). The linkage's
@@ -105,8 +108,9 @@ Without `[body.suspension]` the carriage is left out and the wheel hinges straig
   rider (where that force carries their weight); on the stand the spring presses the tire into the
   ground, so the sag shows once the stand lets go. Pedals, IMU and rider are on the frame (sprung).
   The tire and the shell never touch each other (an explicit contact exclusion: the tire runs inside
-  the frame). Telemetry channels: `suspension_mm` (axle travel) and `shock_mm` (shock travel, for
-  drawing the shock).
+  the frame). Telemetry channels: `suspension_mm` (axle travel) and `shock_mm` (shock travel). The
+  studio poses the drawn linkage from `suspension_mm`; its shock length follows the drawn linkage,
+  not `shock_mm` (they differ by up to 17 mm while the physics keeps the constant ratio).
 - **Shell.** Mass, centre of mass and inertia from the parameters. The shapes are the scan's collision
   solids (`geometry.toml` `[collision]`: battery packs with their slider channels, seat, handle and
   headlight, rear roller, shock, pedal brackets, and estimated pedal decks), for drawing and for the
@@ -287,12 +291,12 @@ Wheel (`[body]` in `plant.toml`, Begode Extreme values):
 | `suspension.preload_mm` | 2 mm | ESTIMATE |
 | `suspension.stroke_mm` | 55 mm | ESTIMATE: 200 mm DNM coil-overs come with 50-57 mm of stroke |
 | `suspension.eye_to_eye_mm` | 200 mm | MEASURED (owner; drawing only); the scan's older shock was 204 mm |
-| `suspension.linkage_ratio` | 1.2 | ESTIMATE: 66 mm of axle travel (the rods leave 108 mm free above the carriage); used while `ratio_curve` is empty |
-| `suspension.ratio_curve` | none yet | the rocker's leverage along the travel, from the scan and the owner's photos (model) |
-| `suspension.damping_n_s_per_m` | 2200 N·s/m | ESTIMATE: damping ratio about 0.25 for the sprung 100 kg |
+| `suspension.linkage_ratio` | 1.7 | ESTIMATE from the owner's sag (1.6-1.9 with 0-2 mm preload); used while `ratio_curve` is empty |
+| `suspension.ratio_curve` | none | the rocker's leverage along the travel; the photo-measured layout (`docs/hardware/geometry.md`, "Rear linkage") does not fix it yet: its frame pivot and the spring preload are open |
+| `suspension.damping_n_s_per_m` | 2200 N·s/m | ESTIMATE: damping ratio about 0.18 for the sprung 100 kg |
 
-With these values an 80 kg rider sags the suspension 8 mm (13 % of the travel), and the sprung mass
-bounces at about 4.8 Hz with a damping ratio of about 0.25.
+With these values an 80 kg rider sags the suspension 18 mm (19 % of the 93.5 mm axle travel), and
+the sprung mass bounces at about 3.4 Hz with a damping ratio of about 0.18.
 
 Rider and aids (scenario `[rider]`, `[rider.control]`, `[assist]`; these are the defaults):
 

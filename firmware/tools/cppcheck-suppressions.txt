@@ -47,6 +47,8 @@ misra-c2012-2.5:*/core/include/euc/math/fixed.h
 # inverse square root) is reproduced; C11 defines type punning through a union.
 misra-c2012-19.2:*/core/include/euc/math/float_ops.h
 misra-c2012-19.2:*/core/math/libm.c
+# The same for the target's soft-float entry points, which pass a double or float on as its bit pattern.
+misra-c2012-19.2:*/core/math/soft_float.c
 
 # libm.c is derived from fdlibm and kept close to it, so the two can be read side by side:
 #   8.9 (advisory): constants stay at file scope, as in fdlibm.
@@ -58,6 +60,9 @@ misra-c2012-10.8:*/core/math/libm.c
 
 # 8.7 (advisory): the balance steps are public so a lock-step harness can compare each with its stock function.
 misra-c2012-8.7:*/core/balance/*
+# 8.7 (advisory): the soft-float routines are public so the host unit tests can check them; on the target only
+# the --wrap entry points in the same file call them.
+misra-c2012-8.7:*/core/math/soft_float.c
 
 # Attitude. 8.7 (advisory): the gyro range and calibration-offset helpers are called by the app only.
 misra-c2012-8.7:*/core/attitude/*
@@ -114,6 +119,27 @@ misra-c2012-20.5:*/ports/sim/sil.c
 misra-c2012-20.10:*/ports/sim/sil.c
 misra-c2012-8.7:*/ports/sim/sil.c
 
+# The SIL library's board side (host.c, port.c; docs/sil.md). It is a simulator component that runs on the
+# host, never wheel firmware.
+# 8.7 (advisory): the euc_sil_* functions are the library's C ABI, called through the dynamic loader.
+# 20.1, 20.5, 20.7: the probe list is an X-macro (tools/gen_probes.py --emit-sil) included inside the probe
+# table; EUC_SIL_PROBE's `member` parameter is a member designator for offsetof() and sizeof, which cannot
+# take parentheses.
+# 21.4 (<setjmp.h>): when the engine stops a run (power loss, a reset), the firmware is somewhere in the app's
+# code; longjmp takes it back to euc_sil_run() at once, as the reset takes the MCU away from it. Only C frames
+# lie between the two (host calls return before it), and the library instance is not used again.
+# 11.4 (pointer to integer): register addresses come from the regs.h instance macros, as in ports/stm32f1, and
+# the flash pages are found by their host addresses.
+# 2.5 (advisory, unused macro): sil.h defines the ABI's constants for the engine; the library itself uses some.
+misra-c2012-2.5:*/ports/sim/include/euc/sil.h
+misra-c2012-8.7:*/ports/sim/host.c
+misra-c2012-20.1:*/ports/sim/host.c
+misra-c2012-20.5:*/ports/sim/host.c
+misra-c2012-20.7:*/ports/sim/host.c
+misra-c2012-21.4:*/ports/sim/host.c
+misra-c2012-11.4:*/ports/sim/host.c
+misra-c2012-11.4:*/ports/sim/port.c
+
 # --- ports/stm32f1 ------------------------------------------------------------------------------------------
 
 # Register-level drivers. 11.4 (pointer from an integer): peripherals sit at fixed addresses (RM0008 memory
@@ -135,6 +161,10 @@ misra-c2012-20.1:*/ports/stm32f1/include/stm32f1/device.h
 misra-c2012-2.3:*/ports/stm32f1/include/stm32f1/device.h
 misra-c2012-2.4:*/ports/stm32f1/include/stm32f1/device.h
 misra-c2012-2.5:*/ports/stm32f1/include/stm32f1/device.h
+# irqn.h holds device.h's interrupt numbers for code without CMSIS: each user names one or two of them.
+misra-c2012-2.3:*/ports/stm32f1/include/stm32f1/irqn.h
+misra-c2012-2.4:*/ports/stm32f1/include/stm32f1/irqn.h
+misra-c2012-2.5:*/ports/stm32f1/include/stm32f1/irqn.h
 
 # 8.11 (extern array without a size): linker-script symbols mark addresses and have no C size.
 # 11.4 (pointer to integer): region sizes are differences of linker-symbol addresses.

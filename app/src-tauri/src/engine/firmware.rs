@@ -6,7 +6,6 @@ use euc_profile::{Channel, FirmwareSource, ProfileSource, Sha256, WheelProfile};
 use euc_sim::scenario::Scenario;
 use euc_sim::{Machine, MachineConfig, PlantState, Session, WheelFiles};
 
-use super::cpu;
 use super::display::DisplayLayout;
 use super::host::RideHost;
 use super::lights::LightsLayout;
@@ -62,13 +61,13 @@ pub(super) fn build_free_host(
         injections: Vec::new(),
         power_cycles: Vec::new(),
         cpi: euc_sim::DEFAULT_CPI,
-        exception_timing: euc_sim::ExceptionTiming::default(),
+        exception_timing: loaded.exception_timing(),
         max_quantum: 4000,
         marker_window_s: 4.0,
     };
     progress("Starting firmware with the rider on the stand");
     let machine =
-        Machine::new_live(&config, &euc_sim::registry(), cpu::factory()?, live).map_err(|error| error.to_string())?;
+        Machine::new_live(&config, &euc_sim::registry(), loaded.factory()?, live).map_err(|error| error.to_string())?;
     let session = Session::new(machine, loaded.map.as_ref(), SAMPLE_HZ);
     let mut header = euc_sim::recording::header(
         concat!("EUC Studio ", env!("CARGO_PKG_VERSION")),
@@ -78,15 +77,15 @@ pub(super) fn build_free_host(
         &loaded.label,
         &Sha256::digest(&loaded.image),
     );
-    header.cpu = Some(cpu::backend().name().into());
-    header.cpi = Some(euc_sim::DEFAULT_CPI);
+    header.cpu = Some(loaded.cpu_name().into());
+    header.cpi = loaded.cpi();
     header.settings = Some(spec.settings.clone());
     header.context = controls.recording_context(epoch)?;
     Ok(Built {
         wheel: wheel.id.clone(),
         header: Some(header),
         host: Box::new(super::free_ride::FreeRideHost::new(session, controls, epoch, map)),
-        label: format!("{firmware} firmware · free ride"),
+        label: format!("{} firmware · free ride", firmware_name(firmware)),
         build: loaded.label,
         note: Some(format!(
             "Experimental {} rider. Pedal welds and external yaw/roll aids remain active. Map resolution is 0.25 m",
@@ -128,7 +127,7 @@ pub fn build_host(id: &str, firmware: &str, progress: &mut dyn FnMut(&str)) -> R
         })
     });
     let loaded = super::images::load(&files, firmware, progress)?;
-    let (image, label, map) = (loaded.image, loaded.label, loaded.map);
+    let (image, label, map) = (&loaded.image, loaded.label.clone(), loaded.map.as_ref());
 
     // The settings journal the wheel boots with ("blank" or none: an empty journal).
     let board = match scenario.settings.as_deref() {
@@ -137,19 +136,19 @@ pub fn build_host(id: &str, firmware: &str, progress: &mut dyn FnMut(&str)) -> R
     };
 
     progress("Building the simulated controller");
-    let factory = cpu::factory()?;
+    let factory = loaded.factory()?;
     let plant = PlantState::default();
     let config = MachineConfig {
         board: &board,
-        stockmap: map.as_ref(),
-        image: &image,
+        stockmap: map,
+        image,
         load_addr: wheel.board.app.base,
         hclk: files.hclk(),
         plant,
         injections: scenario.inject.iter().map(|i| (i.at_s, i.bytes.bytes().collect())).collect(),
         power_cycles: Vec::new(),
         cpi: euc_sim::DEFAULT_CPI,
-        exception_timing: euc_sim::ExceptionTiming::default(),
+        exception_timing: loaded.exception_timing(),
         max_quantum: 4000,
         marker_window_s: 4.0,
     };
@@ -158,8 +157,8 @@ pub fn build_host(id: &str, firmware: &str, progress: &mut dyn FnMut(&str)) -> R
         .live_on(scenario.rider, scenario.assist, scenario.terrain.clone())
         .map_err(|e| format!("Invalid physical model: {e}"))?;
     let machine = Machine::new_live(&config, &euc_sim::registry(), factory, live).map_err(|e| e.to_string())?;
-    let session = Session::new(machine, map.as_ref(), SAMPLE_HZ);
-    let sha256 = Sha256::digest(&image);
+    let session = Session::new(machine, map, SAMPLE_HZ);
+    let sha256 = Sha256::digest(image);
     let toml = scenarios::text(id);
     let mut header = euc_sim::recording::header(
         concat!("EUC Studio ", env!("CARGO_PKG_VERSION")),
@@ -169,8 +168,8 @@ pub fn build_host(id: &str, firmware: &str, progress: &mut dyn FnMut(&str)) -> R
         &label,
         &sha256,
     );
-    header.cpu = Some(cpu::backend().name().into());
-    header.cpi = Some(euc_sim::DEFAULT_CPI);
+    header.cpu = Some(loaded.cpu_name().into());
+    header.cpi = loaded.cpi();
     header.scenario = Some(scenario.name.clone());
     header.scenario_toml = toml;
     header.settings = scenario.settings.clone().filter(|p| p != "blank");
@@ -180,7 +179,7 @@ pub fn build_host(id: &str, firmware: &str, progress: &mut dyn FnMut(&str)) -> R
         wheel: wheel.id.clone(),
         header: Some(header),
         host: Box::new(RideHost::new(session, scenario)?),
-        label: format!("{firmware} firmware"),
+        label: format!("{} firmware", firmware_name(firmware)),
         build: label,
         note,
         display,
@@ -188,6 +187,11 @@ pub fn build_host(id: &str, firmware: &str, progress: &mut dyn FnMut(&str)) -> R
         terrain,
         suspension,
     })
+}
+
+/// The firmware choice as the status bar names it: `ours-custom` without its quirk list.
+fn firmware_name(firmware: &str) -> &str {
+    if super::images::custom_quirks(firmware).is_some() { super::images::OURS_CUSTOM } else { firmware }
 }
 
 /// The ground the scenario rides on, as points for the web view to draw (none when flat): every
@@ -257,6 +261,7 @@ mod tests {
 
     use euc_telemetry::{BodyRole, Snapshot};
 
+    use super::super::cpu;
     use super::super::host::Host;
     use super::super::phone::{PhoneDecoder, PhoneFrame};
     use super::*;

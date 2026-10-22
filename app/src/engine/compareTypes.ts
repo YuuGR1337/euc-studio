@@ -7,7 +7,8 @@ import type { RingBuffer } from "../lib/ring.ts";
 import type { BodyInfo } from "./telemetry.gen.ts";
 import type { ChannelId, Latest, ScenarioInfo, TerrainProfile } from "./types.ts";
 
-export type CompareFirmwareId = "stock" | "ours-compat" | "ours-clean" | "file";
+/** `ours-custom`: our firmware as the host SIL library, with the quirks its request names. */
+export type CompareFirmwareId = "stock" | "ours-compat" | "ours-clean" | "ours-custom" | "file";
 
 /** A firmware the workspace offers, and why it cannot run here if it cannot. */
 export interface CompareFirmwareChoice {
@@ -20,6 +21,8 @@ export interface CompareFirmwareChoice {
 /** One side's firmware, as the backend takes it. */
 export type CompareFirmware =
   | { kind: "stock" | "ours-compat" | "ours-clean" }
+  /** The quirks that stay on (IDs of quirks.def); the rest are fixed. */
+  | { kind: "ours-custom"; quirks: string[] }
   | { kind: "file"; name: string; bytes: number[] };
 
 export interface CompareRequest {
@@ -117,6 +120,8 @@ export interface CompareSummary {
   compared_until_s: number | null;
   first_divergence: Divergence | null;
   channels: SeriesDiff[];
+  /** Channels a run states it does not measure (the ISR load of a SIL run), not judged; absent from `channels`. */
+  channels_unavailable?: string[];
   vars: SeriesDiff[];
   vars_unpaired: string[];
   /** Null for the demo, which has no BLE stream. */

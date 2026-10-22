@@ -28,7 +28,7 @@ M6, M7, and M8 remain separate milestones.
 1. Review the integrated checkpoint, run hosted CI on all three operating systems, and merge the tested baseline.
 2. Close M3–M5 evidence gaps with fixed model inputs. Resolve full-run stock/compat differences, including the SOC50 case.
 3. Complete rider and physics validation. Add independent foot contact, reduce external aids, and calibrate suspension and motor inputs.
-4. Complete the SIL host and developer controls: runtime quirks, bounded parameter edits, presets, and scenario sweeps.
+4. Complete the developer controls: bounded parameter edits, presets, and scenario sweeps. The SIL host and runtime quirks are in place ([SIL](sil.md)).
 5. Complete M6 transport and recovery. Run at least 100 simulated flashes with injected faults.
 6. Complete M7 distribution: signed bundles, documentation site, browser demo, and a second working wheel.
 7. Start M8 under its separate bench procedure. Obtain the full SWD backup before hardware firmware tests.

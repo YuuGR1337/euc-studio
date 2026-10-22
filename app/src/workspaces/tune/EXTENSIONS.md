@@ -46,7 +46,7 @@ This worker does not modify host or runner files.
 - This patch adds sampled rising and falling triggers, hold, rearm, and a shared time cursor.
 - This patch adds optional bounded ISR counters and interval table logic.
 - The ISR table uses the parent-owned Host and runner wiring.
-- Memory writes, register fields, gain editing, and runtime quirks remain incomplete.
+- Memory writes, register fields, and gain editing remain incomplete. Quirk switches are in SCOPE.md.
 - Bounded post-trigger acquisition is implemented. Edges between polls remain undetectable.
 - Nine trigger state-machine tests cover acquisition, pause, gaps, termination, capacity, resets, and manual hold.
 

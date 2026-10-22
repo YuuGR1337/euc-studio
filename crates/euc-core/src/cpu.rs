@@ -84,6 +84,22 @@ pub trait Cpu {
     fn set_ccr(&mut self, ccr: u32) {
         let _ = ccr;
     }
+
+    /// HCLK cycles counted by the backend's own per-instruction timing model since it was
+    /// created, or `None` when it has none switched on. With `Some`, the engine takes each
+    /// quantum's duration from this clock instead of charging a fixed cost per instruction. The
+    /// clock never resets, so the engine measures a run as a difference. The default has no model.
+    fn model_cycles(&self) -> Option<u64> {
+        None
+    }
+
+    /// [`run`](Self::run), which also ends once the timing model has counted `max_cycles` cycles
+    /// in this run (the instruction that reaches the limit completes). Backends without a model
+    /// ignore the limit, which is the default.
+    fn run_for(&mut self, bus: &mut dyn Bus, max_instr: u32, max_cycles: u64) -> Exit {
+        let _ = max_cycles;
+        self.run(bus, max_instr)
+    }
 }
 
 /// Why [`Cpu::run`] returned.

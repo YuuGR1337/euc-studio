@@ -12,7 +12,7 @@ use euc_sim::scenario::{Outcome, Ride, Scenario};
 use euc_sim::{Machine, MachineConfig, PlantState, Session, WheelFiles};
 use serde::Serialize;
 
-use crate::sim::{board_with, cpu_factory, injection, load_firmware, load_scenario};
+use crate::sim::{board_with, injection, load_firmware, load_scenario};
 use crate::ui::{self, BAD, DIM, GOOD, STRONG, WARN};
 use crate::{Context, Verdict};
 
@@ -22,17 +22,27 @@ pub(crate) struct CompareArgs {
     /// The scenario both runs ride.
     #[arg(long, value_name = "FILE")]
     scenario: PathBuf,
-    /// Run A: `stock`, `compat` or `clean` (our builds in firmware/build/target-*/), or a .bin
-    /// file (its .elf next to it names our variables, see profiles/<wheel>/probes.toml).
+    /// Run A: `stock`, `compat` or `clean` (our builds in firmware/build/target-*/),
+    /// `ours-sil[:QUIRKS]` (our firmware as the host SIL library, docs/sil.md), or a .bin file (its
+    /// .elf next to it names our variables, see profiles/<wheel>/probes.toml).
     #[arg(long, default_value = "stock")]
     a: String,
     /// Run B, as for --a.
     #[arg(long)]
     b: String,
+    /// Quirks of every `ours-sil` run that does not name its own (`ours-sil:clean`): `compat` (the
+    /// default), `clean`, `none`, a mask, or names added to or removed from a base
+    /// (`clean+ASIN_ACCEL`).
+    #[arg(long, value_name = "QUIRKS")]
+    quirks: Option<String>,
     /// CPU backend for both runs: `own` (every build) or `unicorn` (development builds with the
     /// feature).
     #[arg(long, default_value = "own", value_name = "own|unicorn")]
     cpu: euc_sim::cpu::Backend,
+    /// Instruction timing for both runs: `fixed` (CPI 2.0), `flash` or `flash-wN` (our core's
+    /// per-instruction model). Default: the engine's shipped timing on `own`, `fixed` on `unicorn`.
+    #[arg(long, value_name = "fixed|flash|flash-wN")]
+    timing: Option<euc_sim::cpu::Timing>,
     /// Settings preset both runs boot with (default: the scenario's).
     #[arg(long, value_name = "PRESET")]
     settings: Option<String>,
@@ -161,9 +171,12 @@ impl Run {
         settings: Option<&str>,
         args: &CompareArgs,
     ) -> anyhow::Result<Self> {
-        let cpu = cpu_factory(args.cpu)?;
+        let timing = args.timing.unwrap_or_else(|| args.cpu.default_timing());
         let wheel = &files.profile;
-        let fw = load_firmware(ctx, files, spec)?;
+        let quirks = args.quirks.as_deref().filter(|_| crate::sil::library(spec).is_ok_and(|l| l.is_some()));
+        let fw = load_firmware(ctx, files, spec, quirks)?;
+        let cpu = fw.factory(args.cpu, timing)?;
+        let exception_timing = fw.exception_timing(timing);
         let (image, label, sha256, stock, map) = (fw.image, fw.label, fw.sha256, fw.stock, fw.map);
         let injections = scenario
             .inject
@@ -181,7 +194,7 @@ impl Run {
             injections,
             power_cycles: Vec::new(),
             cpi: euc_sim::DEFAULT_CPI,
-            exception_timing: euc_sim::ExceptionTiming::default(),
+            exception_timing,
             max_quantum: args.max_quantum,
             marker_window_s: 4.0,
         };
@@ -201,16 +214,8 @@ impl Run {
             _ => true,
         });
         let ride = Ride::new(&scenario, &mut session)?;
-        Ok(Self {
-            spec: spec.to_owned(),
-            label,
-            sha256,
-            scenario,
-            checks_skipped,
-            session,
-            ride,
-            trace: Trace::new(files.hclk()),
-        })
+        let trace = Trace::of_session(&session);
+        Ok(Self { spec: spec.to_owned(), label, sha256, scenario, checks_skipped, session, ride, trace })
     }
 
     fn sample(&mut self) {
@@ -315,6 +320,13 @@ fn print(output: &CompareOutput<'_>) {
         None => ui::row(GOOD, "first", "no divergence"),
     }
     print_series(c);
+    if !c.channels_unavailable.is_empty() {
+        ui::row(
+            DIM,
+            "unmeasured",
+            format!("{} (a run states it does not measure it)", c.channels_unavailable.join(", ")),
+        );
+    }
     if !c.vars_unpaired.is_empty() {
         ui::row(DIM, "unpaired", c.vars_unpaired.join(", "));
     }
