@@ -21,13 +21,17 @@ Parts that follow the owner's photos (2026-10-16) or an estimate, to be refined 
   (`docs/hardware/geometry.md`, "Rear linkage").
 - **Rear handle.** Orange CNC U-handle with a black grip bar. The arms' outer faces are in the
   scan; their three windows, blind pocket, foot and the grip position follow the owner's photos.
-- **Pedals.** The decks were not on the wheel for the scan; their shape and size are an ESTIMATE.
+- **Pedals.** The decks were not on the wheel for the scan. Deck, hinge rod and bracket follow the
+  owner's tape photo (300 mm long) and a parts diagram: outline, hexagonal cut-outs on the
+  diagram's lattice, a plain centre strip (the maker's lettering is left out), bright machined
+  edge, steel grip pins. Width INFERRED, thickness ESTIMATE; the brackets are drawn clean on the
+  scanned hangers' envelope (`docs/hardware/geometry.md`, "Pedals").
 
 | File                      | Triangles | Size    | Use                  |
 | ------------------------- | --------- | ------- | -------------------- |
-| `begode-extreme-lod0.glb` | 296k      | 2.5 MB  | close-ups            |
-| `begode-extreme-lod1.glb` | 115k      | 1.1 MB  | default view         |
-| `begode-extreme-lod2.glb` | 41k       | 0.37 MB | far away, thumbnails |
+| `begode-extreme-lod0.glb` | 284k      | 2.4 MB  | close-ups            |
+| `begode-extreme-lod1.glb` | 111k      | 1.1 MB  | default view         |
+| `begode-extreme-lod2.glb` | 40k       | 0.36 MB | far away, thumbnails |
 
 The files use meshopt compression (`EXT_meshopt_compression`, `KHR_mesh_quantization`). three.js
 loads them with `GLTFLoader` and the `MeshoptDecoder`; drei's `useGLTF` enables it by default.
@@ -63,7 +67,7 @@ begode-extreme
    ├─ rocker             both rocker plates, the top-eye and rocker-pin cross tubes and spacers,
    │                     chrome bolt heads: turns about z
    ├─ link               both link plates: turns about z on the rocker pin
-   ├─ pedal_mount_left, pedal_mount_right
+   ├─ pedal_mount_left, pedal_mount_right   hinge brackets (black block, bright flange)
    ├─ axle
    └─ pedal_left, pedal_right   origin on the hinge pin: fold about x
 ```
@@ -81,7 +85,7 @@ begode-extreme
   The physics keeps a constant ratio, so the drawn shock length can differ from the engine's shock
   channel (up to 8.4 mm).
 - **Pedals.** `pedal_left` folds up with rotation.x = +90 degrees, `pedal_right` with -90 degrees.
-  Their shape and size are an estimate (see above).
+  Their shape and size: see above.
 - **Display.** On `display_window`, u and v run from 0 to 1 across the 82.6 x 55.2 mm LED panel of
   `profiles/begode-extreme/display.toml`, u to the right and v down as in that file, with the top of
   the digits toward the front. Use the texture with `flipY = false`.

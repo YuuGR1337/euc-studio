@@ -51,23 +51,26 @@ axle_height_m = 0.2296
 axle_height_loaded_m = 0.2251  # INFERRED: equals the firmware's rolling radius
 
 [pedals]
-# CNC aluminium decks (D-shaped, hexagonal cut-outs, grip pins). The decks were off the wheel for
-# the scan: only the hinge brackets and pins are in it. The owner says this design does not match
-# his pedals; shape and sizes will be updated from his measurements. Sizes below are ESTIMATES from shop photo
-# proportions (notch = 0.16 of the length, width = 0.47 of the length) and the bracket the notch
-# must clear; one real measurement replaces them.
+# CNC aluminium decks: full width over the middle, rounded ends, hexagonal cut-outs, a plain centre
+# strip, a bright machined edge, steel grip pins. The decks were off the wheel for the scan: only the
+# hinge brackets and pins are in it. Shape and sizes from the owner's tape photo (2026-10-16) and a
+# retailer's parts diagram (not in the repo); docs/hardware/geometry.md "Pedals". The [collision]
+# deck boxes keep the earlier 290 x 135 mm until a physics change takes these.
 in_scan = false
 pivot_axis = "x"               # MEASURED: a 6 mm pin, fore-aft
 pivot_y_m = 0.1148             # MEASURED: +-y, pin to pin 0.2296 m
 pivot_z_m = 0.0075             # MEASURED: above the axle
 bracket_min_m = [-0.0221, 0.1043, -0.0312]  # MEASURED: left bracket (mirror for the right)
 bracket_max_m = [0.0235, 0.1351, 0.0101]
-length_m = 0.290               # ESTIMATE +-0.030
-width_m = 0.135                # ESTIMATE +-0.015 (hinge tab edge to outer edge)
+length_m = 0.300               # MEASURED +-0.010 (owner's tape, end to end)
+width_m = 0.138                # INFERRED +-0.007 (parts diagram's ratio; hinge edge to outer edge)
 thickness_m = 0.009            # ESTIMATE +-0.002, plate centred on the pin
-inner_edge_y_m = 0.1088        # ESTIMATE: hinge tabs 6 mm inside the pin
-outer_edge_y_m = 0.2438        # ESTIMATE
-notch_m = [0.050, 0.0212]      # ESTIMATE: hinge notch length, depth past the pin (clears the bracket)
+inner_edge_y_m = 0.1088        # ESTIMATE: hinge edge 6 mm inside the pin
+outer_edge_y_m = 0.2471        # INFERRED +-0.007
+notch_m = [0.050, 0.0212]      # INFERRED: hinge notch length, depth past the pin (clears the scanned bracket; the diagram's is 0.045-0.056 long)
+cells = { flats_m = 0.037, pitch_across_m = 0.0461, column_x_m = [0.0516, 0.0901, 0.1286], rim_m = 0.0075 }  # INFERRED (diagram lattice)
+centre_strip_m = 0.062         # INFERRED: plain strip in the middle (the maker's lettering on the real deck)
+hinge_rod = { diameter_m = 0.006, length_m = 0.190 }  # diameter MEASURED (scan pin); length ESTIMATE 0.125-0.200
 deck_top_z_m = 0.012           # ESTIMATE +-0.005 (grip pins add 3 mm)
 surface_height_m = 0.2416      # ESTIMATE: deck top above the ground, unloaded
 fold = "about the pin (x); the left deck folds up with +90 deg about x, the right with -90 deg"

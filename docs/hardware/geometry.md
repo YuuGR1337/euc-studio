@@ -229,24 +229,47 @@ conflicts with the tire on the scanned wheel; the owner's photo confirms the 3.0
 
 ## Pedals
 
-**ESTIMATE, to be updated from the owner's measurements** (pedal height, size and position; the owner
-also says the drawn design does not match his pedals). The CNC decks were off the wheel for the scan. The model draws our own deck in their style: a black
-anodised aluminium plate with a D-shaped outer edge and a bright chamfer, hexagonal through-cut-outs in
-the front and rear thirds, a plain solid band in the middle, gold grip pins on the cell junctions
-(26 per deck) and a polished hinge pin. Left and right are mirror images. The sizes are estimates:
+The CNC decks were off the wheel for the scan; only the hinge brackets and pins are in it. The
+model's deck, hinge rod and bracket follow the owner's tape photo of a deployed deck (2026-10-16) and
+a retailer's parts diagram (not in the repo; its pedal set, pedal rods and pedal brackets). Left
+and right are mirror images.
 
-- **Hinge.** Measured: the 6 mm pin runs fore-aft at y +-114.8 mm, z +7.5 mm. The deck's notch must
-  clear the scanned bracket (46 mm long, its outer face 20.3 mm past the pin), so the notch is 50 mm
-  long and 21 mm deep. The plate (9 mm) is centred on the pin, so its top is at z +12 mm.
-- **Length and width.** Shop photos give the proportions: the hinge notch is 0.16 of the deck length
-  and the width (hinge edge to outer edge) is 0.47 of it. A 50 mm notch makes the deck about 300 mm
-  long; with a little margin around the bracket, 290 x 135 mm. Uncertainty: +-30 mm length, +-15 mm
-  width, +-5 mm deck height. One tape measure on a real pedal settles it.
+- **Length: 300 mm, MEASURED +-10 mm.** The owner's tape across the deck reads 2.6 to 32.7 cm end to
+  end; the tape lies above the deck, so the reading carries about 10 mm of parallax.
+- **Outline and width: 138 mm hinge edge to outer edge, INFERRED +-7 mm.** Traced from the diagram,
+  where the deck is 277 px long; at the tape's 300 mm that is 1.06 mm per px. The diagram is taken
+  slightly in perspective (the near end 3 % wider), and the deck is symmetric front to back (the
+  diagram's cell centres repeat within 2 px about the notch, and the tape photo shows matching
+  ends), so each traced edge is the mean of the two halves. The deck is full width over its middle
+  third and rounds off toward both ends, also on the hinge side.
+- **Cut-outs: INFERRED.** Hexagons with their points along the deck's length, on the diagram's
+  lattice: columns 51.6, 90.1 and 128.6 mm from the middle, cells 46.1 mm apart across the deck,
+  37 mm across the flats (9 mm webs), cut back by a 7.5 mm rim along the outline. Eight cells per
+  half, the outer ones partial, as in both pictures.
+- **Solid strips: INFERRED.** A plain centre strip 62 mm long (it carries the maker's lettering on
+  the real deck; the model leaves it plain) and a solid strip 25 mm wide along the hinge edge.
+- **Edge and finish.** Black anodised faces with a bright machined side wall and top chamfer all
+  round (the tape photo shows a silver rim); steel grip pins on the web junctions (28 per deck;
+  the diagram shows them at most junctions).
+- **Hinge and notch.** MEASURED: the 6 mm pin runs fore-aft at y +-114.8 mm, z +7.5 mm. The notch
+  must clear the scanned bracket (46 mm long, its outer face 20.3 mm past the pin), so it is 50 mm
+  long and reaches 21 mm past the pin. The diagram's notch is 45-56 mm long but only about 20 mm deep
+  from the hinge edge, which would not clear the scanned bracket; the bracket fit decides. The
+  hinge rod is drawn 190 mm long (ESTIMATE: that is its length at the deck's diagram scale; 125-200
+  mm if the rods are pictured at another scale).
+- **Thickness: 9 mm, ESTIMATE +-2 mm** (no picture shows the edge square on). The plate is centred
+  on the pin, so its top is at z +12 mm.
+- **Bracket.** The scanned hanger's envelope (MEASURED: x -22.1 to 23.5, y 100.7 to 135.5, z -31.1
+  to 10.5 mm) drawn clean: a black block holding the rod, an outer web, and a bright flange at the
+  packs' bottom plane with the diagram's three screw holes (layout ESTIMATE).
 - **Fold.** Each deck is its own node with its origin on the pin, so the app folds it about x: the
   left deck up with +90 degrees, the right with -90 degrees (glTF axes).
 
-The collision boxes `pedal_left` and `pedal_right` follow these sizes: 290 x 135 x 9 mm, centred on
-the pins at y +-176.3 mm.
+**Physics values not changed.** The collision boxes `pedal_left` and `pedal_right` keep 290 x 135 x
+9 mm centred at y +-176.3 mm, and `plant.toml` keeps `pedal_below_axle_m` -0.012. With the drawn
+deck they would become 300 x 138.3 x 9 mm (half sizes 0.150, 0.0692, 0.0045) centred at y +-177.95
+mm: 10 mm longer, 3.3 mm wider, the centre (where the feet stand) 1.65 mm further out. The deck's
+height does not change (same thickness and pin), so `pedal_below_axle_m` stays.
 
 ## Collision shapes
 
@@ -262,12 +285,13 @@ the pins at y +-176.3 mm.
 - **Top and front.** A box over the seat and the top frame; a box over the handle, headlight and
   display chamfer.
 - **Rear roller and shock.** Capsules along their axes.
-- **Pedals.** The bracket boxes are measured; the decks use the estimated sizes above.
+- **Pedals.** The bracket boxes are measured; the deck boxes keep the earlier 290 x 135 mm (see
+  "Pedals").
 
 ## The render model
 
-`app/public/models/begode-extreme/` holds three levels of detail (LOD0 296k triangles 2.5 MB, LOD1
-115k 1.1 MB, LOD2 41k 0.37 MB, meshopt compressed). Its README lists the nodes. How it is made from
+`app/public/models/begode-extreme/` holds three levels of detail (LOD0 284k triangles 2.4 MB, LOD1
+111k 1.1 MB, LOD2 40k 0.36 MB, meshopt compressed). Its README lists the nodes. How it is made from
 the scan (the tools live in the private research folder):
 
 1. **Parts.** Simple rules split the scan: tire (wheel pieces that reach the tread), hub, seat
@@ -325,7 +349,7 @@ the scan (the tools live in the private research folder):
 9. **Looks.** The scan has no colour. Materials follow the owner's photos: textured dark-grey shell
    (a tileable grain normal map on LOD0 and LOD1), black rubber tire, matte black motor covers, orange
    flange ring, textured matte black linkage plates, smoked grey tail-light sleeves (they glow with
-   the LEDs in the studio), satin aluminium handle tube, black anodised pedals with gold pins,
+   the LEDs in the studio), satin aluminium handle tube, black anodised pedals with steel pins,
    smoked display window. Ambient occlusion is baked into the vertex colours. The anodised orange
    is set from the owner's photo (mean sRGB 184, 91, 47 on the handle). Under the studio's lights
    (neutral tone mapping, neutral rim light) the handle, the chrome bolt heads and the shell render
@@ -345,7 +369,7 @@ What the owner can measure to close the remaining gaps (centre to centre, in mm)
 - **Pad covers.** The length of a removed cover with a tape, and one photo of it mounted, from the
   side.
 - **Shock stroke.** Printed on the shock or in its listing (55 mm is an ESTIMATE, 50-57 mm range).
-- **Pedals.** Width at the front, middle and back, and the thickness. A tape photo reads the length
-  at about 300 mm (model: 290 mm ESTIMATE); the outline and pin layout are not yet taken from it.
+- **Pedals.** The deck's width at the middle (hinge edge to outer edge) and its thickness, with a
+  tape; and the hinge rod's length if it comes out.
 - **Rear handle.** Distance from the roller axis to the grip centre.
 - **Controller.** Where the controller board sits (for the IMU height above the axle).
