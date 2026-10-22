@@ -36,7 +36,7 @@ iq_a = 6.0
 battery_a = 1.0      # climbs and top speed draw 30-60 A
 
 [scenario.balance-60s]
-note = "Rider model, not firmware: the default articulated rider (2026-10-22) sways for a few seconds after each push (about 0.4 Hz, pitch swinging about ±0.4°), where the rigid rider settles, so a few cycles of timing part the runs more. They differ by 0.58 km/h at 42.96 s, just after the third push (rigid rider: 0.06 km/h). Both firmwares hold the wheel alike: pitch within 0.69° and torque RMS 1.8 N·m."
+note = "Firmware hunting, sustained by the rider (PRELIMINARY): at standstill the firmware does not compensate the inverter dead time, so small commands give almost no torque and the pedals hunt after each push (pitch swinging about ±0.4°, a cycle of about 3 s). The default articulated rider's ankle damping (2026-10-22) keeps the hunting going where the rigid rider settles (docs/findings/stock-firmware.md, finding 11). A few cycles of timing part the runs more: they differ by 0.58 km/h at 42.96 s, just after the third push (rigid rider: 0.06 km/h). Both firmwares hold the wheel alike: pitch within 0.69° and torque RMS 1.8 N·m."
 [scenario.balance-60s.channels]
 speed_kmh = 0.9       # 0.585 km/h measured at 42.96 s with the articulated rider; 0.056 with the rigid one (2026-10-22)
 

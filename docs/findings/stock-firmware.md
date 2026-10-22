@@ -359,3 +359,61 @@ saturates (18.10 s) before clean's tiltback starts (18.11 s), and the wheel fall
 48.5 km/h, so the 75 % threshold is too late for such a motor. The telemetry PWM % still reports Vq,
 as stock does; whether it should report the true headroom is an open question ([cutoffs.md](../../firmware/docs/cutoffs.md), "Telemetry PWM % and the
 true headroom").
+
+## 11. No dead-time compensation: the pedals hunt at standstill (PRELIMINARY)
+
+**Behaviour.** Neither the voltage-mode nor the current-mode drive compensates the inverter's dead
+time. At standstill the motor current is near zero, and there the dead time cancels small voltage
+commands. In `balance-60s` (neutral settings, voltage mode, quantum 4000, 26-40 s), commands below
+about 1.25 % of full modulation put only 0.09-0.13 % on the motor, and the torque current stays under
+1.2 A. With no dead time in the plant the applied voltage follows the command. After a push the pedals
+can therefore hunt: the pitch flips between about -0.4° and +0.35° about every 1.5 s, the motor
+torque swings about ±5 N·m, and the wheel barely moves.
+
+**Scenario.** `balance-60s` with the default articulated rider (welded feet):
+
+```sh
+cargo run --release -p euc-cli -- sim run --scenario scenarios/balance-60s.toml
+```
+
+To remove the dead time, ride a copy of `profiles/` with `[inverter] dead_time_s = 0.0` in
+`begode-extreme/plant.toml` (`--profiles <copy>`).
+
+**Numbers.** Settle time after each push (pitch peak to peak below 0.05° in every later 1 s window),
+stock image, quanta 4000, 3000 and 2000 (2026-10-22):
+
+| Rider, dead time | Push at 10 s | Push at 25 s (backward) | Push at 40 s |
+|---|---|---|---|
+| articulated, 0.5 µs (default) | 10.0 s | not settled before the next push | 9.0-10.0 s |
+| articulated, none | 6.8 s | 7.5 s | 7.5 s |
+| rigid, 0.5 µs (default) | 6.8-7.0 s | 8.5 s | 6.8 s |
+| rigid, none | 6.8 s | 6.8 s | 6.2 s |
+
+At 0.25 µs (quantum 4000 only) the articulated rider still does not settle after the backward push.
+Our clean image gives the same pattern (8.8 s after the backward push with no dead time), and compat
+matches stock. The current-mode drive (neutral settings with `drive_mode = "current"`) hunts too, with
+a shorter period: after the backward push the articulated rider settles at 15.0 s at one quantum and
+not at the other two, and with no dead time in 9.5-10.0 s.
+
+**Ruled out.** In private clean and compat builds, at all three quanta and with both riders: the
+hall-period speed feed-forward (switched off, or replaced by a smooth estimate, below 0.25 m/s) and
+the current-feedback term (switched off). With each change the articulated rider still does not
+settle after the backward push. Hall edges do not pace the hunting either: on stock, 11 of 29
+half-cycles had no hall edge, and the wheel moved a median 7.6 mm per half-cycle (one hall step is
+8.4 mm).
+
+**The rider's part.** The rigid rider's ankle hinge takes the pedal motion without a reaction, and it
+settles within 8.5 s. The articulated rider's ankle damping (60 N·m·s/rad per ankle, an estimate)
+couples the pedals to the legs and keeps the hunting going
+([articulated acceptance](../models/articulated-acceptance.md#limits-of-the-default-rider)).
+
+**Status.** PRELIMINARY. The missing compensation is in the stock image: the emulated binary drives
+the plant's inverter directly, and its small commands reach the motor as almost nothing. How wide the
+dead band is rests on the plant's dead-time model: 0.5 µs (DEFAULT, the gate driver's; the stock
+timer adds 14 ns at 10 kHz and 403 ns at 12 kHz) and the 0.5 A band in which the dead-time error grows
+with the current. Both are unmeasured. A scope trace of one phase's dead time on the board, or a video
+of the pedals while a rider stands still after a push, would settle it.
+
+**Clean profile.** Same behaviour: the clean profile has no dead-time compensation either.
+Dead-time compensation (a voltage offset in the direction of each phase current) is a candidate clean
+fix, but it needs the gate driver's real dead time, measured on the bench (M8), before it ships.
