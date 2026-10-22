@@ -39,7 +39,8 @@ pub(crate) struct CompareArgs {
     /// feature).
     #[arg(long, default_value = "own", value_name = "own|unicorn")]
     cpu: euc_sim::cpu::Backend,
-    /// Instruction timing for both runs.
+    /// Instruction timing for both runs: `fixed` (CPI 2.0), `flash` or `flash-wN` (our core's
+    /// per-instruction model). Default: the engine's shipped timing on `own`, `fixed` on `unicorn`.
     #[arg(long, value_name = "fixed|flash|flash-wN")]
     timing: Option<euc_sim::cpu::Timing>,
     /// Settings preset both runs boot with (default: the scenario's).

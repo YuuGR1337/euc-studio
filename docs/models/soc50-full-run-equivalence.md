@@ -238,6 +238,14 @@ What remains of compat's extra tick is almost all before the command store, abou
 - About 750 instructions in the float comparison calls; GCC calls a helper for each float comparison, where stock's image makes about a quarter as many comparison calls (INFERRED: its compiler compares many inline).
 - About 600 instructions in the out-of-line `euc_f32_flush` calls (the KEIL_FTZ flush), and about 350 in the divide, which is still slower than stock's.
 
+The speed-up is accepted for this phase as it is: bit-identical, with compat at 66.6 % interrupt load against stock's 63.7 %.
+Both comparison exceptions stay.
+
+Next step (open): in the hot balance code, compare floats on their bit patterns and inline the KEIL_FTZ flush at the call sites, instead of calling the helpers.
+Every result stays bit-identical; the comparison and flush calls above are about 1,350 instructions of the 4,100 before the command store.
+Rejected: an own double add that reproduces libgcc's rare misrounding.
+Only black-box tests could pin that misrounding down, so bit-identity could not be shown.
+
 Both compat and clean ran at 90-98 % interrupt load before the speed-up.
 That is a real-hardware risk for those builds, not only a simulator effect: on a real STM32 the main loop gets 2-10 % of the CPU and may be starved, with late display, storage and BLE work (INFERRED; the flash timing model gives the same picture, 93.8 %).
 The speed-up brings compat to 66.6 % and clean to 68.1 %; stock runs at about 64 %.
