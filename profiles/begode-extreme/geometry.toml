@@ -184,6 +184,8 @@ scan_linkage_pivots_xz_m = { shock_top = [-0.1395, 0.3675], shock_bottom = [-0.2
 linkage_pivots_xz_m = { frame_pivot = [-0.1000, 0.3950], rocker_pin = [-0.1770, 0.3130], shock_top = [-0.1850, 0.3780], shock_bottom = [-0.0338, 0.2471] }
 spare_hole_xz_m = [-0.1725, 0.3930]
 front_pin_xz_m = [-0.045, 0.400]
+rocker_plates_y_m = [0.0465, 0.0510]    # ESTIMATE: |y| of each rocker plate; the rear photo's camera pose fits 0.050-0.054 for the outer face
+link_plates_y_m = [0.0405, 0.0450]      # ESTIMATE: inboard of the rocker plates
 link_length_m = 0.1576                  # INFERRED: rocker_pin to shock_bottom
 rocker_sides_m = { pivot_to_pin = 0.1125, pivot_to_eye = 0.0867, eye_to_pin = 0.0655 }  # eye_to_pin MEASURED, the others ESTIMATE
 rocker_turn_deg = 11.0                  # ESTIMATE: largest turn over the physics travel (drawn linkage)
@@ -215,9 +217,14 @@ arm_roller_bolt_m = [-0.1868, 0.4491]   # x, z; MEASURED (the roller axis)
 arm_outer_y_m = 0.0587                  # MEASURED: outer face, +-y
 arm_thickness_m = 0.006                 # ESTIMATE
 arm_width_m = 0.030                     # MEASURED (scan, lower part)
-grip_centre_m = [-0.2515, 0.0, 0.5042]  # ESTIMATE: 85 mm past the roller axis, bent 15 deg up
+# The arm's lower part ends in a foot at x -0.113 (z 0.387-0.411) and carries three through
+# windows, the upper part a blind pocket; MEASURED on the owner's cover-off photo (camera pose
+# solved from scan points, +-2 mm).
+arm_foot_x_m = -0.113
+arm_windows_xz_m = [[-0.1683, 0.4382], [-0.1426, 0.4155], [-0.1240, 0.4005]]  # centres, MEASURED
+grip_centre_m = [-0.2455, 0.0, 0.4752]  # MEASURED (photo pose): the grip bolt, 63.5 mm past the roller axis
 grip_diameter_m = 0.026                 # ESTIMATE
-evidence = "lower arms MEASURED (scan); upper arms and grip ESTIMATE (photos, roller as scale)"
+evidence = "lower arms MEASURED (scan); arm windows and grip MEASURED (photo pose); thickness ESTIMATE"
 
 [imu]
 # The controller board is inside the body and not visible in the scan. DEFAULT (findings)
@@ -241,7 +248,8 @@ roller = { from = [-0.1868, -0.059, 0.4491], to = [-0.1868, 0.059, 0.4491], radi
 # from (-0.185, 0.378) forward and down to (-0.034, 0.247) ([shock]); this solid moves to it when the
 # physics takes the photo-measured linkage (a physics change, not made yet).
 shock = { from = [-0.1395, 0.0, 0.3675], to = [-0.2265, 0.0, 0.1835], radius = 0.028 }
-# ESTIMATE: rear handle grip bar (see [rear_handle]).
+# ESTIMATE: rear handle grip bar. The photo puts the grip at (-0.2455, 0.4752) ([rear_handle]);
+# this solid keeps the earlier estimate until a physics change moves it.
 rear_handle_grip = { from = [-0.2515, -0.0527, 0.5042], to = [-0.2515, 0.0527, 0.5042], radius = 0.013 }
 pedal_bracket_left = { centre = [0.0007, 0.1197, -0.0106], half = [0.0228, 0.0154, 0.0207] }
 pedal_bracket_right = { centre = [0.0007, -0.1197, -0.0106], half = [0.0228, 0.0154, 0.0207] }

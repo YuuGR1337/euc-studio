@@ -260,8 +260,8 @@ the pins at y +-176.3 mm.
 
 ## The render model
 
-`app/public/models/begode-extreme/` holds three levels of detail (LOD0 293k triangles 2.5 MB, LOD1
-113k 1.1 MB, LOD2 40k 0.37 MB, meshopt compressed). Its README lists the nodes. How it is made from
+`app/public/models/begode-extreme/` holds three levels of detail (LOD0 294k triangles 2.5 MB, LOD1
+114k 1.1 MB, LOD2 41k 0.37 MB, meshopt compressed). Its README lists the nodes. How it is made from
 the scan (the tools live in the private research folder):
 
 1. **Parts.** Simple rules split the scan: tire (wheel pieces that reach the tread), hub, seat
@@ -280,7 +280,7 @@ the scan (the tools live in the private research folder):
 4. **Hub and rim.** Modelled from the measured profile: matte black motor covers with a ring of socket
    screws, and the rim flange as an orange ring (the owner's photo). The scan had holes there.
 5. **Modelled parts.** Display window (flat, with UVs for the T16-007 panel), headlight lenses, axle
-   stub, pedal decks (above), and the rear roller: its tube is redrawn as two translucent sleeves
+   stub, pedal decks (above), and the rear roller: its tube is redrawn as two smoked grey sleeves
    around a black centre band with the BLE status LED; the scanned end caps become the two speakers.
 6. **Packs, shock and rear handle.** The four battery packs are modelled as boxes with 4 mm rounded
    edges and 8 mm chamfers on the faces measured above, with the rivet rows read on a height map of
@@ -291,14 +291,17 @@ the scan (the tools live in the private research folder):
    linkage** are drawn to the owner's photos of 2026-10-22 (see "Rear linkage" above): per side a
    rocker plate with the photographed outline, window and empty hole, plus its hidden forward arm
    to the pivot ESTIMATE; a link (a bar with the pointed tip past the rocker pin) to the carriage;
-   cross bars at the top eye and the rocker pin; the carriage's clevis and bottom shaft (hidden in
+   cross bars at the top eye and the rocker pin (black tubes with spacers either side of the shock
+   eye, chrome button heads with washers); the plates sit at |y| 46.5-51 mm (the rear photo's camera
+   pose fits 50-54 mm for their outer faces); the carriage's clevis and bottom shaft (hidden in
    every photo, ESTIMATE); the pivot shaft; and the steel pin between two frame blocks at the front.
    Nothing of the scan's older system is drawn: its shafts, plates and rear tray are removed. Each
    moving part is its own node (README), and the studio poses them from the Suspension channel.
-   The **rear handle** is the orange CNC U-handle of the photos: the lower part of each arm
-   (frame bolt at x -115, z 415 mm to the roller axis, three windows, outer face at |y| 58.7 mm) is
-   in the scan as the "roller arms"; the part above the roller (85 mm, bent 15 degrees up) and the
-   black grip bar (26 mm) are ESTIMATES scaled with the roller. The scanned faces these models
+   The **rear handle** is the orange CNC U-handle of the photos: each arm runs from a foot at the
+   frame top (x -113 mm) up through the roller axis to the grip bolt, with three through-windows on
+   the lower part and a blind pocket on the upper part; the windows, the foot and the grip (63.5 mm
+   past the roller axis) are MEASURED on the cover-off photo (camera pose from scan points), the
+   outer face at |y| 58.7 mm on the scan, the black grip bar (26 mm) is an ESTIMATE. The scanned faces these models
    replace are removed; what remains of the scan there (brackets, a sloped base plate) is cleaned
    (loose flaps under 150 mm2 dropped, holes closed, smoothed). The roller is cut out of the seat
    before decimation, and its end caps (speakers) are modelled from their measured profile.
@@ -312,8 +315,9 @@ the scan (the tools live in the private research folder):
    and 400 mm2 for LOD0, LOD1, LOD2) are dropped.
 9. **Looks.** The scan has no colour. Materials follow the owner's photos: textured dark-grey shell
    (a tileable grain normal map on LOD0 and LOD1), black rubber tire, matte black motor covers, orange
-   flange ring, satin aluminium handle tube, black anodised pedals with gold pins, smoked display
-   window. Ambient occlusion is baked into the vertex colours.
+   flange ring, textured matte black linkage plates, smoked grey tail-light sleeves (they glow with
+   the LEDs in the studio), satin aluminium handle tube, black anodised pedals with gold pins,
+   smoked display window. Ambient occlusion is baked into the vertex colours.
 
 ## Open
 
