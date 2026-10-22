@@ -4,8 +4,9 @@
 
 The scan was cleaned and completed: flat panels and round parts were trued, the tire was rebuilt with
 a regular tread, and the motor covers, rim ring, display window, rear roller parts, battery packs,
-rear shock, rear handle and pedal decks were modelled. `docs/hardware/geometry.md` explains each
-step; `profiles/begode-extreme/geometry.toml` holds the measurements.
+rear shock, rear linkage, rear handle, pedal decks and brackets and (as an ESTIMATE) the side pad
+covers were modelled. `docs/hardware/geometry.md` explains each step;
+`profiles/begode-extreme/geometry.toml` holds the measurements.
 
 Parts that follow the owner's photos (2026-10-16) or an estimate, to be refined from his measurements:
 
@@ -19,6 +20,11 @@ Parts that follow the owner's photos (2026-10-16) or an estimate, to be refined 
   the rocker pin to its own pin on the carriage, above the shock's bottom eye. Both carriage points
   are INFERRED and the carriage's clevis and plates are ESTIMATES: they are hidden in every photo
   (`docs/hardware/geometry.md`, "Rear linkage").
+- **Side pad covers: ESTIMATE.** Not in the scan. C-shaped 3D frames of black molded plastic,
+  grained like the shell (the maker's lettering is left out): the shape follows the owner's photos
+  of a removed cover and a parts diagram; the size (401 mm long) and the place on the wheel are
+  estimates until the owner's tape length and a photo of it mounted
+  (`docs/hardware/geometry.md`, "Pad covers").
 - **Rear handle.** Orange CNC U-handle with a black grip bar. The arms' outer faces are in the
   scan; their three windows, blind pocket, foot and the grip position follow the owner's photos.
 - **Pedals.** The decks were not on the wheel for the scan. Deck, hinge rod and bracket follow the
@@ -29,9 +35,9 @@ Parts that follow the owner's photos (2026-10-16) or an estimate, to be refined 
 
 | File                      | Triangles | Size    | Use                  |
 | ------------------------- | --------- | ------- | -------------------- |
-| `begode-extreme-lod0.glb` | 284k      | 2.4 MB  | close-ups            |
-| `begode-extreme-lod1.glb` | 111k      | 1.1 MB  | default view         |
-| `begode-extreme-lod2.glb` | 40k       | 0.36 MB | far away, thumbnails |
+| `begode-extreme-lod0.glb` | 286k      | 2.4 MB  | close-ups            |
+| `begode-extreme-lod1.glb` | 113k      | 1.1 MB  | default view         |
+| `begode-extreme-lod2.glb` | 42k       | 0.37 MB | far away, thumbnails |
 
 The files use meshopt compression (`EXT_meshopt_compression`, `KHR_mesh_quantization`). three.js
 loads them with `GLTFLoader` and the `MeshoptDecoder`; drei's `useGLTF` enables it by default.
@@ -69,6 +75,7 @@ begode-extreme
    ├─ link               both link plates: turns about z on the rocker pin
    ├─ pedal_mount_left, pedal_mount_right   hinge brackets (black block, bright flange)
    ├─ axle
+   ├─ pad_cover_left, pad_cover_right   side pad covers (ESTIMATE), static
    └─ pedal_left, pedal_right   origin on the hinge pin: fold about x
 ```
 

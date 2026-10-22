@@ -263,6 +263,27 @@ pedal_bracket_right = { centre = [0.0007, -0.1197, -0.0106], half = [0.0228, 0.0
 pedal_left = { centre = [0.0, 0.1763, 0.0075], half = [0.145, 0.0675, 0.0045] }
 pedal_right = { centre = [0.0, -0.1763, 0.0075], half = [0.145, 0.0675, 0.0045] }
 
+# Side pad covers: C-shaped 3D frames of textured black plastic, not in the scan. Shape from the
+# owner's photos of a removed cover and a retailer's parts diagram; size and place ESTIMATE
+# (docs/hardware/geometry.md "Pad covers"). Left cover; mirror y for the right. Drawing only: no
+# collision solid, no mass.
+[pad_covers]
+in_scan = false
+length_m = 0.401               # ESTIMATE: 0.372-0.447 (diagram scales), 0.370-0.510 (photo screw heads)
+height_m = 0.332               # ESTIMATE, same scale
+depth_m = 0.065                # ESTIMATE 0.050-0.080: mounting face to outer face
+x_range_m = [-0.205, 0.196]    # ESTIMATE +-0.040: arms' rear ends beside the rocker's rear lobes, spine at the front
+z_range_m = [0.145, 0.476]     # ESTIMATE +-0.040: the upper arm's lower edge just above the rocker plates
+inner_y_m = 0.1025             # on the packs' outer faces (the scan reaches 0.1020 under the footprint)
+outer_y_m = 0.1675
+# Where the rider's legs can rest (a later leg-pad contact model): outer faces, ESTIMATE
+contact_faces = [
+  { name = "upper_arm", x_m = [-0.205, 0.121], z_m = [0.356, 0.476], y_m = 0.1675 },
+  { name = "spine_and_lower_arm", x_m = [-0.205, 0.196], z_m = [0.145, 0.356], y_m = 0.1675 },
+  { name = "round_block", x_m = [-0.135, -0.056], z_m = [0.224, 0.332], y_m = 0.1895 },
+  { name = "slotted_block", x_m = [0.083, 0.196], z_m = [0.154, 0.257], y_m = 0.1795 },
+]
+
 # The cleaned render model (public), see app/public/models/begode-extreme/README.md.
 [model]
 files = ["begode-extreme-lod0.glb", "begode-extreme-lod1.glb", "begode-extreme-lod2.glb"]
@@ -272,6 +293,7 @@ pedal_nodes = ["pedal_left", "pedal_right"]  # node origin on the pin: fold abou
 roller_nodes = ["roller_sleeve_left", "roller_sleeve_right", "roller_center_band", "speaker_left",
                 "speaker_right", "ble_led"]  # sleeves and ble_led are the emissive parts
 handle_nodes = ["rear_handle"]
+pad_cover_nodes = ["pad_cover_left", "pad_cover_right"]  # ESTIMATE (see [pad_covers])
 # Current linkage per owner photos (the scan shows an older system, not drawn). "shock": the
 # coil-over only; origin on the top eye, local +Y from the bottom eye to the top eye, bottom eye at
 # local (0, -0.200, 0). "shock_mount": the carriage's clevis and bottom shaft, origin on the bottom
