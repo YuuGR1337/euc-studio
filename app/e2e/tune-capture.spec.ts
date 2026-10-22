@@ -4,6 +4,10 @@ import { expect, test, type Locator, type Page, type TestInfo } from "@playwrigh
 import { createServer, type ViteDevServer } from "vite";
 import type { EngineState } from "../src/engine/types.ts";
 
+// The layout checks and screenshots are for 1280x720. Set it here so the spec keeps that size
+// under the main config (1440x900) as well as under e2e/tune-capture.config.ts.
+test.use({ viewport: { width: 1280, height: 720 }, deviceScaleFactor: 1 });
+
 // Production TuneWorkspace, hook, trigger state, scopes, API client, and CSS.
 // Only engine identity and the Tauri transport are replaced with controlled fixture replies.
 const root = fileURLToPath(new URL("..", import.meta.url));
