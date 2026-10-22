@@ -105,7 +105,7 @@ def test_session_steps_resets_and_records(scenario, firmware, tmp_path):
     assert recording.header["started_unix_ms"] <= created_by_ms
     assert recording.header["scenario_toml"] == scenario.read_text()
     assert recording.context["run_mode"] == "scenario"
-    assert recording.context["rider_model"] == "rigid_ankle_v1"
+    assert recording.context["rider_model"] == "articulated_sagittal_v1"
     assert recording.outputs
     assert recording.outputs[0].outputs.controller_powered is True
     assert recording.truncated is None
