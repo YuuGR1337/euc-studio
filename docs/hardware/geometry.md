@@ -122,70 +122,76 @@ points that are in the scan (pack rivets, frame bolts, the rear handle's roller 
 with the cover off fits 11 scan points to 8 px RMS, about 1 mm at the linkage. The derivation lives
 in the private research folder (`research/linkage/`).
 
-- **The rocker (MEASURED shape).** One black, textured, laser-cut steel plate on each side, outside
-  the shock, with one large window and three holes in view: the shock's top eye on a cross bar (the
-  red rebound knob beside it), an empty hole 20 mm from it, up and forward (likely a second shock
-  position), and a lower cross bar 66 mm below the top eye. The plate continues forward under the rear packs' edge,
-  where no photo reaches it.
+- **The rocker (MEASURED).** One black, textured, laser-cut steel plate on each side, outside the
+  shock. A retailer's parts diagram (not in the repo) shows the whole plate: a triangle with a notch
+  on its rear edge, three windows and four holes. Three of the holes are in the owner's photos: the
+  shock's top eye on a cross bar (the red rebound knob beside it), an empty hole 20 mm from it, up
+  and forward (likely a second shock position), and the rocker pin 66 mm below the top eye. A
+  similarity fit of the diagram's holes to these three (scale error 2 %, residuals under 0.8 mm)
+  places the fourth hole, the frame pivot, at (x -66.6, z 398.1 mm) +-3 mm (a fit to hand-picked
+  hole centres gives (-67.6, 396.9)). That is the steel pin between two frame blocks seen with the
+  seat off (x -45 +-20, z 400 +-15 mm there), so that pin is the rocker's pivot.
 - **The shock (MEASURED line).** It runs from its top eye, under the rear roller, forward and down
-  toward the carriage: a decal on the shock body places the line 44-52 degrees forward of vertical.
+  toward the carriage: a decal on the shock body places the line 42-52 degrees forward of vertical.
   So its bottom eye, 200 mm away, sits on the carriage just behind the slider channel, above the
   tire (INFERRED, +-10 mm), hidden behind the rear packs in every photo.
-- **The link (INFERRED).** Plates leave the lower cross bar forward and down, along the shock,
-  toward the bottom eye's shaft; past the bar they end in a pointed tip with a small hole. So the
-  lower cross bar is the link-to-rocker pin, and the link joins it to the carriage.
-- **The rocker's frame pivot (not located).** It is hidden in every photo. With the seat off, a
-  steel pin crosses between two frame blocks at the front end of the plates, at about (x -45 +-20,
-  z 400 +-15 mm). As the pivot of this rocker it would lock the linkage: every geometry with the
-  pivot there runs within 25 degrees of a straight link-to-rocker line (a toggle) before the shock
-  is compressed. So its role is open (a stop, a mount, or the pivot of another part). A pivot works
-  from about x -80 mm rearward; the render model draws it at (x -100, z 395 mm), the sound point
-  nearest that pin (ESTIMATE).
-- **The parts photo** (a product picture of a three-hole rocker and a two-hole link) shows a
-  smooth CNC part with three windows; the owner's plates are not that part, so its sizes are not
-  used.
+- **The link (MEASURED shape, INFERRED lower pin).** The diagram shows a straight bar, 156 mm hole
+  to hole at the rocker plate's scale, wider near its upper hole and ending in a pointed tip with a
+  small hole past it; the tip shows beside the rocker pin in the photos. In the side photo with the
+  cover off, the link's two edges, back-projected onto its plane, run 16 +-2 degrees below
+  horizontal forward from the rocker pin. Its lower pin is therefore at about (x -27, z 270 mm)
+  +-8 mm, 23 mm above the shock's bottom eye: the link does not share the shock's bottom shaft
+  (that would need 25 degrees). The lower pin must ride on the carriage too, or the rocker, its
+  pivot and the link would form a rigid triangle.
 
 | Point (full extension) | x mm | z mm | Evidence |
 | --- | --- | --- | --- |
 | Shock top eye (on the rocker) | -185 | 378 | MEASURED (photo pose, +-3) |
 | Rocker pin (link upper hole) | -177 | 313 | MEASURED (photo pose, +-3) |
 | Empty hole beside the top eye | -172.5 | 393 | MEASURED (photo pose) |
-| Shock bottom eye and link lower hole, on the carriage | -34 | 247 | INFERRED (shock line, 200 mm), +-10 |
-| Steel pin between two frame blocks | -45 | 400 | MEASURED roughly (seat-off photos), +-20 / +-15 |
-| Rocker frame pivot | -100 | 395 | ESTIMATE (drawing only), band below |
+| Rocker frame pivot (the steel pin) | -66.6 | 398.1 | MEASURED (parts-diagram fit, +-3) |
+| Link lower pin, on the carriage | -27 | 270 | INFERRED (link direction and length), +-8 |
+| Shock bottom eye, on the carriage | -34 | 247 | INFERRED (shock line, 200 mm), +-10 |
 
-**The leverage (ESTIMATE, not used by the physics yet).** A Monte Carlo over the measured points
-(+-2 mm), the shock line (44-52 degrees), the link's direction (18-32 degrees below the rocker pin,
-from the plates) and its lower pin on the carriage, with the frame pivot anywhere the photos leave
-room for it (between the rear packs, under the frame top), keeps 24,000 of 160,000 sampled geometries
-(link and rocker at least 20 degrees from a straight line, the shock compressed monotonically). Their pivots
-lie at x -128 to -81 mm, z 376 to 413 mm (5th to 95th percentile). They agree on three things:
+**The leverage (INFERRED, not used by the physics yet).** The rocker's pivot is fixed, and the
+carriage carries both the shock's bottom eye and the link's lower pin. As the carriage rises, the
+shock is pushed toward its top eye while the link turns the rocker a few degrees, first so that the
+top eye rises with it and, once the link passes horizontal (about 50 mm of travel), back. Drawn as
+in the table, the ratio is 2.34 axle mm per shock mm at rest, 2.03 at 45 mm, 1.84 at 75 mm and 1.70
+at 93.5 mm (a falling ratio: the wheel gets stiffer through the travel), and the 55 mm stroke ends
+at 107.5 mm of axle travel. A Monte Carlo over the points' uncertainties (pivot, top eye and rocker
+pin +-3 mm, shock line 42-52 degrees, link 14-18 degrees and 153-159 mm; 4,000 samples) gives:
 
-- the ratio at rest is 2.1-2.7 (median 2.4) axle mm per shock mm, not the 1.6-1.9 that the owner's
-  sag gives with the 0-2 mm of preload assumed so far. To match the owner's sag at that ratio, the
-  spring needs about 6-11 mm of preload;
-- the rods' stop (108.5 mm of axle travel above the carriage) ends the travel before the shock's
-  stroke in 87 % of them: only 41-55 mm (median 47) of the 55 mm stroke is used;
-- the ratio near the end of the travel rises (median 2.6 at 100 mm, band 1.6-3.6).
+- ratio at rest 2.0-2.5 (median 2.2), at 93.5 mm 1.3-2.1 (median 1.6);
+- the 55 mm stroke ends at 89-121 mm of axle travel (median 101), within the 132 mm to the frame's
+  top plate; the ring on the rod 108.5 mm above the carriage would stop it first in about a quarter
+  of the cases, if it is a stop and not a travel indicator;
+- the owner's sag needs about 4-9 mm of spring preload (median 6), against the 2 mm assumed so far;
+  with 2 mm, the default 80 kg rider would sag 23-37 mm (median 28) instead of the 18 mm of the
+  constant 1.7.
 
-The physics keeps the constant `linkage_ratio` 1.7 of `plant.toml` until two inputs arrive: where
-the rocker's front end is bolted (or whether the steel pin turns when the seat is pressed), and the
-spring preload (or a sag reading on an O-ring on the shock shaft). With them the curve becomes a
-measured `ratio_curve`.
+The physics keeps the constant `linkage_ratio` 1.7 of `plant.toml`. The curve becomes a measured
+`ratio_curve` once two inputs confirm it: a seat-press video (does the rocker turn, and which way)
+and the spring preload (or a sag reading on the shock).
 
-**The drawn linkage.** The render model draws the measured points with the pivot ESTIMATE above.
-Over the physics travel (93.5 mm with the constant 1.7) its shock shortens 38 mm where the physics'
-shock travel is 55 mm: the drawing's shock length differs from the `shock_mm` channel by up to 17 mm
-(2 mm at 10 mm of travel, 11 mm at 60 mm). The rocker turns 11 degrees at most. The studio poses the
-drawing from `suspension_mm`, so all parts stay joined; the shock's length follows the drawing.
+**The drawn linkage.** The render model draws the rocker plates and links from the diagram's
+outlines, placed by the fits above, with the carriage points of the table. Seen from the solved
+camera of the cover-off side photo, its holes, windows, notch and link fall on the photo within a
+few millimetres. Over the physics travel (93.5 mm with the constant 1.7) its shock shortens 46.6 mm
+where the physics' shock travel is 55 mm: the drawing's shock length differs from the `shock_mm`
+channel by up to 8.4 mm. The rocker turns 4.3 degrees at most. The studio poses the drawing from
+`suspension_mm`, so all parts stay joined; the shock's length follows the drawing.
 
 **Superseded.** The first estimate (2026-10-22, before the cover-off and seat-off photos) read the
 2026-10-16 photos with the scan's old shafts as anchors: a shock leaning 23.5 degrees forward from
 the old bottom shaft, a frame pivot forward of the top eye, and a rising curve from 1.75 at rest to
 2.38 at 103.5 mm. The new photos contradict its positions (the top eye sits 40 mm further back and
 the old bottom shaft is gone), so it is not used. Its scenario runs (no verdict changed against the
-constant 1.7) say nothing about the real linkage. `docs/hardware/suspension-linkage.md` records the
-readings considered and why each was kept or dropped.
+constant 1.7) say nothing about the real linkage. The second estimate, before the parts diagram,
+had the link on the shock's bottom shaft and the pivot hidden: its Monte Carlo (pivots between the
+rear packs, ratio 2.1-2.7 at rest, 41-55 mm of stroke used) is superseded by the located pivot and
+link pin. `docs/hardware/suspension-linkage.md` records the readings considered and why each was
+kept or dropped.
 
 ## Pad covers
 
@@ -260,8 +266,8 @@ the pins at y +-176.3 mm.
 
 ## The render model
 
-`app/public/models/begode-extreme/` holds three levels of detail (LOD0 294k triangles 2.5 MB, LOD1
-114k 1.1 MB, LOD2 41k 0.37 MB, meshopt compressed). Its README lists the nodes. How it is made from
+`app/public/models/begode-extreme/` holds three levels of detail (LOD0 296k triangles 2.5 MB, LOD1
+115k 1.1 MB, LOD2 41k 0.37 MB, meshopt compressed). Its README lists the nodes. How it is made from
 the scan (the tools live in the private research folder):
 
 1. **Parts.** Simple rules split the scan: tire (wheel pieces that reach the tread), hub, seat
@@ -288,13 +294,14 @@ the scan (the tools live in the private research folder):
    reservoir: **200 mm eye to eye and 750 lb/in, MEASURED by the owner**; a 56 mm x 115 mm spring
    (DNM size chart for 200 mm), 8 mm x 24 mm eyelets, threaded body with a slotted collar at the
    bottom eye, red rebound knob at the top eye; stroke ESTIMATE (55 mm). The shock and the **rear
-   linkage** are drawn to the owner's photos of 2026-10-22 (see "Rear linkage" above): per side a
-   rocker plate with the photographed outline, window and empty hole, plus its hidden forward arm
-   to the pivot ESTIMATE; a link (a bar with the pointed tip past the rocker pin) to the carriage;
-   cross bars at the top eye and the rocker pin (black tubes with spacers either side of the shock
-   eye, chrome button heads with washers); the plates sit at |y| 46.5-51 mm (the rear photo's camera
-   pose fits 50-54 mm for their outer faces); the carriage's clevis and bottom shaft (hidden in
-   every photo, ESTIMATE); the pivot shaft; and the steel pin between two frame blocks at the front.
+   linkage** are drawn to the owner's photos of 2026-10-22 and the parts diagram (see "Rear
+   linkage" above): per side a rocker plate with the diagram's outline, three windows and four
+   holes; a link with the diagram's outline (wider near the rocker pin, the pointed tip and its
+   small hole past it) to its own carriage pin; cross bars at the top eye and the rocker pin (black
+   tubes with spacers either side of the shock eye, chrome button heads with washers); the plates
+   sit at |y| 46.5-51 mm (the rear photo's camera pose fits 50-54 mm for their outer faces); the
+   carriage's clevis and bottom shaft for the shock and a plate per side carrying the link's lower
+   pin (hidden in every photo, ESTIMATE); and the pivot pin between two frame blocks.
    Nothing of the scan's older system is drawn: its shafts, plates and rear tray are removed. Each
    moving part is its own node (README), and the studio poses them from the Suspension channel.
    The **rear handle** is the orange CNC U-handle of the photos: each arm runs from a foot at the
@@ -330,11 +337,11 @@ the scan (the tools live in the private research folder):
 
 What the owner can measure to close the remaining gaps (centre to centre, in mm):
 
-- **Rocker linkage.** Where the rocker plate's front end is bolted to the frame: with the seat off,
-  whether the steel pin at the front turns when the seat is pressed down (then it is the pivot) or
-  the plates slide past it; a short video while pressing the seat answers it and shows the ratio.
-  And the spring preload: how far the collar is wound down from the spring's free length, or the
-  sag read on an O-ring on the shock shaft. With both, the leverage becomes a measured curve.
+- **Rocker linkage.** A short video from the side with the pad cover off while pressing the seat
+  down: whether the rocker plates turn about the steel pin and which way (it confirms that the
+  link's lower pin rides on the carriage). And the spring preload: how far the collar is wound
+  down from the spring's free length, or the sag read on an O-ring on the shock shaft. With both,
+  the leverage becomes a measured curve.
 - **Pad covers.** The length of a removed cover with a tape, and one photo of it mounted, from the
   side.
 - **Shock stroke.** Printed on the shock or in its listing (55 mm is an ESTIMATE, 50-57 mm range).

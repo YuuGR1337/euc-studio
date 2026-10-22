@@ -28,6 +28,7 @@ function profileLinkage(): LinkageRest {
     rockerPin: point("rocker_pin"),
     topEye: point("shock_top"),
     bottomEye: point("shock_bottom"),
+    linkBottom: point("link_bottom"),
   };
 }
 
@@ -64,7 +65,7 @@ function glbNodes(lod: number): Map<string, GlbNode> {
 function linkageBody(lod: number): THREE.Object3D {
   const body = new THREE.Object3D();
   for (const [name, node] of glbNodes(lod)) {
-    if (!["shock", "shock_mount", "rocker", "link"].includes(name)) continue;
+    if (!["shock", "shock_mount", "link_bottom", "rocker", "link"].includes(name)) continue;
     const o = new THREE.Object3D();
     o.name = name;
     const [x = 0, y = 0, z = 0] = node.translation ?? [];
@@ -97,23 +98,24 @@ describe("rear linkage", () => {
   });
 
   it("keeps the link and the rocker rigid along the travel", () => {
-    const link = distance(rest.rockerPin, rest.bottomEye);
+    const link = distance(rest.rockerPin, rest.linkBottom);
     const eyeToPivot = distance(rest.topEye, rest.pivot);
     const pinToEye = distance(rest.rockerPin, rest.topEye);
     for (const travel of [0.02, 0.05, 0.1]) {
       const p = pose(rest, travel);
-      expect(distance(p.rockerPin, p.bottomEye)).toBeCloseTo(link, 9);
+      expect(distance(p.rockerPin, p.linkBottom)).toBeCloseTo(link, 9);
       expect(distance(p.topEye, rest.pivot)).toBeCloseTo(eyeToPivot, 9);
       expect(distance(p.rockerPin, p.topEye)).toBeCloseTo(pinToEye, 9);
       expect(p.bottomEye[1] - rest.bottomEye[1]).toBeCloseTo(travel, 5);
+      expect(p.linkBottom[1] - rest.linkBottom[1]).toBeCloseTo(travel, 5);
     }
   });
 
   it("compresses the drawn shock within its stroke over the physics travel", () => {
-    // The physics keeps a constant leverage while the drawn linkage's pivot is an ESTIMATE
+    // The physics keeps a constant leverage while the drawing follows the measured linkage
     // (docs/hardware/geometry.md "Rear linkage"); the drawing then differs from the shock channel
-    // by up to 17 mm. When plant.toml gets the measured ratio_curve, this test should compare the
-    // two exactly instead.
+    // by up to 8.4 mm. When plant.toml gets the linkage's ratio_curve, this test should compare
+    // the two exactly instead.
     const { ratio, strokeMm, curve } = profileSuspension();
     expect(curve).toBe("[]");
     const travelMm = strokeMm * ratio;
@@ -122,7 +124,7 @@ describe("rear linkage", () => {
       const drawn = (0.2 - pose(rest, axleMm / 1000).length) * 1000;
       expect(drawn, `at ${axleMm} mm`).toBeGreaterThan(last);
       expect(drawn, `at ${axleMm} mm`).toBeLessThan(strokeMm);
-      expect(Math.abs(drawn - axleMm / ratio), `at ${axleMm} mm`).toBeLessThan(18);
+      expect(Math.abs(drawn - axleMm / ratio), `at ${axleMm} mm`).toBeLessThan(9);
       last = drawn;
     }
   });
@@ -139,6 +141,7 @@ describe("rear linkage", () => {
       near("link", rest.rockerPin);
       near("shock", rest.topEye);
       near("shock_mount", rest.bottomEye);
+      near("link_bottom", rest.linkBottom);
     }
   });
 
@@ -148,7 +151,8 @@ describe("rear linkage", () => {
     if (!rig) throw new Error("the model has no linkage nodes");
     // Rest points in each part's own frame: the link's lower hole, the rocker's top eye and pin.
     const local = (o: THREE.Object3D, p: P2) => o.worldToLocal(new THREE.Vector3(p[0], p[1], 0));
-    const linkLower = local(rig.link, rig.rest.bottomEye);
+    const linkLower = local(rig.link, rig.rest.linkBottom);
+    const mountPin = local(rig.mount, rig.rest.linkBottom);
     const rockerEye = local(rig.rocker, rig.rest.topEye);
     const rockerPin = local(rig.rocker, rig.rest.rockerPin);
     const close = (a: THREE.Vector3, b: THREE.Vector3, what: string) =>
@@ -166,7 +170,14 @@ describe("rear linkage", () => {
         rig.link.position,
         `rocker pin at ${travel}`,
       );
-      close(rig.link.localToWorld(linkLower.clone()), bottomEye, `link lower hole at ${travel}`);
+      // The link's lower hole on the carriage's pin, and the marker on it.
+      const pin = rig.mount.localToWorld(mountPin.clone());
+      close(rig.link.localToWorld(linkLower.clone()), pin, `link lower hole at ${travel}`);
+      close(
+        rig.linkBottom?.getWorldPosition(new THREE.Vector3()) ?? pin,
+        pin,
+        `link pin at ${travel}`,
+      );
       expect(bottomEye.y - rest.bottomEye[1]).toBeCloseTo(travel, 5);
     }
   });

@@ -92,9 +92,9 @@ Without `[body.suspension]` the carriage is left out and the wheel hinges straig
 - **Suspension.** The Extreme's motor axle slides up into the frame on two vertical rods, held down
   by a coil-over shock at the rear through a rocker linkage (per side, from the owner's photos: the
   shock runs forward and down from its top eye on the rocker, under the rear roller, to its bottom
-  eye on the carriage, and a link joins the rocker's lower pin to the carriage; the rocker's frame
-  pivot is not yet located, `docs/hardware/geometry.md`, "Rear linkage"). In the model the carriage
-  (stator, axle clamps, slider blocks: `unsprung_mass_kg`)
+  eye on the carriage, a link joins the rocker's lower pin to a second pin on the carriage, and
+  the rocker turns about a pin on the frame, `docs/hardware/geometry.md`, "Rear linkage"). In the
+  model the carriage (stator, axle clamps, slider blocks: `unsprung_mass_kg`)
   slides on a joint along `axis_forward_deg` from the shell's vertical, and the wheel spins on the
   carriage, so the motor's reaction torque still reaches the shell. The joint counts compression
   from full extension (the scanned state, where the shell's heights are measured). The linkage's
@@ -110,7 +110,7 @@ Without `[body.suspension]` the carriage is left out and the wheel hinges straig
   The tire and the shell never touch each other (an explicit contact exclusion: the tire runs inside
   the frame). Telemetry channels: `suspension_mm` (axle travel) and `shock_mm` (shock travel). The
   studio poses the drawn linkage from `suspension_mm`; its shock length follows the drawn linkage,
-  not `shock_mm` (they differ by up to 17 mm while the physics keeps the constant ratio).
+  not `shock_mm` (they differ by up to 8.4 mm while the physics keeps the constant ratio).
 - **Shell.** Mass, centre of mass and inertia from the parameters. The shapes are the scan's collision
   solids (`geometry.toml` `[collision]`: battery packs with their slider channels, seat, handle and
   headlight, rear roller, shock, pedal brackets, and estimated pedal decks), for drawing and for the
@@ -292,7 +292,7 @@ Wheel (`[body]` in `plant.toml`, Begode Extreme values):
 | `suspension.stroke_mm` | 55 mm | ESTIMATE: 200 mm DNM coil-overs come with 50-57 mm of stroke |
 | `suspension.eye_to_eye_mm` | 200 mm | MEASURED (owner; drawing only); the scan's older shock was 204 mm |
 | `suspension.linkage_ratio` | 1.7 | ESTIMATE from the owner's sag (1.6-1.9 with 0-2 mm preload); used while `ratio_curve` is empty |
-| `suspension.ratio_curve` | none | the rocker's leverage along the travel; the photo-measured layout (`docs/hardware/geometry.md`, "Rear linkage") does not fix it yet: its frame pivot and the spring preload are open |
+| `suspension.ratio_curve` | none | the rocker's leverage along the travel; the located linkage (`docs/hardware/geometry.md`, "Rear linkage") gives 2.3 at rest falling to 1.7 at 93.5 mm (INFERRED), waiting for a seat-press video and the spring preload |
 | `suspension.damping_n_s_per_m` | 2200 N·s/m | ESTIMATE: damping ratio about 0.18 for the sprung 100 kg |
 
 With these values an 80 kg rider sags the suspension 18 mm (19 % of the 93.5 mm axle travel), and

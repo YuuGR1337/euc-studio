@@ -168,27 +168,30 @@ scan_linkage_pivots_xz_m = { shock_top = [-0.1395, 0.3675], shock_bottom = [-0.2
 # Current linkage (owner photos 2026-10-22 with the pad cover and the seat off; positions from
 # camera poses solved on scan points; docs/hardware/geometry.md "Rear linkage"), per side: the
 # shock runs forward and down from its top eye on the rocker, under the rear roller, to its bottom
-# eye on the carriage; a link joins the rocker pin to the same carriage shaft; the rocker turns
-# about a frame pivot. Positions at full extension, x and z in metres:
+# eye on the carriage; a link joins the rocker pin to a second carriage pin above that eye; the
+# rocker turns about a frame pivot. Positions at full extension, x and z in metres:
 #   shock_top     MEASURED (photo pose, +-3 mm)
 #   rocker_pin    MEASURED (photo pose, +-3 mm)
 #   spare_hole    MEASURED (photo pose): an empty hole beside the top eye, a second shock position
-#   shock_bottom  INFERRED: 200 mm from the top eye along the photographed shock line (44-52 deg
+#   shock_bottom  INFERRED: 200 mm from the top eye along the photographed shock line (42-52 deg
 #                 forward of vertical), +-10 mm; hidden behind the rear packs in every photo
-#   frame_pivot   ESTIMATE: hidden in every photo. Drawn at the kinematically sound point nearest the
-#                 steel pin seen with the seat off (front_pin); band x -0.128..-0.081, z 0.376..0.413
-#   front_pin     MEASURED roughly (seat-off photos): x +-0.020, z +-0.015; a steel pin between two
-#                 frame blocks at the front end of the plates. As the rocker's pivot it would lock
-#                 the linkage (near toggle), so its role is open (a stop, a mount, or the pivot of
-#                 another part)
-linkage_pivots_xz_m = { frame_pivot = [-0.1000, 0.3950], rocker_pin = [-0.1770, 0.3130], shock_top = [-0.1850, 0.3780], shock_bottom = [-0.0338, 0.2471] }
+#   link_bottom   INFERRED: the link's lower pin, +-8 mm. In the cover-off side photo (pose on 11
+#                 scan points) the link's edges, back-projected on its plane, run 16 +-2 deg below
+#                 horizontal from the rocker pin; the parts map's link is 156 mm hole to hole at the
+#                 rocker plate's scale. It cannot be the shock's bottom shaft (that needs 25 deg).
+#                 It must ride on the carriage, or the rocker could not turn
+#   frame_pivot   MEASURED (parts-map fit, +-3 mm): the rocker plate's fourth hole. A retailer's
+#                 parts map (not in the repo) shows the plate with four holes; a similarity fit of
+#                 three of them to shock_top, rocker_pin and spare_hole (scale error 2 %, residuals
+#                 under 0.8 mm) places the fourth here. It is the steel pin between two frame blocks
+#                 seen with the seat off (x +-0.020, z +-0.015 there), so that pin is the pivot.
+linkage_pivots_xz_m = { frame_pivot = [-0.0666, 0.3981], rocker_pin = [-0.1770, 0.3130], shock_top = [-0.1850, 0.3780], shock_bottom = [-0.0338, 0.2471], link_bottom = [-0.0270, 0.2700] }
 spare_hole_xz_m = [-0.1725, 0.3930]
-front_pin_xz_m = [-0.045, 0.400]
 rocker_plates_y_m = [0.0465, 0.0510]    # ESTIMATE: |y| of each rocker plate; the rear photo's camera pose fits 0.050-0.054 for the outer face
 link_plates_y_m = [0.0405, 0.0450]      # ESTIMATE: inboard of the rocker plates
-link_length_m = 0.1576                  # INFERRED: rocker_pin to shock_bottom
-rocker_sides_m = { pivot_to_pin = 0.1125, pivot_to_eye = 0.0867, eye_to_pin = 0.0655 }  # eye_to_pin MEASURED, the others ESTIMATE
-rocker_turn_deg = 11.0                  # ESTIMATE: largest turn over the physics travel (drawn linkage)
+link_length_m = 0.1560                  # MEASURED (parts map at the rocker plate's scale, +-2 %): rocker_pin to link_bottom
+rocker_sides_m = { pivot_to_pin = 0.1394, pivot_to_eye = 0.1201, eye_to_pin = 0.0655 }  # MEASURED (photo poses and the parts-map fit)
+rocker_turn_deg = 4.3                   # INFERRED: largest turn over the physics travel (drawn linkage); it turns back once the link passes horizontal (about 50 mm)
 
 [shock]
 # Current shock: DNM coil-over without reservoir. Owner photos 2026-10-16: body and threaded collar
@@ -207,7 +210,7 @@ spring_coils = 7                        # owner photos
 spring_rate_n_per_m = 131_300           # 750 lb/in, MEASURED (owner; printed on the spring)
 eyelet_bore_m = 0.008                   # DNM listing
 eyelet_width_m = 0.024                  # DNM listing
-motion_ratio = "UNRESOLVED: the photo-measured layout needs the rocker's frame pivot (hidden) and the spring preload; with a pivot between the rear packs the ratio is 2.1-2.7 at rest (ESTIMATE). The physics keeps plant.toml's constant 1.7; docs/hardware/geometry.md"
+motion_ratio = "INFERRED from the drawn linkage: 2.3 at rest falling to 1.7 at 93.5 mm (band 1.9-2.7 at rest, from the carriage points' uncertainty). The physics keeps plant.toml's constant 1.7 until a seat-press video or the spring preload confirms the curve; docs/hardware/geometry.md"
 
 [rear_handle]
 # Orange anodised CNC U-handle (owner photos 2026-10-16): two flat arms bolted to the frame and
@@ -269,7 +272,8 @@ handle_nodes = ["rear_handle"]
 # Current linkage per owner photos (the scan shows an older system, not drawn). "shock": the
 # coil-over only; origin on the top eye, local +Y from the bottom eye to the top eye, bottom eye at
 # local (0, -0.200, 0). "shock_mount": the carriage's clevis and bottom shaft, origin on the bottom
-# eye (moves with the axle). "rocker": origin on its frame pivot (turns about z). "link": origin on
-# the rocker pin. "shock_links": the pivot shaft, the front blocks and their pin (static). Rest
-# origins = [suspension] linkage_pivots_xz_m.
-shock_nodes = ["shock", "shock_links", "shock_mount", "rocker", "link"]
+# eye (moves with the axle; carries the link's lower pin too). "link_bottom": empty, on the link's
+# lower pin. "rocker": origin on its frame pivot (turns about z). "link": origin on the rocker pin.
+# "shock_links": the pivot pin and its two frame blocks (static). Rest origins = [suspension]
+# linkage_pivots_xz_m.
+shock_nodes = ["shock", "shock_links", "shock_mount", "link_bottom", "rocker", "link"]
