@@ -879,8 +879,10 @@ impl Scheduler {
             bed: Bed::new(),
             volume: 1.0,
             volume_now: 1.0,
-            bed_on: true,
-            bed_now: 1.0,
+            // The ride bed is opt-in (the studio's "Ride sound (experimental)"): silent until a mix
+            // turns it on.
+            bed_on: false,
+            bed_now: 0.0,
         }
     }
     fn mix(&mut self, volume: f64, bed: bool) {
@@ -1117,6 +1119,37 @@ impl Synth {
     }
 }
 
+/// A run's sound offline, as the live runner would play it at 1x: each sample's tones and ride
+/// sound pushed in order, with the output rendered up to the sample's time before each push (the
+/// device's clock), then the scheduling lead flushed. 48 kHz mono from the first sample's time;
+/// `ride_sound` as the studio's opt-in switch. Test-only: the README showcase (`showcase.rs`).
+#[cfg(test)]
+pub(super) fn render_offline(
+    samples: &[(f64, Vec<Tone>, Option<Ride>)],
+    ride_sound: bool,
+) -> Result<Vec<f32>, AudioError> {
+    let Some(&(start, ..)) = samples.first() else { return Ok(Vec::new()) };
+    let mut scheduler = Scheduler::new();
+    scheduler.reset(1, start)?;
+    scheduler.mix(1.0, ride_sound);
+    scheduler.bed_now = if ride_sound { 1.0 } else { 0.0 };
+    let mut out = Vec::new();
+    let mut render_to = |scheduler: &mut Scheduler, frame: u64| -> Result<(), AudioError> {
+        let mut chunk = vec![0.0; usize::try_from(frame.saturating_sub(scheduler.cursor)).unwrap_or(0)];
+        scheduler.render(&mut chunk)?;
+        out.extend_from_slice(&chunk);
+        Ok(())
+    };
+    for (t_s, tones, ride) in samples {
+        render_to(&mut scheduler, ((t_s - start) * SAMPLE_RATE).round() as u64)?;
+        scheduler.push_ride(1, *t_s, 1.0, tones, *ride)?;
+    }
+    let end = scheduler.cursor + LEAD_FRAMES;
+    render_to(&mut scheduler, end)?;
+    out.drain(..usize::try_from(LEAD_FRAMES).unwrap_or(0).min(out.len()));
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1128,6 +1161,13 @@ mod tests {
         let mut s = Scheduler::new();
         s.reset(1, 0.0).unwrap();
         s.push(1, 0.0, 1.0, &[]).unwrap();
+        s
+    }
+    /// A scheduler with the opt-in ride sound on (already faded in).
+    fn riding() -> Scheduler {
+        let mut s = scheduler();
+        s.mix(1.0, true);
+        s.bed_now = 1.0;
         s
     }
     fn energy(samples: &[f32]) -> f64 {
@@ -1366,8 +1406,16 @@ mod tests {
     }
 
     #[test]
-    fn a_free_ride_sounds_on_simulated_time_and_quiets_when_its_samples_stop() {
+    fn the_ride_sound_is_off_until_a_mix_turns_it_on_and_the_buzzer_plays_regardless() {
         let mut s = scheduler();
+        let pcm = ride_for(&mut s, 0.0, 1.0, 10.0, &[tone(0.7, 2700.0), tone(0.8, 0.0)]);
+        assert_eq!(energy(&pcm[frame(0.3)..frame(0.7)]), 0.0);
+        assert!(energy(&pcm[frame(0.72)..frame(0.8)]) > 1e-3);
+    }
+
+    #[test]
+    fn a_free_ride_sounds_on_simulated_time_and_quiets_when_its_samples_stop() {
+        let mut s = riding();
         let pcm = ride_for(&mut s, 0.0, 1.0, 10.0, &[]);
         // Nothing before the lead, then the bed.
         assert_eq!(energy(&pcm[..LEAD_FRAMES as usize - 1]), 0.0);
@@ -1386,17 +1434,17 @@ mod tests {
     #[test]
     fn the_master_volume_scales_both_voices_and_a_hidden_window_quiets_only_the_bed() {
         let loud = {
-            let mut s = scheduler();
+            let mut s = riding();
             let pcm = ride_for(&mut s, 0.0, 1.0, 10.0, &[]);
             energy(&pcm[frame(0.5)..])
         };
-        let mut s = scheduler();
+        let mut s = riding();
         s.mix(0.5, true);
         let pcm = ride_for(&mut s, 0.0, 1.0, 10.0, &[]);
         let half = energy(&pcm[frame(0.5)..]);
         assert!((half / loud - 0.25).abs() < 0.05, "half {half} loud {loud}");
         // Hidden: the bed fades out over 0.3 s; a beep still sounds.
-        let mut s = scheduler();
+        let mut s = riding();
         s.mix(1.0, false);
         let pcm = ride_for(&mut s, 0.0, 1.0, 10.0, &[tone(0.7, 2700.0), tone(0.8, 0.0)]);
         assert!(energy(&pcm[frame(0.4)..frame(0.7)]) < 1e-12);

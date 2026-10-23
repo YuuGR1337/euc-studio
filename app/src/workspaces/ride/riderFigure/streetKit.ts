@@ -22,7 +22,7 @@ import { RIDER_BLOCKOUT as B } from "../../../vendor/euc-thrills/tuning.ts";
 
 // The street kit: EUC Studio's own rider look, an everyday riding outfit. A black full-face
 // helmet with a mirrored visor, a small rear-view mirror on its left and a chin strap; a loose
-// black tee with bare forearms; orange gloves with black knuckles; loose light-blue jeans; black
+// black tee with bare forearms; orange gloves with black knuckles; loose mid-blue jeans; black
 // hard knee and shin guards with a hexagon surface, strapped over the jeans; chunky white
 // sneakers. Plain shapes and colours, no marks of any brand.
 //

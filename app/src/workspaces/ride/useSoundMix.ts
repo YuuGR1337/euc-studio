@@ -9,26 +9,31 @@ import { useUi } from "../../state/ui.ts";
 export const volumeGain = (volume: number) => Math.min(1, Math.max(0, volume)) ** 2;
 
 /**
- * Keeps native output's mix on the user's volume and mute, and the ride sound (motor, tyre,
- * wind) off while the window is hidden: the run goes on, the buzzer still sounds (its alarms
- * matter), the ride sound fades out over 0.3 s and back in when the window shows again.
+ * Keeps native output's mix on the user's volume and mute. The ride sound (motor, tyre, wind) is
+ * experimental and plays only when the user turns it on, and never while the window is hidden:
+ * the run goes on, the buzzer still sounds (its alarms matter), the ride sound fades out over
+ * 0.3 s and back in when the window shows again.
  */
 export function useSoundMix(source: EngineClient = engine) {
   const volume = useUi((s) => s.soundVolume);
   const muted = useUi((s) => s.soundMuted);
+  const ride = useUi((s) => s.rideSound);
   const [hidden, setHidden] = useState(() => typeof document !== "undefined" && document.hidden);
   useEffect(() => {
     const update = () => setHidden(document.hidden);
     document.addEventListener("visibilitychange", update);
     return () => document.removeEventListener("visibilitychange", update);
   }, []);
-  useEffect(() => sendMix(source, volume, muted, hidden), [source, volume, muted, hidden]);
+  useEffect(
+    () => sendMix(source, volume, muted, ride && !hidden),
+    [source, volume, muted, ride, hidden],
+  );
 }
 
 /** Sends one mix to a live engine's native output; a failure is logged, never thrown. */
-export function sendMix(source: EngineClient, volume: number, muted: boolean, hidden: boolean) {
+export function sendMix(source: EngineClient, volume: number, muted: boolean, ride: boolean) {
   if (source.kind !== "live" || !source.setSoundMix) return;
-  source.setSoundMix(muted ? 0 : volumeGain(volume), !hidden).catch((error: unknown) => {
+  source.setSoundMix(muted ? 0 : volumeGain(volume), ride).catch((error: unknown) => {
     console.warn(`[sound] ${String(error)}`);
   });
 }

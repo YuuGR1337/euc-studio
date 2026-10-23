@@ -29,9 +29,17 @@ export interface GeneratedMapSpec {
 export type GroundChoice = { world: WorldChoice } | { map: GeneratedMapSpec };
 export const isWorldChoice = (ground: GroundChoice): ground is { world: WorldChoice } =>
   "world" in ground;
+/**
+ * The settings journal Free Ride boots the stock firmware with (profiles/begode-extreme/
+ * settings.toml). "neutral" is the factory record with level pedals (pedal trim 4); "blank" is
+ * the factory-fresh record, whose pedals sit 4.8° nose down, so the wheel rides nose down.
+ */
+export const SETTINGS_PRESETS = ["neutral", "blank"] as const;
+export type SettingsPreset = (typeof SETTINGS_PRESETS)[number];
+export const DEFAULT_SETTINGS: SettingsPreset = "neutral";
 export interface FreeRideSpec {
   wheel: "begode-extreme";
-  settings: "blank";
+  settings: SettingsPreset;
   rider_model: RiderModel;
   map?: GeneratedMapSpec;
   world?: WorldChoice;
@@ -195,13 +203,18 @@ function epochCheck(epoch: number) {
   if (!Number.isSafeInteger(epoch) || epoch < 0) throw new Error("Invalid run epoch.");
 }
 export const freeRideApi = {
-  async start(ground: GroundChoice, riderModel: RiderModel = DEFAULT_RIDER_MODEL): Promise<void> {
+  async start(
+    ground: GroundChoice,
+    riderModel: RiderModel = DEFAULT_RIDER_MODEL,
+    settings: SettingsPreset = DEFAULT_SETTINGS,
+  ): Promise<void> {
     const error = isWorldChoice(ground) ? worldProblem(ground.world) : mapProblem(ground.map);
     if (error) throw new Error(error);
     if (!isRiderModel(riderModel)) throw new Error("Select a supported rider model.");
+    if (!SETTINGS_PRESETS.includes(settings)) throw new Error("Select a settings preset.");
     const spec: FreeRideSpec = {
       wheel: "begode-extreme",
-      settings: "blank",
+      settings,
       rider_model: riderModel,
       ...ground,
     };

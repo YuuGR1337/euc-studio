@@ -8,7 +8,10 @@
 
 **Run real electric-unicycle firmware in a 3D simulation with a physical rider. Inspect it, compare it, improve it.**
 
-<!-- showcase -->
+[![EUC Studio replaying real runs: a Free Ride through the city, a pothole, a cut-out at top speed, and stock against our firmware](docs/assets/video/showcase-loop.webp)](docs/assets/video/showcase.mp4)
+
+<sub>The studio itself, filmed headless, replaying real runs of the stock firmware (26 s). With sound:
+[showcase.mp4](docs/assets/video/showcase.mp4). How it is made: [video/](video/README.md).</sub>
 
 EUC Studio is a workbench for people who want better and safer EUC controller firmware. It runs the controller's
 actual firmware image on an emulated microcontroller. Motor, battery, wheel, rider and city models supply its inputs.

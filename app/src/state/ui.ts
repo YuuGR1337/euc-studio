@@ -66,6 +66,8 @@ interface UiState {
   soundVolume: number;
   /** Mute the buzzer and the ride sound, keeping the volume. */
   soundMuted: boolean;
+  /** Free Ride's synthesized ride sound (motor, tyre, wind): experimental, off by default. */
+  rideSound: boolean;
 
   navigate: (route: Route) => void;
   setAccent: (accent: AccentName) => void;
@@ -82,6 +84,7 @@ interface UiState {
   setBuzzerSound: (on: boolean) => void;
   setSoundVolume: (volume: number) => void;
   setSoundMuted: (muted: boolean) => void;
+  setRideSound: (on: boolean) => void;
 }
 
 const DEFAULT_DOCKS: DockState = { right: true, bottom: true };
@@ -134,6 +137,7 @@ export const useUi = create<UiState>((set, get) => ({
   buzzerSound: readStored<boolean>("buzzerSound", true) !== false,
   soundVolume: storedVolume(),
   soundMuted: readStored<boolean>("soundMuted", false) === true,
+  rideSound: readStored<boolean>("rideSound", false) === true,
 
   navigate: (route) => {
     if (get().route === route) return;
@@ -187,6 +191,10 @@ export const useUi = create<UiState>((set, get) => ({
   setSoundMuted: (soundMuted) => {
     writeStored("soundMuted", soundMuted);
     set({ soundMuted });
+  },
+  setRideSound: (rideSound) => {
+    writeStored("rideSound", rideSound);
+    set({ rideSound });
   },
 }));
 

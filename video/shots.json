@@ -1,0 +1,62 @@
+{
+  "runs": [
+    {
+      "kind": "free_ride",
+      "id": "city",
+      "rider_model": "articulated_sagittal_v1",
+      "seed": 42,
+      "start": { "xy_m": [76.0, -2.0], "heading_rad": 0.0 },
+      "seconds": 10,
+      "inputs": [
+        { "at_s": 0.0, "throttle": 0.6 },
+        { "at_s": 2.2, "throttle": 0.12 },
+        { "at_s": 3.96, "throttle": 0.12, "turn_rad_s": 0.52 },
+        { "at_s": 6.98, "throttle": 0.4 },
+        { "at_s": 8.5, "throttle": 0.15 }
+      ]
+    },
+    { "kind": "scenario", "id": "pothole5", "scenario": "pothole-5cm-20kmh", "firmware": "stock" },
+    { "kind": "scenario", "id": "pothole", "scenario": "pothole-20kmh", "firmware": "stock" },
+    { "kind": "scenario", "id": "tiltback", "scenario": "overlean-top-speed", "firmware": "stock" }
+  ],
+  "captures": [
+    {
+      "id": "city",
+      "run": "city",
+      "from_s": 2.0,
+      "seconds": 7.0,
+      "camera": "Chase",
+      "crop": "viewport",
+      "window": [1920, 1080],
+      "scale": 1.5
+    },
+    {
+      "id": "pothole",
+      "run": "pothole5",
+      "from_s": 16.8,
+      "seconds": 6.0,
+      "camera": "Side",
+      "events": "Ride"
+    },
+    {
+      "id": "cutoff",
+      "run": "tiltback",
+      "from_s": 22.5,
+      "seconds": 5.5,
+      "camera": "Chase",
+      "events": "Safety"
+    },
+    { "id": "compare", "compare": "compare", "sound": "pothole", "from_s": 16.5, "seconds": 6.5 }
+  ],
+  "compares": [
+    {
+      "id": "compare",
+      "spec": {
+        "a": { "kind": "stock" },
+        "b": { "kind": "ours-compat" },
+        "scenario": "pothole-20kmh",
+        "fast": false
+      }
+    }
+  ]
+}

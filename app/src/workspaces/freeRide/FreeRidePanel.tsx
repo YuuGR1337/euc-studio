@@ -11,6 +11,7 @@ import { Panel } from "../../ui/Panel.tsx";
 import { Pill } from "../../ui/Pill.tsx";
 import { SegmentedControl } from "../../ui/SegmentedControl.tsx";
 import { Slider } from "../../ui/Slider.tsx";
+import { Toggle } from "../../ui/Toggle.tsx";
 import { KeyBindings } from "./KeyBindings.tsx";
 import { FreeRideController, LIGHT_MODES, PEDAL_MODES, offPedals } from "./controller.ts";
 
@@ -54,6 +55,8 @@ function FreeRideSession({ engine, active, onGround, onExit }: FreeRidePanelProp
   const setVolume = useUi((s) => s.setSoundVolume);
   const muted = useUi((s) => s.soundMuted);
   const setMuted = useUi((s) => s.setSoundMuted);
+  const rideSound = useUi((s) => s.rideSound);
+  const setRideSound = useUi((s) => s.setRideSound);
   useEffect(() => {
     if (active && engine.kind === "live") return controller.connect();
   }, [active, controller, engine]);
@@ -242,11 +245,18 @@ function FreeRideSession({ engine, active, onGround, onExit }: FreeRidePanelProp
               {muted ? "Unmute" : "Mute"}
             </Button>
           </div>
+          <Toggle
+            checked={rideSound}
+            onCheckedChange={setRideSound}
+            label="Ride sound (experimental)"
+            description="Motor, tyre and wind, synthesized from the simulation."
+          />
           <p className="text-12 text-fg-2">
-            Every sound comes from the simulation: the motor from its electrical frequency and
-            current, the tyre from the wheel speed and the ground under it, the wind from the speed,
-            and the buzzer as the firmware drives it. Hidden, the window keeps only the buzzer. The
-            Display card&apos;s bell switches the wheel&apos;s sound off altogether.
+            The buzzer plays as the firmware drives it. The ride sound is off by default while it is
+            being improved: the motor from its electrical frequency and current, the tyre from the
+            wheel speed and the ground under it, the wind from the speed. Hidden, the window keeps
+            only the buzzer. The Display card&apos;s bell switches the wheel&apos;s sound off
+            altogether.
           </p>
         </Section>
         <Section title="World">

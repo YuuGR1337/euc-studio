@@ -285,6 +285,12 @@ impl FreeRideState {
         self.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
+    /// What `free_ride_status` answers. Test-only: the README showcase drives a run by its caps.
+    #[cfg(test)]
+    pub(super) fn status(&self) -> FreeRideStatus {
+        self.lock().status.clone()
+    }
+
     pub(super) fn recording_context(&self, epoch: u64) -> Result<Option<serde_json::Value>, String> {
         let inner = self.lock();
         if inner.status.mode != "free_ride" {
@@ -846,7 +852,7 @@ const KNOB_REPEATS: f64 = 15.0;
 /// A sample of the ride's sound from the snapshot: the motor's electrical frequency (pole pairs ×
 /// wheel revolutions per second) and phase current, the speed, the tread's knob rate and the
 /// ground under the wheel (a world's; asphalt and dry off one). None while a signal is missing.
-fn ride_sound(
+pub(super) fn ride_sound(
     snapshot: &Snapshot,
     pole_pairs: u32,
     surface: Option<euc_world::Surface>,

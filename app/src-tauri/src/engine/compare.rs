@@ -608,6 +608,48 @@ fn ride_session(files: &WheelFiles, scenario: &Scenario, fw: &Firmware) -> Resul
     Ok(Session::new(machine, fw.map.as_ref(), SAMPLE_HZ))
 }
 
+/// What a comparison sends the Compare workspace, in the order the pump sends it.
+#[cfg(test)]
+pub(super) enum Sent {
+    A(Vec<u8>),
+    B(Vec<u8>),
+    Message(CompareMessage),
+}
+
+/// Runs `spec` as the workspace does (`run`, drained as `pump` drains it, every pump period) and
+/// keeps what the channels would carry. Test-only: the README showcase replays it in a browser
+/// (`showcase.rs`).
+#[cfg(test)]
+pub(super) fn record_stream(spec: &CompareSpec) -> Vec<Sent> {
+    let outbox = Arc::new(Mutex::new(Outbox::default()));
+    let stop = Arc::new(AtomicBool::new(false));
+    let worker = {
+        let (spec, outbox, stop) = (spec.clone(), Arc::clone(&outbox), Arc::clone(&stop));
+        thread::spawn(move || run(&spec, &outbox, &stop))
+    };
+    let mut sent = Vec::new();
+    loop {
+        let stopping = stop.load(Ordering::Relaxed);
+        thread::sleep(PUMP_PERIOD);
+        let (a, b, messages) = {
+            let mut out = lock(&outbox);
+            let a = out.a.as_mut().and_then(BatchWriter::take);
+            let b = out.b.as_mut().and_then(BatchWriter::take);
+            (a, b, std::mem::take(&mut out.messages))
+        };
+        let (early, late): (Vec<_>, Vec<_>) = messages.into_iter().partition(|m| matches!(m, CompareMessage::Reset(_)));
+        sent.extend(early.into_iter().map(Sent::Message));
+        sent.extend(a.map(Sent::A));
+        sent.extend(b.map(Sent::B));
+        sent.extend(late.into_iter().map(Sent::Message));
+        if stopping {
+            break;
+        }
+    }
+    worker.join().expect("the comparison thread ends");
+    sent
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

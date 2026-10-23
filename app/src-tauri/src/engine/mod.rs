@@ -21,6 +21,8 @@ pub mod recordings;
 mod ride_sound;
 mod runner;
 mod scenarios;
+#[cfg(test)]
+mod showcase;
 pub mod tune;
 pub mod world;
 
