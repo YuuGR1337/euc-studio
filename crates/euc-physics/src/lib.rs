@@ -108,6 +108,18 @@ const STANCE_PENETRATION_MAX_M: f64 = 0.01;
 /// the knees bent 21° to 30° (0.15 to 0.18).
 const ADDUCTION_PER_SWING: f64 = 0.17;
 
+/// In an absorb, how stiff the hips and knees hold their posture, as a share of `joint_kp` at
+/// its start (ESTIMATE: legs that give).
+const ABSORB_STIFFNESS: f64 = 0.15;
+
+/// How long the wheel's speed, and then its fall, are averaged over for the absorb's trigger,
+/// seconds.
+const ABSORB_DECEL_TIME_S: f64 = 0.01;
+
+/// In an absorb, how much of `joint_kd` the legs keep at its start (ESTIMATE: with the full
+/// damping the ankles still turned the pedals over).
+const ABSORB_DAMPING: f64 = 0.2;
+
 /// How fast a lateral knee swings out or in, radians per second.
 const SWING_RATE_RAD_S: f64 = 2.0;
 
@@ -256,9 +268,12 @@ pub struct RiderState {
     pub ankle_saturated: bool,
     /// Total simulated time at the ankle torque cap, seconds.
     pub ankle_saturation_s: f64,
+    /// How far the legs give way now, 0 to 1, after something stopped the wheel (see
+    /// [`Articulation::absorb_decel_mps2`]); zero for the rigid and contact-feet riders.
+    pub absorb: f64,
     /// Command minus measured lean, radians.
     pub lean_error_rad: f64,
-    /// Last external yaw aid on the shell (and the lateral rider's upper body), N·m, left
+    /// Last external yaw aid on the shell, N·m, left
     /// positive. Heading twist fades with speed; yaw-rate damping remains active at every speed.
     pub yaw_aid_torque_nm: f64,
     /// Last external roll aid torque, N·m, excluding the artificial step-off kick.
@@ -538,6 +553,8 @@ struct Attitude {
     yaw_rate: f64,
     /// Ground speed of the axle along the heading, m/s.
     speed: f64,
+    /// Ground speed of the axle in any direction across the ground, m/s.
+    ground_speed: f64,
 }
 
 /// The lateral legs' stance against the shell (`Physics::stance`).
@@ -557,6 +574,17 @@ struct Stance {
     /// them, radians (in `ArticulatedIds::joints` order): their posture holds the settled stance,
     /// so the springs carry no load at rest.
     offset_rad: [f64; MAX_LEG_JOINTS],
+}
+
+/// The welded rider's absorb: legs that give way when something stops the wheel.
+#[derive(Debug, Clone, Copy, Default)]
+struct Absorb {
+    /// How far the legs give way now, 0 to 1.
+    level: f64,
+    /// How fast `speed` falls, m/s², averaged over [`ABSORB_DECEL_TIME_S`].
+    decel: f64,
+    /// The axle's speed across the ground, m/s, averaged over [`ABSORB_DECEL_TIME_S`].
+    speed: f64,
 }
 
 /// The mechanical model and its state.
@@ -602,6 +630,8 @@ pub struct Physics {
     motor_torque: f64,
     ankle_torque: f64,
     ankle_saturation_s: f64,
+    /// The welded rider's absorb.
+    absorb: Absorb,
     /// The rider's lean from vertical as of the last step, radians, forward positive: for the
     /// articulated rider the upper-body pitch along the shell heading, for the rigid one its pitch.
     lean: f64,
@@ -657,12 +687,9 @@ impl Physics {
         };
         let articulated_ids = articulated.then(|| ArticulatedIds::resolve(&model, &setup)).transpose()?;
         let mut body_ids = vec![(wheel, BodyRole::Wheel, names::WHEEL), (shell, BodyRole::Shell, names::SHELL)];
-        if articulated {
-            for name in HUMAN_BODIES {
-                body_ids.push((id(MjtObj::mjOBJ_BODY, name)?, BodyRole::Rider, name));
-            }
-        } else {
-            body_ids.push((rider, BodyRole::Rider, names::RIDER));
+        let riders: &[&'static str] = if articulated { &HUMAN_BODIES } else { &[names::RIDER] };
+        for &name in riders {
+            body_ids.push((id(MjtObj::mjOBJ_BODY, name)?, BodyRole::Rider, name));
         }
         let ids = Ids {
             shell,
@@ -716,6 +743,7 @@ impl Physics {
             motor_torque: 0.0,
             ankle_torque: 0.0,
             ankle_saturation_s: 0.0,
+            absorb: Absorb::default(),
             lean: 0.0,
             yaw_aid_torque: 0.0,
             roll_aid_torque: 0.0,
@@ -1018,6 +1046,7 @@ impl Physics {
             ankle_torque_nm: self.ankle_torque,
             ankle_saturated: self.ankle_saturated(),
             ankle_saturation_s: self.ankle_saturation_s,
+            absorb: self.absorb.level,
             lean_error_rad: self.rider.lean_command() - measured_lean,
             yaw_aid_torque_nm: self.yaw_aid_torque,
             roll_aid_torque_nm: self.roll_aid_torque,
@@ -1204,7 +1233,10 @@ impl Physics {
             yaw_rate: att.yaw_rate,
         };
         let rider_off = self.rider_off();
-        self.ankle_torque = if rider_off { 0.0 } else { self.rider.ankle_torque(&sense) };
+        self.update_absorb(rider_off, att.ground_speed);
+        // In an absorb the ankles give way too: holding the body upright over feet that stopped
+        // with the wheel would turn the body's momentum into a nose-down moment on the pedals.
+        self.ankle_torque = if rider_off { 0.0 } else { self.rider.ankle_torque(&sense) * (1.0 - self.absorb.level) };
         // Steering: the roll aid holds the turn lean, standing in for the hips. The heading
         // twist fades with speed; yaw-rate damping remains active. Both yaw terms are external.
         let steer = if rider_off { rider::Steer::default() } else { self.rider.steer(&sense) };
@@ -1325,13 +1357,23 @@ impl Physics {
             // With a spring at the ankle too, the three joints shared the lean, the legs leaned
             // a third as far as the upper body, and the centre of mass leaned (and the wheel
             // accelerated) about half as much as asked. A lifted foot keeps its spring.
-            let stiffness = if ankle && !lifted[leg] { 0.0 } else { config.joint_kp };
+            let stiffness = if ankle && !lifted[leg] {
+                0.0
+            } else if matches!(joint.kind, JointKind::Hip | JointKind::Knee) {
+                config.joint_kp * (1.0 - self.absorb.level * (1.0 - ABSORB_STIFFNESS))
+            } else {
+                config.joint_kp
+            };
             let target = self.posture_target(index, joint);
             // Contact feet damp their ankles in the joint itself (implicit; see mjcf.rs). A foot that
             // rocks off its deck turns on the ankle alone, and this explicit damping on its small
             // inertia (about 0.01 kg·m², above the step's stability limit) made it chatter at the
             // torque cap: the soles hopped on their decks and slid back.
-            let damping = if ankle && legs.pairs.is_some() { 0.0 } else { config.joint_kd };
+            let damping = if ankle && legs.pairs.is_some() {
+                0.0
+            } else {
+                config.joint_kd * (1.0 - self.absorb.level * (1.0 - ABSORB_DAMPING))
+            };
             let posture = stiffness * (target - self.data.qpos()[joint.qpos]) - damping * self.data.qvel()[joint.dof];
             let mut limit = joint.kind.cap(&self.setup.rider);
             if joint.kind == JointKind::AnkleRoll {
@@ -1468,6 +1510,33 @@ impl Physics {
             for (axis, value) in force.into_iter().chain([tx, ty, tz]).enumerate() {
                 applied[axis] += value;
             }
+        }
+    }
+
+    /// The welded rider's absorb, once a step: a wheel that slows faster than `absorb_decel_mps2`
+    /// starts it in full, and it fades out over `absorb_time_s`. A rider meets a curb on legs
+    /// that give: the knees and hips fold and go soft, and the ankles let the body go on over the
+    /// feet, so the body's momentum does not turn the pedals over. A sole's load would not do as
+    /// the trigger: the sagittal rider's soles take short peaks of over three times their share
+    /// in a hard turn.
+    fn update_absorb(&mut self, rider_off: bool, speed: f64) {
+        let config = self.setup.rider.articulation;
+        // The axle's speed across the ground in any direction: in a hard turn the speed along the
+        // heading drops by a tenth for a few milliseconds whenever the shell's heading jumps,
+        // and that is not a stop. The speed and its fall are each averaged over
+        // ABSORB_DECEL_TIME_S.
+        let absorb = &mut self.absorb;
+        let follow = TIMESTEP_S / ABSORB_DECEL_TIME_S;
+        let before = absorb.speed;
+        absorb.speed += (speed.abs() - absorb.speed) * follow;
+        absorb.decel += ((before - absorb.speed) / TIMESTEP_S - absorb.decel) * follow;
+        let welded = self.ids.articulated.is_some_and(|legs| legs.welds.is_some());
+        if !welded || rider_off || self.data.eq_active()[self.ids.stand] {
+            absorb.level = 0.0;
+        } else if absorb.decel > config.absorb_decel_mps2 {
+            absorb.level = 1.0;
+        } else {
+            absorb.level = (absorb.level - TIMESTEP_S / config.absorb_time_s).max(0.0);
         }
     }
 
@@ -1609,13 +1678,15 @@ impl Physics {
     /// The knees' bend the legs hold now, radians: the stance's, deeper in a turn (the lateral
     /// rider's), and the crouch from there to the deepest crouch.
     fn knee_bend_rad(&self) -> f64 {
+        let config = self.setup.rider.articulation;
         let turn = if self.setup.rider.model.has_lateral_legs() {
-            self.setup.rider.articulation.turn_crouch * self.rider.turn_lean().abs()
+            config.turn_crouch * self.rider.turn_lean().abs()
         } else {
             0.0
         };
-        let stance = self.stance_rad + turn;
-        stance + self.crouch_rad * (1.0 - (self.soft_knee_rad() + turn) / CROUCH_MAX_RAD).max(0.0)
+        let bend = turn + self.absorb.level * config.absorb_fold_rad;
+        let stance = self.stance_rad + bend;
+        stance + self.crouch_rad * (1.0 - (self.soft_knee_rad() + bend) / CROUCH_MAX_RAD).max(0.0)
     }
 
     /// How far leg `leg`'s knee swings out in all (the lateral rider's), radians: the stance's
@@ -1810,6 +1881,7 @@ impl Physics {
             // The vertical component of that rate in the world: the shell's axes' heights weigh it.
             yaw_rate: vel[3] * fwd[2] + vel[4] * left[2] + vel[5] * cross(fwd, left)[2],
             speed: axle_vel[0] * heading[0] + axle_vel[1] * heading[1],
+            ground_speed: axle_vel[0].hypot(axle_vel[1]),
         }
     }
 }

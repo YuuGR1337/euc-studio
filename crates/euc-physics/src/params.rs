@@ -409,6 +409,18 @@ pub struct Articulation {
     /// How much harder the outside leg rests on its pad in a turn, newtons per radian of the
     /// turn's lean ([`RiderModel::ArticulatedLateralV1`]; ESTIMATE from the owner's report).
     pub turn_press_n_per_rad: f64,
+    /// A wheel that slows faster than this, m/s² (over 10 ms), starts an absorb: something stopped
+    /// it, a curb or a pothole's far edge, and the legs give way to the pedals' sudden push
+    /// ([`RiderModel::ArticulatedSagittalV1`] and [`RiderModel::ArticulatedLateralV1`], the welded
+    /// soles; ESTIMATE: hard braking stays under 10, a 15 cm curb at 10 km/h passes 60). `inf`
+    /// turns it off.
+    pub absorb_decel_mps2: f64,
+    /// How long an absorb lasts, seconds: it starts in full and fades out over this time
+    /// (ESTIMATE).
+    pub absorb_time_s: f64,
+    /// How far the knees fold at the start of an absorb, radians, the hips by the crouch's share
+    /// (ESTIMATE).
+    pub absorb_fold_rad: f64,
 }
 
 impl Default for Articulation {
@@ -431,6 +443,9 @@ impl Default for Articulation {
             turn_crouch: 0.5,
             turn_spread: 1.3,
             turn_press_n_per_rad: 100.0,
+            absorb_decel_mps2: 30.0,
+            absorb_time_s: 0.3,
+            absorb_fold_rad: 0.6,
         }
     }
 }
@@ -462,6 +477,19 @@ impl Articulation {
             if !value.is_finite() || value < 0.0 {
                 return Err(ParamError(format!("rider.articulation.{name} must be finite and not negative")));
             }
+        }
+        if self.absorb_decel_mps2.is_nan() || self.absorb_decel_mps2 <= 0.0 {
+            return Err(ParamError("rider.articulation.absorb_decel_mps2 must be positive (inf: off)".into()));
+        }
+        if !self.absorb_time_s.is_finite() || self.absorb_time_s <= 0.0 {
+            return Err(ParamError("rider.articulation.absorb_time_s must be finite and positive".into()));
+        }
+        let fold = self.absorb_fold_rad;
+        if !fold.is_finite() || !(0.0..=crate::CROUCH_MAX_RAD).contains(&fold) {
+            return Err(ParamError(format!(
+                "rider.articulation.absorb_fold_rad must be finite and in [0, {}]",
+                crate::CROUCH_MAX_RAD
+            )));
         }
         let offset = self.foot_offset_m;
         if !offset.is_finite() || offset.abs() > MAX_FOOT_OFFSET_M {

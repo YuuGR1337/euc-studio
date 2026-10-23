@@ -352,6 +352,33 @@ The second is a stronger, still estimated, jump torque. The third is a check of 
 firmware does with a wheel in the air. The fourth is a choice between the welds' pull and a
 calf-pad contact. This is a study phase of its own, not a control setting.
 
+**The absorb (2026-10-23; task 61, part 1).** The owner rides straight into curbs of about 15 cm
+on soft knees that let the wheel come up under him. With legs that held their posture, a curb
+that stopped the wheel in 30 ms turned the welded rider and the shell as one rigid body about the
+axle (about 200 kg·m²/s of the body's momentum): the shell pitched nose-down at 150-300°/s, more
+than the firmware's 210 N·m stops, and the rider fell. Most of that moment went through the
+ankles: the lean task and the joints' damping held the body upright over feet that had stopped
+with the wheel. A welded rider (`articulated_sagittal_v1` and `articulated_lateral_v1`) now
+absorbs. When the axle's speed across the ground falls faster than `absorb_decel_mps2` (30 m/s²,
+the speed and its fall each averaged over 10 ms), the absorb starts in full, and it fades out over
+`absorb_time_s` (0.3 s). In it the knees fold by up to `absorb_fold_rad` (0.6 rad, the hips by the
+crouch's share), the hips and knees hold their posture at 0.15 of `joint_kp`, every leg joint
+keeps 0.2 of `joint_kd`, and the ankles' lean task gives way. All are ESTIMATES. Two other
+triggers did not do: a sole's load (the sagittal rider's soles take peaks of over three times
+their share in a full manual turn) and the speed along the heading (it drops by a tenth for a few
+milliseconds whenever the shell's heading jumps in a hard turn). Riding to 15 km/h, braking hard
+to a stop and a full manual turn at 5 m/s do not start it; a 10 cm curb at 10 km/h does, and the
+knees fold by about 0.5 rad. `RiderState::absorb` reports it. The absorb alone does not carry a
+rider over a 15 cm curb (stock firmware, the convex-mesh tire of bundle P1): the shell stays
+within −12° while the wheel climbs, but the body goes on 0.5 m ahead, leaning 0.5 rad, and the
+recovery overshoots. A brace before the curb (part 2, to come: lean back 0.10 rad and crouch
+0.3 rad in the last 0.55 s) carries both riders over 15 cm at 10-15 km/h and the lateral rider
+also at 8 km/h (the sagittal rider's wheel only gets 7 cm up the face at 8 km/h); 20 cm still
+throws them. In the shipped scenarios (stock firmware, the convex-mesh tire) it starts once each
+in `pothole-5cm-20kmh`, `world-pothole-15kmh`, `world-curb-up-30deg`, `world-curb-up-90deg` and
+`world-stairs-down-5kmh`, and never in `hard-braking-30kmh` or the full-effort, overlean and
+step-off runs.
+
 ### The lateral rider (opt-in)
 
 A rider's legs also move sideways: they lean the body into a turn, press a calf on a side pad
@@ -606,6 +633,7 @@ Rider and aids (scenario `[rider]`, `[rider.control]`, `[assist]`; these are the
 | `articulation.foot_offset_m` | 0.015 m | DEFAULT: each foot this far outside its pedal's centre (`articulated_lateral_v1`) |
 | `articulation.hip_adduction_max_nm`, `hip_rotation_max_nm`, `knee_rotation_max_nm`, `ankle_roll_max_nm` | 150, 50, 25, 35 N·m | ESTIMATE: per joint, from published strength of adults (`articulated_lateral_v1`; see the lateral rider) |
 | `articulation.pad_friction`, `pad_contact_time_s`, `pad_preload_n` | 0.3, 0.03 s, 20 N | DEFAULT: a leg on a side pad, and how hard it rests there (`articulated_lateral_v1` on a wheel with measured pads) |
+| `articulation.absorb_decel_mps2`, `absorb_time_s`, `absorb_fold_rad` | 30 m/s², 0.3 s, 0.6 rad | ESTIMATE: the absorb's trigger (the axle's fall in speed over 10 ms; `inf` turns it off), how long it lasts and how far the knees fold (`articulated_sagittal_v1` and `articulated_lateral_v1`) |
 | `articulation.turn_crouch`, `turn_spread`, `turn_press_n_per_rad` | 0.5, 1.3, 100 N | ESTIMATE from the owner's report: per radian of a turn's lean, the knees' deeper bend (rad), the inside knee's spread from its pad (rad) and the outside leg's harder rest on its pad (`articulated_lateral_v1`) |
 | `cda_m2` | 0.6 m² | air drag |
 | `control.lean_kp`, `lean_kd` | 6000 N·m/rad, 900 N·m·s/rad | about 1.3 Hz, damping 0.6 about the ankles |
