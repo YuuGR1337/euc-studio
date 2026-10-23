@@ -1,7 +1,8 @@
 # Free Ride redesign (FR)
 
 Status, 2026-10-22: FR1 study and plan approved. FR2 (controls), FR2b (native controls, by the
-physics owner) and FR3 (the Chase camera) are built. The other phases are not built.
+physics owner), FR3 (the Chase camera) and the rider body (FR9's body, moved ahead: their rider,
+copied) are built. The other phases are not built.
 
 Tarik (Human) asked for a better Free Ride: the world looks primitive, there is no sky, and the
 controls feel bad. He pointed at [EUC Thrills](https://github.com/VibezZzCoder/EUC-thrills), an
@@ -170,6 +171,65 @@ matches our MuJoCo rider, whose poses arrive per body every frame.
 | Animation | Lean, carve, crouch, tuck, arm carriage, head stabilisation and look-into-turn, idle with a foot down: all computed from the controller's smoothed state, with analytic two-bone IK. | Draw physics poses as they are; cosmetic motion only where the physics has no joint (Free Ride) | The physics owns hips, knees, ankles and lean. Cosmetic layers only for what it lacks: head look into the turn (from steer intent, about 0.42 rad, τ 0.16 s), small hand and forearm offsets, the jacket hem. No counter-rolled upper body: it would put the drawn centre of mass somewhere the physics does not. A "Physics bodies" toggle shows the raw geoms. |
 | Crash ragdoll | 11 Verlet particles, a 0.12 s slerp from the riding pose. | Skip | Our rider falls physically. |
 
+**Built (2026-10-22): their rider, copied.** Tarik asked for their body as it is, so the rows
+above changed from "re-implement a generic kit" to a port. Claude copied the game's own fictional
+rider, Cool Rider (MIT code, CC BY 4.0 look), into `app/src/vendor/euc-thrills` and adapted its
+construction in `app/src/workspaces/ride/riderFigure/rig.ts`. Its 26 meshes are the game's,
+geometry and materials byte for byte (checked against the game's own `createPlaceholderRider`),
+and its painted tailoring sheet has the game's bytes (a test pins them).
+
+The physics drives it (`riderFigure/skeleton.ts`, `figure.ts`):
+
+- The articulated rider's trunk body carries the jacket, collar, panels, shoulders and head; each
+  thigh, shank and foot body carries its own part. A thigh runs from a hip inside the jacket
+  (the game's hip width) to the physics knee, a shin from the knee to the physics ankle, each
+  stretched along the bone to the physics length; the boot is fixed to the foot body, its sole on
+  the pedal (our ankle sits 8 cm above it, theirs 6 cm). The upper body is scaled so the helmet
+  tops out at the physics head (0.99 for the default rider).
+- The rigid rider is one body: the figure's pelvis sits at its hip height, and the knees are
+  placed by two-link IK between the hip and the foot shapes, slightly bent.
+- Cosmetic only, as decided: the arms hang in the game's carriage and ease at a standstill (the
+  game's `armEaseForSpeed`, from a speed filtered off the pelvis motion), the hands turn toward
+  the thighs as they ease, and the head keeps 0.65 of the trunk's pitch off the eyes (at most
+  0.55 rad). No counter-roll and no rest pitch: the trunk's attitude is the physics'.
+- The cube button in the viewport, Physics bodies (also in the palette), draws the simulated
+  shapes instead, and is kept per user. A body list the figure does not know (an old recording)
+  draws its shapes.
+
+The articulated physics stands with nearly straight knees at a cruise, so the figure does too;
+their rider rests with soft knees. A softer-knee posture would be a physics change.
+
+### Navigation targets (intent level)
+
+Tarik asked for their navigation too. Their wheel is a kinematic controller: the throttle sets a
+force-demand lean, the lean sets an acceleration, and the steer sets a yaw rate directly, held to
+a lateral grip limit. Ours keeps the real firmware and MuJoCo, so the same feel becomes targets.
+The input asks for an acceleration and a turn rate (Free Ride agent: input to intent, and its
+tuning); the physics' rider controller leans and twists the rider to deliver them (physics owner).
+Today's mapping, where keys ask for a lean angle, stays as a "direct lean" option.
+
+| Target | Their value | Where (EUC Thrills `src/`, commit `a66dabd`) | Our use |
+| --- | --- | --- | --- |
+| Force-demand lean at full throttle | 0.50 rad | `data/tuning.ts:1005` (`maxLeanPitch`) | Full W or stick asks for 16·sin(0.50) = 7.7 m/s² before drag |
+| Lean response | τ 0.14 s, at most 3.0 rad/s | `data/tuning.ts:1013`, `:1021`; `shared/maths.ts:41` (`approach`); `simulation/EucController.ts:3137` | The demand ramps the same way: a slammed key reverses in at least 0.28 s |
+| Drive | 16.0 m/s² per unit of sin(lean) | `data/tuning.ts:1027` (`leanToAccel`); `EucController.ts:3157` | Asked acceleration while the demand and the travel agree |
+| Brake | 22.0 m/s² per unit of sin(lean), when the lean opposes travel above 0.05 m/s | `data/tuning.ts:1034` (`brakeAuthority`), `:1094` (`stoppedSpeed`); `EucController.ts:3155-3157` | Asked deceleration |
+| Drag | 0.00867·v·\|v\| m/s² | `data/tuning.ts:1079` (`dragCoefficient`) | Taken off the ask, so a held W levels off at 29.7 m/s (107 km/h) unless the firmware tilts back first. Theirs is 29.1 m/s on pavement with its rolling resistance; ours leaves rolling resistance to the physics |
+| Reverse gate | Below 0.6 m/s, asked for 0.35 s; reverse at most 6.7 m/s | `data/tuning.ts:1105`, `:1114`, `:1132`; `EucController.ts:3214-3236` | Already in FR2 (`BrakeGate`); the cap becomes an asked speed limit |
+| Yaw authority | 3.6 rad/s near a stop down to 0.85 rad/s at 9 m/s, by (v/9)^1.5 | `data/tuning.ts:1193`, `:1195`, `:1197`, `:1214`; `EucController.ts:3245-3246` | Already in FR2 (`STEER_SCHEDULE`) |
+| Lateral grip | 0.75 g to 9 m/s, rising to 1.05 g at 22.25 m/s; up to 1.2 g more for a hard steer (0.55 to 0.90 of full), gone by 6 m/s | `data/tuning.ts:1225`, `:1250`, `:1261`, `:1283`, `:1300-1306`; `simulation/lateralCeiling.ts:70`; `EucController.ts:3325-3338` | Caps the asked turn rate at \|v·ω\| ≤ grip·g; the physics' own cap (FR2b: min(2.5, g·tan 35°/\|v\|)) still applies |
+| Steer at a stop | None below 0.05 m/s | `EucController.ts:3272` | Ours differs: the rider turns at a stop through the physics (decision 3) |
+
+Interface, agreed with the physics owner (the lead approved its plan; not built yet):
+`free_ride_input` gains `desired_accel_mps2`, along the heading, + forward, at most 12 m/s².
+When it is present the packet is in drive mode and `desired_lean_rad` must be 0; when it is
+absent the packet is direct lean, as today. The status adds `accel_cap_mps2` and
+`brake_cap_mps2` (the most the rider's lean can ask at the current speed, drag included) and
+`accel_mps2` (measured, filtered over about 0.1 s). A lean gives only g·tan(lean), and drive mode
+allows about 20° to 22°: about 3.6 to 4.0 m/s², far below their 7.7 and 10.5 m/s². So full
+throttle means the cap: the ask keeps their shape and lag, scaled to `accel_cap_mps2` or
+`brake_cap_mps2`.
+
 ### Wheel and effects
 
 | Item | What they do | Decision | Why, and how for us |
@@ -272,6 +332,11 @@ them.
 9. Free Ride keys: R restart here, Space crouch (hop later), X step off, Esc pause. Ride's manual
    mode keeps its keys; FR2 only adds the gamepad's triggers and D-pad there.
 10. km/h by default with a mph setting; a fixed afternoon sun now, a time of day later.
+
+Later the same day Tarik (Human) asked to copy the game's body and navigation ("theirs are spot
+on"). This replaces decision 7: the rider is EUC Thrills' fictional Cool Rider, with its MIT and
+CC BY 4.0 notices, driven by the physics, with a Physics bodies toggle. It goes ahead of the other
+phases.
 
 ## Open questions for Tarik (answered above for now)
 

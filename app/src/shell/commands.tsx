@@ -20,6 +20,7 @@ const CAMERA_TITLES: Record<CameraMode, string> = {
 import type { PaletteCommand } from "../ui/CommandPalette.tsx";
 import {
   Bell,
+  Box,
   Camera,
   Cpu,
   FolderOpen,
@@ -237,6 +238,15 @@ export function useCommands(): PaletteCommand[] {
         shortcut: "c",
         keywords: ["camera", "3d", "viewport", "orbit", "follow", "chase", "side"],
         run: () => ui.setCamera(nextCamera(ui.camera, ui.cameraContext)),
+      },
+      {
+        id: "view.physicsBodies",
+        title: ui.physicsBodies ? "Draw the rider figure" : "Draw the physics bodies",
+        group: "View",
+        icon: <Box />,
+        keywords: ["physics", "bodies", "rider", "figure", "mannequin", "shapes", "mujoco"],
+        hint: ui.physicsBodies ? "On" : "Off",
+        run: () => ui.setPhysicsBodies(!ui.physicsBodies),
       },
       {
         id: "view.buzzer",

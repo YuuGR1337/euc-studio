@@ -3,17 +3,22 @@ import { useMemo, useRef } from "react";
 import * as THREE from "three";
 import { surface, text } from "../../design/tokens.ts";
 import { engine, useEngineVersion } from "../../engine/index.ts";
+import { useUi } from "../../state/ui.ts";
 import { type BodyInfo, type Geom } from "../../engine/telemetry.gen.ts";
 import { BodyPart, ShellVisual, WheelPart } from "./EucModel.tsx";
 import { Ghost } from "./Ghost.tsx";
 import { useWheelModel } from "./wheelModel.ts";
 import { placeBodies, visualFrame } from "./poses.ts";
+import { RiderFigureView } from "./riderFigure/RiderFigure.tsx";
+import { bindRider } from "./riderFigure/skeleton.ts";
 
 // The live engine's bodies, posed every frame from the latest snapshot. Everything sits inside
 // one group that turns the physics world (MuJoCo: z up) into three.js (y up), so body poses go
-// in unchanged. The wheel and the shell get the scanned model (else the stylized one); every
-// other body (the rider, one body or many) is drawn from its MJCF geoms. A body without a pose
-// of its list is hidden (placeBodies), never drawn at the origin.
+// in unchanged. The wheel and the shell get the scanned model (else the stylized one). The rider
+// (one body or many) is drawn as the EUC Thrills figure posed on its bodies (riderFigure/), or,
+// with "Physics bodies" on or for a body list the figure cannot bind, from its MJCF geoms like
+// any other body. A body without a pose of its list is hidden (placeBodies), never drawn at the
+// origin.
 //
 // The Ride workspace draws the ride engine; the Compare workspace draws each of its two runs
 // (`source`), run B as a ghost. A compare run shows the plain shell: the display and tail light
@@ -107,6 +112,11 @@ export function LiveBodies({
   const nodes = useRef<(THREE.Group | null)[]>([]);
   const placed = useRef<{ bodies: readonly BodyInfo[] | null }>({ bodies: null });
   const own = source === engine;
+  const physicsBodies = useUi((s) => s.physicsBodies);
+  const binding = useMemo(
+    () => (physicsBodies ? null : bindRider(bodies)),
+    [bodies, physicsBodies],
+  );
 
   useFrame(() => {
     // The visual frame is of the engine's bodies now; this render may still hold the last list.
@@ -115,7 +125,7 @@ export function LiveBodies({
     placeBodies(nodes.current, bodies, poses, placed.current);
   }, -50);
 
-  const content = bodies.map((b, i) => (
+  const placedBodies = bodies.map((b, i) => (
     <group
       key={`${i}-${b.name}`}
       name={`body:${b.name}`}
@@ -137,11 +147,17 @@ export function LiveBodies({
             <PlainBody model={model} accent={accent} />
           )}
         </group>
-      ) : (
+      ) : b.role === "rider" && binding ? null : (
         b.geoms.map((g, j) => <GeomMesh key={j} geom={g} material={materialFor(b.name)} />)
       )}
     </group>
   ));
+  const content = (
+    <>
+      {placedBodies}
+      {binding && <RiderFigureView binding={binding} nodes={nodes} />}
+    </>
+  );
 
   return (
     <group rotation={[-Math.PI / 2, 0, 0]}>{ghost ? <Ghost>{content}</Ghost> : content}</group>
