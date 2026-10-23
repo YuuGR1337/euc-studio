@@ -42,7 +42,7 @@ const HALF_WIDTH_M: f64 = 1.5;
 const BASE_M: f64 = 0.5;
 /// The floor of flat ground (the MJCF line every model had before terrain).
 const FLOOR_PLANE: &str =
-    r#"    <geom name="floor" type="plane" size="0 0 1" friction="0.5 0 0" condim="3" conaffinity="3"/>"#;
+    r#"    <geom name="floor" type="plane" size="0 0 1" friction="0.5 0 0" condim="3" conaffinity="3" group="3"/>"#;
 
 /// The ground (`[terrain]` in a scenario).
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -154,7 +154,7 @@ impl Feature {
         let half_width = CURB_WIDTH_M / 2.0 + CURB_DEPTH_M * yaw.abs().tan();
         // A quaternion, not Euler angles: the line reads the same whatever the model's angle unit.
         Some(format!(
-            r#"    <geom name="curb_{index}" type="box" size="{half_depth} {half_width} {half_height}" pos="{} {} {}" quat="{} 0 0 {}" friction="0.5 0 0" condim="3" conaffinity="3"/>"#,
+            r#"    <geom name="curb_{index}" type="box" size="{half_depth} {half_width} {half_height}" pos="{} {} {}" quat="{} 0 0 {}" friction="0.5 0 0" condim="3" conaffinity="3" group="3"/>"#,
             at_m + half_depth * yaw.cos(),
             half_depth * yaw.sin(),
             height_m - half_height,
@@ -257,7 +257,7 @@ impl Terrain {
         }
         let grid = self.grid();
         let mut ground = format!(
-            r#"    <geom name="floor" type="hfield" hfield="terrain" pos="{} 0 {}" friction="0.5 0 0" condim="3" conaffinity="3"/>"#,
+            r#"    <geom name="floor" type="hfield" hfield="terrain" pos="{} 0 {}" friction="0.5 0 0" condim="3" conaffinity="3" group="3"/>"#,
             grid.centre, grid.low
         );
         for solid in self.features.iter().enumerate().filter_map(|(index, f)| f.solid(index)) {

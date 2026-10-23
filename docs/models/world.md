@@ -130,6 +130,10 @@ A rider who has left the wheel (stepped off, let go after a cut or thrown) can e
 - No box pool follows the rider; the faces' step behind each box (above) still gives it curbs and steps.
 - Test (`world.rs`): with each rider model, a rider who stepped off stays above the ground for 3 s after the wheel goes 9 m away, and the rider's window takes over.
 
+### Ground ray
+
+`Physics::ground_ray_m(xy)` gives the ground height at a physics-frame point as the tire meets it: one `mj_ray` from 50 m above against the ground geoms only. Every ground geom (the floor or strip, curb boxes, a height map, the world's window, box pool and rider's window) is in geom group 3 (`GROUND_GROUP`), which MuJoCo uses only to filter rays and drawing, never contacts; so the ray never hits the tire, the shell or a rider. It returns `None` where there is no ground (in a world, beyond the windows: the window reaches at least 5 m ahead of the wheel, the box pool 6 m). About 0.9 µs per ray in a release build, so a rider can look ahead with a few samples every step. Test (`tests/world.rs`): under the wheel and the rider, with each rider model, the ray finds the road within 3 mm; on a strip it finds a 15 cm curb's top past its face.
+
 ### Ground friction
 
 World geoms have no friction of their own. MuJoCo takes the larger friction of the two geoms in a contact, so the tire's friction decides on every surface.

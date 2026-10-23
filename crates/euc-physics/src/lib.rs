@@ -44,6 +44,11 @@ use mjcf::{JointKind, SOLE_HALF_WIDTH_M, names};
 /// Physics step, seconds.
 pub const TIMESTEP_S: f64 = 0.0005;
 
+/// MJCF geom group of every ground geom (`group="3"` on the floor or strip, curb boxes, a height
+/// map and the world's geoms); [`Physics::ground_ray_m`] sees only it. Groups only filter rays
+/// and drawing in MuJoCo, never contacts.
+pub const GROUND_GROUP: usize = 3;
+
 /// The default rider model's id ([`RiderModel::default`]).
 pub const RIDER_MODEL: &str = "articulated_sagittal_v1";
 
@@ -848,10 +853,15 @@ impl Physics {
         self.world.as_ref().map(world::Window::surface)
     }
 
-    /// Height of the static ground (window and solids, not bodies) under `xy`, metres, by a ray
-    /// cast from 50 m above, as the contacts see it; `None` where nothing is hit.
+    /// Height of the ground under `xy` (physics frame), metres, as the tire meets it: one ray cast
+    /// from 50 m above against the ground geoms only ([`GROUND_GROUP`]: the floor or strip, curb
+    /// boxes, a height map, the world's window, box pool and rider's window), never a body;
+    /// `None` where nothing is hit (in a world, beyond its windows). Cheap enough for a few
+    /// look-ahead samples every step.
     pub fn ground_ray_m(&mut self, xy: [f64; 2]) -> Option<f64> {
-        let (hit, distance) = self.data.ray(&[xy[0], xy[1], 50.0], &[0.0, 0.0, -1.0], None, true, None, None);
+        let mut groups = [0; mujoco_rs::mujoco_c::mjNGROUP as usize];
+        groups[GROUND_GROUP] = 1;
+        let (hit, distance) = self.data.ray(&[xy[0], xy[1], 50.0], &[0.0, 0.0, -1.0], Some(&groups), true, None, None);
         hit.map(|_| 50.0 - distance)
     }
 

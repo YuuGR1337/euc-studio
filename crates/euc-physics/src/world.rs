@@ -70,7 +70,7 @@ pub(crate) const RIDER_WINDOW: &str = "world_rider_window";
 pub(crate) const BOX: &str = "world_box_";
 /// Contact settings of every world geom: today's floor, without friction of its own, so the
 /// tire's friction (scaled per surface) and each body's own friction decide.
-const GROUND_CONTACT: &str = r#"friction="0 0 0" condim="3" conaffinity="3""#;
+const GROUND_CONTACT: &str = r#"friction="0 0 0" condim="3" conaffinity="3" group="3""#;
 
 /// Where a world run starts: the wheel's ground point and heading in world coordinates.
 #[derive(Debug, Clone, Copy, PartialEq)]

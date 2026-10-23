@@ -86,6 +86,37 @@ fn the_window_follows_the_wheel_down_the_spawn_street() {
     }
 }
 
+/// The ground ray sees the ground only, as the tire meets it: under the wheel and the rider it
+/// finds the road, not the tire, the shell or the rider; on a strip it finds a curb box's top
+/// past its face.
+#[test]
+fn the_ground_ray_sees_the_ground_never_a_body() {
+    for model in [RiderModel::RigidAnkleV1, RiderModel::ArticulatedSagittalV1, RiderModel::ArticulatedLateralV1] {
+        let ground = WorldGround::at_spawn(WorldSpec::city(7)).unwrap();
+        let mut physics = Physics::new(setup(model, ground.clone())).unwrap();
+        ride(&mut physics, 0.2);
+        let p = physics.position_m();
+        let rider = physics.rider_position_m();
+        for xy in [[p[0], p[1]], [rider[0], rider[1]]] {
+            let ray = physics.ground_ray_m(xy).expect("ground under the wheel");
+            let world = ground.height_m(xy);
+            assert!((ray - world).abs() < 0.003, "{model:?}: ray {ray:.4} vs world {world:.4} at {xy:?}");
+        }
+        let mut strip = setup(model, ground);
+        strip.world = None;
+        strip.terrain = euc_physics::Terrain {
+            features: vec![euc_physics::Feature::Curb { at_m: 3.0, height_m: 0.15, yaw_deg: 0.0 }],
+            length_m: 10.0,
+            ..euc_physics::Terrain::flat()
+        };
+        let mut physics = Physics::new(strip).unwrap();
+        for (x, height) in [(0.0, 0.0), (2.9, 0.0), (3.1, 0.15), (6.5, 0.15)] {
+            let ray = physics.ground_ray_m([x, 0.0]).expect("the strip");
+            assert!((ray - height).abs() < 0.002, "{model:?}: ray {ray:.4} at x = {x}, the ground is {height}");
+        }
+    }
+}
+
 /// Heading straight at the curb 5.5 m to the right of the spawn: the curb box must either be
 /// climbed or stop the wheel; the wheel never ends up inside the sidewalk.
 #[test]
