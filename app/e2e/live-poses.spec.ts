@@ -294,6 +294,18 @@ test("hides bodies until a frame of them arrives, never at the origin", async ({
   await expect.poll(async () => (await drawnFigure(page)).shown).toBe(true);
 });
 
+/** How many frames the renderer has drawn: the low-quality view draws only on request. */
+function framesDrawn(page: Page) {
+  return page.evaluate(() => {
+    const get = (
+      window as unknown as {
+        __eucScene?: () => { gl: { info: { render: { frame: number } } } };
+      }
+    ).__eucScene;
+    return get?.().gl.info.render.frame ?? 0;
+  });
+}
+
 /** A finished run (status run number 1) drawn at FINAL. */
 async function finishedRun(page: Page) {
   await send(page, { type: "reset", scenario: "ride-20kmh-stop" });
@@ -306,7 +318,9 @@ async function finishedRun(page: Page) {
 }
 
 // The low-quality view draws only on request: on the Ticker's clock when the run moved, on an
-// orbit drag, or when the scene graph changes. These checks never ask for a frame themselves.
+// orbit drag, or when the scene graph changes. These checks never ask for a frame themselves. They
+// wait on what the page did, never on a fixed time: a slow page (a loaded machine, a first shader
+// compile) only takes longer. A missed redraw still fails, since nothing else redraws this view.
 
 test("low quality: a new body list with the same names hides the old bodies at once", async ({
   page,
@@ -316,11 +330,12 @@ test("low quality: a new body list with the same names hides the old bodies at o
   // The next run, as an attach sends it: a reset, then a new list with the same names. The
   // reset's own frame is drawn first; only the new list can ask for the frame that hides the
   // finished run's bodies.
+  const before = await framesDrawn(page);
   await send(page, { type: "reset", scenario: "ride-20kmh-stop" });
-  await page.waitForTimeout(500);
+  await expect.poll(() => framesDrawn(page)).toBeGreaterThan(before);
   await send(page, { type: "bodies", bodies });
   await expect
-    .poll(async () => (await drawnBodies(page)).map((b) => b.visible), { timeout: 2000 })
+    .poll(async () => (await drawnBodies(page)).map((b) => b.visible))
     .toEqual(BODIES.map(() => false));
   expect((await drawnFigure(page)).shown).toBe(false);
 });
@@ -337,18 +352,20 @@ test("low quality: a paused new run after a firmware switch shows its first pose
   await send(page, { type: "reset", scenario: "ride-20kmh-stop" });
   await send(page, { type: "bodies", bodies: [] });
   await status(page, "starting", 0, next);
-  await page.waitForTimeout(500);
+  await expect
+    .poll(async () => (await drawnBodies(page)).map((b) => b.visible))
+    .toEqual(BODIES.map(() => null));
   await send(page, { type: "reset", scenario: "ride-20kmh-stop" });
   await send(page, { type: "bodies", bodies });
-  await page.waitForTimeout(500);
+  await expect
+    .poll(async () => (await drawnBodies(page)).map((b) => b.visible))
+    .toEqual(BODIES.map(() => false));
   await sendBatch(page, 0, { dx: -70 });
   await status(page, "paused", 0, next);
   await expect
-    .poll(async () => (await drawnBodies(page)).find((b) => b.name === "left_foot"), {
-      timeout: 2000,
-    })
+    .poll(async () => (await drawnBodies(page)).find((b) => b.name === "left_foot"))
     .toEqual({ name: "left_foot", visible: true, at: [10, 0.1, 0.307] });
-  await expect.poll(async () => (await drawnFigure(page)).shown, { timeout: 2000 }).toBe(true);
+  await expect.poll(async () => (await drawnFigure(page)).shown).toBe(true);
 });
 
 /** What a comparison's runs hold: sample times, speeds and the latest frame's float count. */
