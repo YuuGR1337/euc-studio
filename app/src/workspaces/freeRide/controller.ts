@@ -35,7 +35,7 @@ import {
   type PadButton,
   type PadReading,
 } from "../../lib/rideControls.ts";
-import { useUi } from "../../state/ui.ts";
+import { nextCamera, useUi } from "../../state/ui.ts";
 import { RideHints, type HintId } from "./hints.ts";
 import { CLOSED, useFreeRideHud, type FreeRideHud } from "./hud.ts";
 
@@ -1186,7 +1186,7 @@ export class FreeRideController {
           break;
         case "camera": {
           const ui = useUi.getState();
-          ui.setCamera(ui.camera === "follow" ? "orbit" : "follow");
+          ui.setCamera(nextCamera(ui.camera, ui.cameraContext));
           break;
         }
         case "crouch":

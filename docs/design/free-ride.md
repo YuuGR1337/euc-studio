@@ -1,7 +1,7 @@
 # Free Ride redesign (FR)
 
-Status, 2026-10-22: FR1 study and plan approved. FR2 (controls) built; FR2b (native controls)
-built by the physics owner, except a Free Ride step-off command. The other phases are not built.
+Status, 2026-10-22: FR1 study and plan approved. FR2 (controls), FR2b (native controls, by the
+physics owner) and FR3 (the Chase camera) are built. The other phases are not built.
 
 Tarik (Human) asked for a better Free Ride: the world looks primitive, there is no sky, and the
 controls feel bad. He pointed at [EUC Thrills](https://github.com/VibezZzCoder/EUC-thrills), an

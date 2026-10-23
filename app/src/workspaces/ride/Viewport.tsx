@@ -1,12 +1,12 @@
 import { AnimatePresence, motion } from "motion/react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { smooth } from "../../design/motion.ts";
 import { series } from "../../design/tokens.ts";
 import { cx } from "../../lib/cx.ts";
 import { engine, useEngineVersion, useLive } from "../../engine/index.ts";
-import { type CameraMode, useUi } from "../../state/ui.ts";
+import { type CameraMode, cameraContextOf, useUi } from "../../state/ui.ts";
 import { Gauge } from "../../ui/Gauge.tsx";
-import { Crosshair, Orbit, RotateCcw } from "../../ui/icons.tsx";
+import { Crosshair, Orbit, RotateCcw, Unicycle } from "../../ui/icons.tsx";
 import { Button } from "../../ui/Button.tsx";
 import { Pill } from "../../ui/Pill.tsx";
 import { RollingNumber, RollingText } from "../../ui/RollingNumber.tsx";
@@ -260,6 +260,10 @@ export function Viewport({
   const [worldError, setWorldError] = useState<string | null>(null);
   const ready = SCENE_OFF || scene !== null;
   useManualRiding(active);
+  // Ride and Free Ride each keep their own camera (Side and Chase by default).
+  useEngineVersion();
+  const runMode = engine.status.runMode;
+  useEffect(() => useUi.getState().setCameraContext(cameraContextOf(runMode)), [runMode]);
 
   return (
     <div
@@ -305,10 +309,17 @@ export function Viewport({
               onValueChange={setCamera}
               options={[
                 {
+                  value: "chase",
+                  label: "Chase",
+                  icon: <Unicycle />,
+                  tooltip: "Camera behind the rider; it widens with speed",
+                  shortcut: "c",
+                },
+                {
                   value: "follow",
-                  label: "Follow",
+                  label: "Side",
                   icon: <Crosshair />,
-                  tooltip: "Camera follows the wheel",
+                  tooltip: "Camera follows the wheel from the side",
                   shortcut: "c",
                 },
                 {

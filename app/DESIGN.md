@@ -88,7 +88,8 @@ Four tokens, nothing else.
   0.26 s ease-in; direction follows the value; at most 8 updates per second. A digit that changes
   again before its roll ends swaps in place (see decisions).
 - Reduced motion: `MotionConfig reducedMotion="user"` drops transforms; digits cross-fade; the
-  follow camera cuts instead of easing; CSS transitions and animations shrink to 1 ms.
+  chase and side cameras cut instead of easing (and the chase camera does not bank); CSS
+  transitions and animations shrink to 1 ms.
 - Low power: when WebGL runs on a CPU rasterizer (SwiftShader, llvmpipe, Microsoft Basic Render
   Driver) the 3D view drops to reduced quality (1x pixel ratio, no shadow maps, a static contact
   shadow, no camera sway, 20 fps and only while the sim moves) and says so with a "Reduced 3D
@@ -248,3 +249,4 @@ it models; channels the run does not model show "Not modelled in this run" inste
 | 2026-10-22 | A world is outdoors: a painted sky with seeded clouds, one sun shared by the sky and its shadows, fog in the sky's horizon colour, daylight palette, contact pools under the wheel and body. Scenarios without a world and the 32 m test pad keep the studio sweep. Neutral tone mapping at 1.5 stays                   | Colour discipline instead of post-processing (EUC Thrills); fog equal to the horizon hides where the streamed ground ends; the wheel keeps the colours of the owner's photos            |
 | 2026-10-22 | Free Ride rides on the first push: W, the stick or a trigger arms once the engine's 250 ms neutral dwell is met, and the lean ramps up from a neutral first packet. Keys work wherever focus is, except text fields, menus, dialogs and the wheel's buttons; Esc pauses                                                 | Arm, source and gamepad pickers stood between the rider and the ride; the native guards (dwell, watchdog, confirmed arm) stay, only the steps around them went                          |
 | 2026-10-22 | Free Ride input is shaped in `lib/rideControls.ts`: keys lag 0.15 s (lean) and 0.10 s (turn) to at most 10°; a full turn gets the engine's speed-scheduled cap; near a stop a back lean waits 0.35 s; Space crouches; R restarts here after a 3 s countdown                                                             | Methods and starting values from EUC Thrills (MIT; docs/design/free-ride.md). A 10° key step and a fixed 30°/s turn felt like switches; the input stays rider intent                    |
+| 2026-10-22 | Three cameras: Chase (behind the rider; arm 4.2 to 6.0 m and view 65 to 78° by 60 km/h, yaw lag 0.42 to 0.14 s, aim 0.22 s ahead, small bank, stopped by world solids), Side (the old Follow), Orbit. Ride starts on Side, Free Ride on Chase, each kept in `camera.v2`; C goes to Orbit next                           | Method and values from EUC Thrills' chase camera (MIT): speed and turns read at a glance. Ride is the analysis view: pitch and suspension read best from the side                       |
