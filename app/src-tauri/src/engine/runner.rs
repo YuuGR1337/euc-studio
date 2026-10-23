@@ -847,19 +847,9 @@ impl Sim {
     fn run(mut self, rx: &Receiver<Cmd>, tune_rx: &Receiver<tune::Request>) {
         self.build();
         loop {
+            // A free ride's input watchdog only makes the controls neutral (free_ride.rs): play mode
+            // never pauses for want of input.
             self.sync_button_states();
-            if self.free_ride.check_timeout() {
-                lock(&self.button_gate).cancel_holds();
-                if let Some(host) = self.host.as_mut() {
-                    host.manual_pause();
-                    host.release_button_pulses();
-                }
-                self.playing = false;
-                self.debt = 0.0;
-                self.pending.clear();
-                self.awaiting = None;
-                self.post_status();
-            }
             if let Ok(request) = tune_rx.try_recv() {
                 let state = if self.error.is_some() {
                     "error"
@@ -919,8 +909,8 @@ impl Sim {
             Cmd::Announce => {
                 lock(&self.button_gate).cancel_holds();
                 if self.free_spec.is_some() {
-                    self.free_ride.disarm("The view reconnected. Arm neutral controls to continue");
-                    self.playing = false;
+                    // Play mode: the ride goes on with neutral controls until the view sends input.
+                    self.free_ride.clear_input();
                 }
                 if let Some(host) = self.host.as_mut() {
                     host.manual_pause();
@@ -973,7 +963,7 @@ impl Sim {
                         host.release_button_pulses();
                     }
                     if !on && self.free_spec.is_some() {
-                        self.free_ride.disarm("Manual controls paused");
+                        self.free_ride.clear_input();
                     }
                     self.playing = on;
                     self.window.clear();
@@ -1061,12 +1051,17 @@ impl Sim {
         self.debt += now.duration_since(self.last).as_secs_f64().min(0.1) * self.rtf;
         self.last = now;
         let mut stepped = false;
-        while self.debt >= STEP_S {
+        loop {
+            // A host still booting on its stand runs as fast as it can (a free ride's respawn).
+            let booting = self.host.as_ref().is_some_and(|host| host.booting());
+            if !booting && self.debt < STEP_S {
+                break;
+            }
             self.step_once();
             if !self.playing {
                 break;
             }
-            self.debt -= STEP_S;
+            self.debt = if booting { 0.0 } else { self.debt - STEP_S };
             stepped = true;
             if now.elapsed() >= SLICE {
                 break;
@@ -1632,5 +1627,79 @@ mod button_state_tests {
         sim.handle(Cmd::ManualPause(7));
         sim.sync_button_states();
         assert_eq!(lock(&view).levels, [false; 2]);
+    }
+}
+
+#[cfg(test)]
+mod play_mode_tests {
+    use super::*;
+
+    /// Boots on its stand until `boot_s` simulated seconds, then runs on.
+    struct BootHost {
+        now: f64,
+        boot_s: f64,
+    }
+
+    impl Host for BootHost {
+        fn step(&mut self, seconds: f64) {
+            self.now += seconds;
+        }
+        fn time_s(&self) -> f64 {
+            self.now
+        }
+        fn bodies(&self) -> Vec<BodyInfo> {
+            Vec::new()
+        }
+        fn snapshot(&self, out: &mut Snapshot) {
+            out.t_s = self.now;
+        }
+        fn drain_events(&mut self, _out: &mut Vec<Event>) {}
+        fn drain_ble_tx(&mut self, _out: &mut Vec<(f64, u8)>) {}
+        fn inject_ble(&mut self, _bytes: &[u8]) -> Result<(), String> {
+            Ok(())
+        }
+        fn halted(&self) -> Option<String> {
+            None
+        }
+        fn booting(&self) -> bool {
+            self.now < self.boot_s
+        }
+    }
+
+    #[test]
+    fn a_booting_host_runs_unthrottled_then_at_the_wall_clock_rate() {
+        let mut sim = Sim::new(
+            Box::new(|_, _, _| Err("Play mode tests never load firmware".into())),
+            "play-unit-test".into(),
+            "mock",
+            Arc::new(Mutex::new(Outbox::default())),
+            RecordingState::default(),
+            Arc::new(Mutex::new(buttons::Gate::default())),
+            FreeRideState::default(),
+        );
+        sim.host = Some(Box::new(BootHost { now: 0.0, boot_s: 30.0 }));
+        sim.playing = true;
+        sim.rtf = 1.0;
+        sim.last = Instant::now();
+        let began = Instant::now();
+        while sim.host.as_ref().is_some_and(|host| host.booting()) {
+            sim.advance();
+            assert!(began.elapsed() < Duration::from_secs(10), "the boot must not wait for the wall clock");
+        }
+        let booted = sim.host.as_ref().unwrap().time_s();
+        let boot_wall = began.elapsed().as_secs_f64();
+        assert!((30.0..30.0 + STEP_S + 1e-9).contains(&booted), "{booted}");
+        assert!(boot_wall < 5.0, "30 simulated seconds of boot took {boot_wall} s of wall time");
+        // Booted: the wall clock paces it again.
+        let resumed = Instant::now();
+        while resumed.elapsed() < Duration::from_millis(200) {
+            sim.advance();
+        }
+        let ran = sim.host.as_ref().unwrap().time_s() - booted;
+        let wall = resumed.elapsed().as_secs_f64();
+        assert!(
+            ran <= wall + SLICE.as_secs_f64() + 2.0 * STEP_S && ran > 0.5 * wall,
+            "{ran} simulated s in {wall} s of wall time"
+        );
     }
 }

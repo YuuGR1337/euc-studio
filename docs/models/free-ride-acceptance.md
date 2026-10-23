@@ -1,5 +1,25 @@
 # Native FreeRide acceptance
 
+## Play mode update (2026-10-22)
+
+Free ride is now play mode: a 1.5 s stand boot, input live at once (no arming, no neutral gate),
+no pause on a crash, respawn, wheel buttons, power off and on, and no run limit. The tests below
+were adapted: `Rig::boot` replaces the arming step, the pause test resumes with the other source
+at once, and a step-off keeps the run going. The finite map (the old test pad) keeps its edge
+guard. New stock tests, all on the streaming world, seed 42:
+
+| Test | What it checks | Observed (articulated; rigid where run) |
+|---|---|---|
+| `stock_*_idle_after_boot_balances_without_a_pause` | 10 s with no input after boot, then a 1 s lean and silence past the 250 ms watchdog | Peak 0.16 km/h (0.13), pitch 0.48 deg, drift 0.015 m; neutral controls after the watchdog, still on the pedals |
+| `stock_*_crash_never_pauses` | Step-off at speed, then 5 s with a held lean | Off at 10.1 km/h (9.6); the run goes on 5 s, the firmware cuts and the wheel falls on its own, 840 BLE bytes in the last 2 s |
+| `stock_articulated_respawns_upright_at_the_last_clear_spot_and_at_the_start` | R after a crash, then Shift+R | Upright (pitch and roll 0.00 deg) within 0.05 m of the spot; call to riding 0.81 s and 0.69 s wall |
+| `stock_articulated_power_off_then_on` | A 1.5 s power hold at 2 m/s, then a hold at a stop, then a press | No power-off at speed; latch drops 0.817 s into the hold; rider off about 1.5 s after the rail goes; latched again 0.55 s into the press, display on 3.2 s later |
+| `stock_articulated_buttons_while_riding` | Handle hold, two handle presses and a power press at speed; the horn command over BLE; two handle presses at a stop | Ignored at 6.8 km/h; the horn sounds; at a stop the second press cuts the drive command to 1 (19 after the first) |
+| `stock_free_ride_keeps_no_ble_backlog` | 20 s with the runner's drains | 7,386 BLE bytes read, none left on the board |
+
+The rigid crash and idle tests passed with the numbers in brackets. The respawn wall times come from
+a release build with four tests in parallel on the development Mac.
+
 ## Scope and identity
 
 These checks use the completion checkout on 2026-10-16.
@@ -33,10 +53,8 @@ The production prefix in `free_ride.rs` stays byte-for-byte unchanged.
 
 Both models use neutral settings, map seed 17, and run epoch 700.
 The generated map has revision 700 and bounds from -16 m to +16 m on each horizontal axis.
-Each test first runs the actual four-second stand boot.
-It then requires fresh neutral input and explicit arming.
-The neutral gate uses six actual 50 ms wall intervals with fresh input packets.
-The test does not change the gate timestamps.
+Each test first runs the actual stand boot (four seconds when these numbers were taken; 1.5 s
+since play mode). Before play mode it then required fresh neutral input and explicit arming.
 
 The sustained tests send one ordinary `ManualInput` packet before each 120 Hz host sample.
 A test policy requests lean from speed error: `clamp(0.05 * (target_m_s - measured_m_s), -0.04, 0.04)`.
@@ -53,7 +71,7 @@ No test moves a body to manufacture an edge crossing.
 
 Every active sample requires finite body poses, no native halt, and no firmware fault or cutoff event.
 It also requires shell pitch and roll below 10 degrees.
-The sustained steering runs additionally require armed and ready status at every sample.
+The sustained steering runs additionally require ready status at every sample.
 
 ## Observed results
 
@@ -88,6 +106,10 @@ Both physical paths leave the level spawn patch and cross nonzero terrain height
 The yaw aid contributes external energy. These checks do not establish unsupported human steering behavior.
 
 ### Pause and neutral rearm
+
+Play mode replaced this test with `stock_*_pause_and_resume`: pause clears the input, and a packet
+from the other source drives at once with no neutral interval. The old turn request does not
+resume. The numbers below are from the old test.
 
 Each model drives for three seconds before pause and three seconds after rearm on a flat generated map.
 Pause clears manual input and freezes the actual body poses and simulation time.
@@ -137,8 +159,8 @@ The new tests use the prefix `engine::free_ride::stock_rider_acceptance::`:
 
 - `stock_rigid_sustained_steering_on_generated_terrain`
 - `stock_articulated_sustained_steering_on_generated_terrain`
-- `stock_rigid_pause_and_neutral_rearm`
-- `stock_articulated_pause_and_neutral_rearm`
+- `stock_rigid_pause_and_resume` (was `stock_rigid_pause_and_neutral_rearm`)
+- `stock_articulated_pause_and_resume` (was `stock_articulated_pause_and_neutral_rearm`)
 - `stock_rigid_finite_map_edge_admission`
 - `stock_articulated_finite_map_edge_admission`
 

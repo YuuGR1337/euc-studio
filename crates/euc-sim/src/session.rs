@@ -337,6 +337,15 @@ impl Session {
         std::mem::take(&mut self.events)
     }
 
+    /// Drops the machine's diagnostic log entries this session has already turned into events, so
+    /// that a run without an end (Free Ride) keeps a bounded log. A run that reads a full
+    /// [`Report`](crate::Report) at its end does not call this.
+    pub fn forget_seen_diagnostics(&mut self) {
+        let seen = self.seen_events.min(self.machine.sys.diag.events.len());
+        self.machine.sys.diag.events.drain(..seen);
+        self.seen_events = 0;
+    }
+
     fn push(&mut self, kind: EventKind, text: String) {
         self.events.push(Event { t_s: self.time_s(), kind, text });
     }
@@ -436,6 +445,22 @@ mod tests {
         let live = files.live_on(rider, Assist::default(), Terrain::default()).unwrap();
         let factory = crate::cpu::Backend::Own.factory().unwrap();
         Session::new(Machine::new_live(&config, &crate::registry(), factory, live).unwrap(), None, 100.0)
+    }
+
+    #[test]
+    fn forgetting_seen_diagnostics_keeps_only_unread_ones() {
+        let mut s = session();
+        s.machine_mut().sys.diag.events.push((0, "BLOCKER test: first".into()));
+        s.step();
+        assert!(s.take_events().iter().any(|e| e.text == "BLOCKER test: first"));
+        s.forget_seen_diagnostics();
+        assert!(s.machine().sys.diag.events.is_empty(), "{:?}", s.machine().sys.diag.events);
+        let at = s.machine().cycles;
+        s.machine_mut().sys.diag.events.push((at, "BLOCKER test: second".into()));
+        s.step();
+        let events = s.take_events();
+        assert!(events.iter().any(|e| e.text == "BLOCKER test: second"), "{events:?}");
+        assert!(!events.iter().any(|e| e.text == "BLOCKER test: first"), "a trimmed entry is not read again");
     }
 
     #[test]
