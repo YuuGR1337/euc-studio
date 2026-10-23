@@ -174,10 +174,18 @@ The studio's engine crates build at `opt-level = 3` in development too, so the s
 - **Worker.** `worldWorker.ts` decodes payloads and builds the ground mesh (positions, normals, a material texture) and one box mesh per chunk off the UI thread, as transferable buffers.
 - **Rings.** `WorldStream` keeps level 0 within 30 m of the wheel and level 1 within 104 m (high quality), or 18 m and 56 m (low quality), refreshes the wanted set every 0.25 s, asks for the nearest chunks first (4 per level-0 request, 24 per level-1 request), and drops what falls out of range. Props are one `InstancedMesh` per part and kind (lamp posts, trees, benches, bins, hydrants, bollards).
 - **Frame.** The world group sits in the physics frame like the live bodies. Chunk meshes carry chunk-local vertices, so f32 stays precise far from the spawn without a floating origin.
-- **View.** On a world the fog runs from 18 m to 110 m and the camera sees 300 m. `WorldView` samples the loaded level-0 and level-1 heights for the floor light, the contact shadow and the grade readout.
+- **View.** On a world the camera sees 300 m. `WorldView` samples the loaded level-0 and level-1 heights for the floor light, the camera and the grade readout.
+- **Outdoor look (FR4, `app/src/workspaces/ride/outdoor/`).** A world is outdoors; scenarios without a world and the 32 m test pad keep the studio sweep. After EUC Thrills by VibezZzCoder (MIT), re-implemented in our code (`docs/design/free-ride.md`):
+  - *Sky.* An equirectangular sky painted once per world in a worker (1024 × 512): a horizon-to-zenith ramp shaped by y^0.62, warm scatter low toward the sun, value-noise clouds on a flat deck seeded from the world seed (a recording shows the same clouds), and the sun's core and glow. It is not tone mapped (sRGB), and it turns with the world group, so the sun is fixed in the world.
+  - *Fog.* Linear, in the horizon colour `#BCD4EC`. three.js mixes fog after tone mapping and colour conversion, so a fully fogged pixel is exactly the sky's horizon. The fog ends before the outer ring does (30 to 90 m on high, 12 to 44 m on low), so the ground's edge is never seen.
+  - *Sun and fill.* One sun at azimuth 225° (south-west) and 42° up, colour `#FFF0DE`, intensity 3.1, shared by the painted sky and the shadows; a hemisphere light (`#C2CCD6` over `#B2AB97`, 0.6); the sky's PMREM environment (a 256 × 128 painting with ground bounce below the horizon) at 0.2. Tuned under the Neutral tone mapping at exposure 1.5, which stays: sunlit asphalt renders about (122, 121, 124), its shadow about (29, 47, 69), close to the reference.
+  - *Shadows (high tier).* A 2048² map over ±25 m that follows the wheel, 9 m ahead along the view, its centre snapped to whole shadow texels in the sun's frame so edges do not crawl. Buildings, solids, props and the bodies cast; the ground receives.
+  - *Contact pools.* The ground's shader darkens softly under the wheel (radius 0.6 m) and under the rider's body (1.05 m, stretched 1.6 times along the shadow), from the poses each frame. They replace `ContactShadows` on a world.
+  - *Palette.* Muted mid-values for daylight (asphalt `#72767C`, concrete `#B2AEA4`, grass `#547446`, paint `#E2E0D8`, never pure white) and facade colours chosen per building by hash.
+  - Budget, measured in headless WebKit at 960 × 540 with real chunks: 60 frames per second, about 190 draw calls, 605 000 to 630 000 triangles, 53 to 57 textures.
 - **Errors.** When the engine refuses chunks, the view keeps what it drew, asks again, and shows a "World view incomplete" pill whose tooltip gives the reason. The physics does not depend on the view.
 - **Where it shows.** Free Ride on a world, a live `[world]` scenario (the run sends its `WorldFrame` with the bodies), and the playback of a recording with a world (the studio regenerates it from the recorded seed).
-- **Not built:** ring 2 and skirts, a facade shader, wet gloss, a minimap.
+- **Not built:** ring 2 and skirts, a facade shader, wet gloss, a minimap; ground detail and road marking ribbons (FR5), building looks and a skyline (FR7), vegetation and better props (FR8).
 
 ## Free Ride
 

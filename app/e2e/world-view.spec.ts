@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { expect, test, type Page } from "@playwright/test";
 import { createServer, type ViteDevServer } from "vite";
@@ -110,29 +110,50 @@ import { DEFAULT_DENSITIES } from "/src/engine/world.ts";
 import { WorldCamera, WorldSurface } from "/src/workspaces/ride/WorldSurface.tsx";
 import { WorldStream } from "/src/workspaces/ride/worldStream.ts";
 import { WorldView } from "/src/workspaces/ride/worldView.ts";
+import { Outdoor } from "/src/workspaces/ride/outdoor/Outdoor.tsx";
+import { EucModel } from "/src/workspaces/ride/EucModel.tsx";
 const q = new URLSearchParams(location.search);
+// ?look=outdoor: the studio's world look (Outdoor, Neutral tone mapping at 1.5, shadows) with the
+// wheel model, seen from a chase camera 4.2 m behind and 1.95 m up.
+const outdoor = q.get("look") === "outdoor";
+const quality = q.get("quality") === "low" ? "low" : "high";
 const frame = {
   spec: { seed: Number(q.get("seed") ?? 1), revision: 2, biome: "city", densities: DEFAULT_DENSITIES },
   start_xy_m: [Number(q.get("x") ?? 0), Number(q.get("y") ?? 0)],
   start_heading_rad: Number(q.get("heading") ?? 0),
-  origin_z_m: 0,
+  origin_z_m: Number(q.get("z") ?? 0),
 };
 const view = new WorldView(frame);
 const page = { view, scene: null, camera: null, gl: null, errors: [], WorldStream, WorldView, THREE };
 window.worldPage = page;
 const e = React.createElement;
+const plainLook = [
+  e("color", { attach: "background", args: ["#A9B8C6"] }),
+  e("fog", { attach: "fog", args: ["#A9B8C6", 18, 110] }),
+  e("hemisphereLight", { args: ["#DDE6F0", "#3A3530", 1.1] }),
+  e("directionalLight", { position: [-20, 30, 10], intensity: 1.6 }),
+];
+const outdoorLook = [
+  e(Outdoor, { world: view, quality }),
+  e(React.Suspense, { fallback: null }, e(EucModel, { accent: "#FF7A1A" })),
+];
 createRoot(document.getElementById("root")).render(
   e(Canvas, {
-      gl: { preserveDrawingBuffer: true },
-      camera: { position: [-5, 1.8, 0], fov: 55, near: 0.05 },
-      onCreated: (s) => { s.camera.lookAt(14, 0, 0); Object.assign(page, { scene: s.scene, camera: s.camera, gl: s.gl }); },
+      shadows: outdoor && quality === "high",
+      gl: { preserveDrawingBuffer: true, antialias: true },
+      camera: outdoor ? { position: [-4.2, 1.95, 0], fov: 65, near: 0.05 } : { position: [-5, 1.8, 0], fov: 55, near: 0.05 },
+      onCreated: (s) => {
+        if (outdoor) {
+          s.gl.toneMapping = THREE.NeutralToneMapping;
+          s.gl.toneMappingExposure = 1.5;
+          s.camera.lookAt(3, 1.0, 0);
+        } else s.camera.lookAt(14, 0, 0);
+        Object.assign(page, { scene: s.scene, camera: s.camera, gl: s.gl });
+      },
     },
-    e("color", { attach: "background", args: ["#A9B8C6"] }),
-    e("fog", { attach: "fog", args: ["#A9B8C6", 18, 110] }),
-    e("hemisphereLight", { args: ["#DDE6F0", "#3A3530", 1.1] }),
-    e("directionalLight", { position: [-20, 30, 10], intensity: 1.6 }),
+    ...(outdoor ? outdoorLook : plainLook),
     e(WorldCamera),
-    e(WorldSurface, { world: view, quality: "high", onError: (m) => page.errors.push(m) }),
+    e(WorldSurface, { world: view, quality, onError: (m) => page.errors.push(m) }),
   ),
 );
 </script></body></html>`,
@@ -347,6 +368,120 @@ test("keeps what it drew and reports the error when the engine refuses chunks", 
     5,
   );
 });
+
+/** One pixel of the canvas (rows from the top), display sRGB. */
+async function pixel(page: Page, x: number, yFromTop: number) {
+  return page.evaluate(
+    ([px = 0, py = 0]) => {
+      const gl = window.worldPage.gl?.getContext();
+      if (!gl) throw new Error("No WebGL context.");
+      const out = new Uint8Array(4);
+      gl.readPixels(px, gl.drawingBufferHeight - 1 - py, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, out);
+      return [out[0] ?? 0, out[1] ?? 0, out[2] ?? 0];
+    },
+    [x, yFromTop],
+  );
+}
+
+test("the outdoor look: a blue sky, fog in the horizon colour and a pool under the wheel", async ({
+  page,
+}) => {
+  await page.goto(`${base}?look=outdoor`);
+  await expect.poll(() => drawn(page), { timeout: 30_000 }).toEqual(expected("high", 0, 0));
+  await page.waitForTimeout(1500);
+  const size = await page.evaluate(() => {
+    const gl = window.worldPage.gl?.getContext();
+    return [gl?.drawingBufferWidth ?? 0, gl?.drawingBufferHeight ?? 0];
+  });
+  const [w = 0, h = 0] = size;
+  // The camera looks 7.5° down with a 65° view: the horizon is 10.3 % of the height above centre.
+  const horizon = Math.round(h / 2 - 0.1032 * h);
+  const top = await pixel(page, Math.round(w / 2), Math.round(h * 0.03));
+  expect(top[2]).toBeGreaterThan((top[0] ?? 0) + 40);
+  // Straight down the street, just under the horizon, the ground is past the fog's end: it is
+  // the horizon colour, like the sky right above it.
+  const fogged = await pixel(page, Math.round(w / 2), horizon + Math.round(h * 0.006));
+  [188, 212, 236].forEach((c, k) => expect(Math.abs((fogged[k] ?? 0) - c)).toBeLessThan(8));
+  await page.locator("canvas").screenshot({ path: `${screens}outdoor-synthetic.png` });
+  // The wheel close up in daylight, for a look at its colours.
+  await page.evaluate(() => {
+    window.worldPage.camera?.position.set(-1.3, 0.75, 1.0);
+    window.worldPage.camera?.lookAt(0, 0.4, 0);
+  });
+  await page.waitForTimeout(800);
+  await page.locator("canvas").screenshot({ path: `${screens}outdoor-wheel.png` });
+});
+
+test("the outdoor look on the low tier keeps the sky and the fog colour, without shadows", async ({
+  page,
+}) => {
+  await page.goto(`${base}?look=outdoor&quality=low`);
+  await expect.poll(() => drawn(page), { timeout: 30_000 }).toEqual(expected("low", 0, 0));
+  await page.waitForTimeout(1500);
+  const shadows = await page.evaluate(() => window.worldPage.gl?.shadowMap.enabled);
+  expect(shadows).toBe(false);
+  const [w = 0, h = 0] = await page.evaluate(() => {
+    const gl = window.worldPage.gl?.getContext();
+    return [gl?.drawingBufferWidth ?? 0, gl?.drawingBufferHeight ?? 0];
+  });
+  const top = await pixel(page, Math.round(w / 2), Math.round(h * 0.03));
+  expect(top[2]).toBeGreaterThan((top[0] ?? 0) + 40);
+  const fogged = await pixel(page, Math.round(w / 2), Math.round(h / 2 - 0.1032 * h) + 3);
+  [188, 212, 236].forEach((c, k) => expect(Math.abs((fogged[k] ?? 0) - c)).toBeLessThan(8));
+  await page.locator("canvas").screenshot({ path: `${screens}outdoor-low.png` });
+});
+
+/** Real chunks in the outdoor look, from a chase camera, for side-by-side review. */
+const OUTDOOR_VIEWS = [
+  { name: "spawn-east", x: 0, y: 0, heading: 0 },
+  { name: "pothole-street", x: 70, y: 3.05, heading: 0 },
+  { name: "stairs-plaza", x: 124.4, y: -47.62, heading: -95.35 },
+  { name: "ramp-plaza", x: 117.9, y: -55.75, heading: 8.86 },
+];
+for (const v of OUTDOOR_VIEWS) {
+  test(`renders real chunks in the outdoor look: ${v.name}`, async ({ page }) => {
+    test.skip(!REAL_BIN, "Set WORLD_PAYLOAD_BIN to euc-world's payload example.");
+    // Real chunks with shadows on a software renderer can take minutes on a busy machine.
+    test.setTimeout(300_000);
+    const heading = (v.heading * Math.PI) / 180;
+    const url = `${base}?look=outdoor&source=real&seed=42&x=${v.x}&y=${v.y}&heading=${heading}`;
+    // First the height under the start (the physics frame's z = 0), then the view on it.
+    await page.goto(url);
+    await expect.poll(() => drawn(page), { timeout: 60_000 }).not.toEqual([0, 0]);
+    await expect
+      .poll(() => page.evaluate(() => window.worldPage.view.sample(0, 0)?.height_m ?? null), {
+        timeout: 60_000,
+      })
+      .not.toBeNull();
+    const z = await page.evaluate(() => window.worldPage.view.sample(0, 0)?.height_m ?? 0);
+    await page.goto(`${url}&z=${z}`);
+    await expect.poll(() => drawn(page), { timeout: 60_000 }).toEqual(expected("high", v.x, v.y));
+    await page.waitForTimeout(1500);
+    await page.locator("canvas").screenshot({ path: `${screens}outdoor-${v.name}.png` });
+    // Draw calls, triangles and the frame rate of this browser, for the phase's budget table.
+    const numbers = await page.evaluate(async () => {
+      const gl = window.worldPage.gl;
+      const start = performance.now();
+      let frames = 0;
+      await new Promise<void>((done) => {
+        const tick = () => {
+          frames += 1;
+          if (performance.now() - start < 2000) requestAnimationFrame(tick);
+          else done();
+        };
+        requestAnimationFrame(tick);
+      });
+      return {
+        fps: Math.round((frames * 1000) / (performance.now() - start)),
+        calls: gl?.info.render.calls,
+        triangles: gl?.info.render.triangles,
+        textures: gl?.info.memory.textures,
+        geometries: gl?.info.memory.geometries,
+      };
+    });
+    writeFileSync(`${screens}outdoor-${v.name}.json`, JSON.stringify(numbers));
+  });
+}
 
 test("draws real generated chunks", async ({ page }) => {
   test.skip(!REAL_BIN, "Set WORLD_PAYLOAD_BIN to euc-world's payload example.");

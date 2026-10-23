@@ -14,6 +14,7 @@ import { INITIAL_CAMERA } from "./cameraTracking.ts";
 import { MapSurface } from "./MapSurface.tsx";
 import { type GroundView, isWorldView, sampleGround } from "./ground.ts";
 import { WorldCamera, WorldSurface } from "./WorldSurface.tsx";
+import { Outdoor } from "./outdoor/Outdoor.tsx";
 import { type Slope, slopeAt } from "./terrain.ts";
 import { TerrainStrip } from "./TerrainStrip.tsx";
 import { LOW_FPS, type Quality, chooseQuality, qualityOverride, rendererName } from "./quality.ts";
@@ -228,6 +229,7 @@ export function Scene({ active, map, onReady, onFirstFrame, onWorldError }: Scen
   const [quality, setQuality] = useState<Quality>(override ?? "high");
   const high = quality === "high";
   const cameraMoving = useRef(false);
+  const world = isWorldView(map) ? map : null;
 
   return (
     <Canvas
@@ -251,11 +253,11 @@ export function Scene({ active, map, onReady, onFirstFrame, onWorldError }: Scen
       aria-label="3D view of the wheel"
     >
       <VisualFrame />
-      <color attach="background" args={[surface.bg]} />
-      {/* A world shows its streets out to the fog; the studio sweep keeps the close fog. */}
-      <fog attach="fog" args={isWorldView(map) ? [surface.bg, 18, 110] : [surface.bg, 5, 13]} />
+      {/* A world brings its own sky, fog and sun (Outdoor); everything else keeps the studio sweep. */}
+      {!world && <color attach="background" args={[surface.bg]} />}
+      {!world && <fog attach="fog" args={[surface.bg, 5, 13]} />}
       <Suspense fallback={null}>
-        <Lights />
+        {world ? <Outdoor world={world} quality={quality} /> : <Lights />}
         <Floor
           flat={
             !map &&
@@ -266,9 +268,9 @@ export function Scene({ active, map, onReady, onFirstFrame, onWorldError }: Scen
           map={map}
         />
         {map && !isWorldView(map) && <MapSurface map={map} />}
-        {isWorldView(map) && (
+        {world && (
           <>
-            <WorldSurface world={map} quality={quality} onError={onWorldError} />
+            <WorldSurface world={world} quality={quality} onError={onWorldError} />
             <WorldCamera />
           </>
         )}
@@ -283,21 +285,24 @@ export function Scene({ active, map, onReady, onFirstFrame, onWorldError }: Scen
         ) : (
           <EucModel accent={accents[accent].accent} />
         )}
-        {engine.kind !== "playback" && (engine.status.runMode !== "free_ride" || !!map) && (
-          <FollowWheel map={map}>
-            <ContactShadows
-              // The key: a new component when quality changes, so `frames` applies from the start.
-              key={quality}
-              position={[0, 0.001, 0]}
-              opacity={0.75}
-              scale={3}
-              blur={2.2}
-              far={0.9}
-              resolution={high ? 512 : 256}
-              frames={high ? Infinity : 1}
-            />
-          </FollowWheel>
-        )}
+        {/* On a world the ground's contact pools (Outdoor) ground the wheel instead. */}
+        {!world &&
+          engine.kind !== "playback" &&
+          (engine.status.runMode !== "free_ride" || !!map) && (
+            <FollowWheel map={map}>
+              <ContactShadows
+                // The key: a new component when quality changes, so `frames` applies from the start.
+                key={quality}
+                position={[0, 0.001, 0]}
+                opacity={0.75}
+                scale={3}
+                blur={2.2}
+                far={0.9}
+                resolution={high ? 512 : 256}
+                frames={high ? Infinity : 1}
+              />
+            </FollowWheel>
+          )}
       </Suspense>
       <CameraRig mode={camera} map={map} moving={cameraMoving} />
       <FirstFrame onFirstFrame={onFirstFrame} />
