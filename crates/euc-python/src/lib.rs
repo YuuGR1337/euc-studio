@@ -353,9 +353,7 @@ fn build(
         max_quantum: 4000,
         marker_window_s: 4.0,
     };
-    let live = files
-        .live_for(&scenario)
-        .map_err(|e| PyValueError::new_err(e.to_string()))?;
+    let live = files.live_for(&scenario).map_err(|e| PyValueError::new_err(e.to_string()))?;
     let factory = Backend::Own.factory().map_err(PyRuntimeError::new_err)?;
     let machine = Machine::new_live(&config, &euc_sim::registry(), factory, live)
         .map_err(|e| PyValueError::new_err(e.to_string()))?;

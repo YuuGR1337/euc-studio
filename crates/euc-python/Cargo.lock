@@ -165,6 +165,7 @@ name = "euc-physics"
 version = "0.1.0"
 dependencies = [
  "euc-telemetry",
+ "euc-world",
  "mujoco-rs",
  "serde",
  "thiserror",
@@ -227,6 +228,7 @@ dependencies = [
  "euc-proto-begode",
  "euc-stm32f1",
  "euc-telemetry",
+ "euc-world",
  "libloading",
  "object",
  "serde",
@@ -251,6 +253,13 @@ dependencies = [
  "serde",
  "serde_json",
  "zstd",
+]
+
+[[package]]
+name = "euc-world"
+version = "0.1.0"
+dependencies = [
+ "serde",
 ]
 
 [[package]]
