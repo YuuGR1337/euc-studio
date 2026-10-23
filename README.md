@@ -2,6 +2,8 @@
 
 **Run real electric-unicycle firmware in a 3D simulation with a physical rider. Inspect it, compare it, improve it.**
 
+<!-- showcase -->
+
 EUC Studio is a workbench for people who want better and safer EUC controller firmware. It runs the controller's
 actual firmware image on an emulated microcontroller. Motor, battery, wheel, rider and city models supply its inputs.
 The simulator helps you inspect behavior under stated conditions. It does not establish real riding safety.
@@ -152,7 +154,12 @@ Free Ride is a simulation for firmware work, not a riding trainer.
 ## Where to start
 
 - Look at the [roadmap board](https://github.com/users/tarikbc/projects/3) and the
-  [good first issues](https://github.com/tarikbc/euc-studio/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22).
+  [good first issues](https://github.com/tarikbc/euc-studio/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22):
+  trees and vegetation in the city ([#29](https://github.com/tarikbc/euc-studio/issues/29)), smooth route steering
+  ([#31](https://github.com/tarikbc/euc-studio/issues/31)), the IMU's low-pass filter
+  ([#39](https://github.com/tarikbc/euc-studio/issues/39)), README visuals
+  ([#51](https://github.com/tarikbc/euc-studio/issues/51)) and 3D model follow-ups
+  ([#56](https://github.com/tarikbc/euc-studio/issues/56)).
   Issues labelled [help wanted](https://github.com/tarikbc/euc-studio/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22)
   and [needs: data](https://github.com/tarikbc/euc-studio/issues?q=is%3Aissue+is%3Aopen+label%3A%22needs%3A+data%22)
   are open to anyone with the skills or a wheel to measure.
