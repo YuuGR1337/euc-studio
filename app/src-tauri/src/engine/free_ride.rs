@@ -2897,6 +2897,36 @@ mod stock_rider_acceptance {
         }
     }
 
+    /// Drive mode, a release: throttle at `fraction` of the cap from rest to 20 km/h, then no ask
+    /// for 4 s. The wheel runs on as it catches the rider (it drives forward under the body as the
+    /// lean comes back), then settles at the speed let go: the reference does not run ahead. The
+    /// peak over the release speed and where the speed settles, km/h.
+    fn drive_release(firmware: &str, fraction: f64) -> (f64, f64) {
+        let mut d = Drive::new("articulated_sagittal_v1", firmware, "tarik-2026-10-15", 1.0, 4000);
+        let (rise, _, released, fell) = drive_until(&mut d, fraction, 10.0, |v| v >= 20.0);
+        assert!(fell.is_none() && rise < 8.0, "{firmware} {fraction}: 20 km/h in {rise:.2} s, fell {fell:?}");
+        let (_, low, high, fell) = drive_until(&mut d, 0.0, 4.0, |_| false);
+        assert!(fell.is_none(), "{firmware} {fraction}: fell after the release at {fell:?}");
+        let settled = f64::from(d.step(0.0).signals.speed_kmh);
+        println!(
+            "drive release {firmware} at {fraction} of the cap: released at {released:.2} km/h, then \
+             {low:.2}-{high:.2} km/h, {settled:.2} km/h after 4 s"
+        );
+        (high - released, settled - released)
+    }
+
+    /// The owner's ride log (2026-10-17): after pushes of about 2.2 m/s² the speed rose 0.6-7.9 km/h
+    /// (median 3.0) from the let-go to the peak.
+    #[test]
+    #[ignore = "needs cached pinned stock firmware; drive mode release at 20 km/h"]
+    fn stock_drive_release_at_20_kmh_settles_at_the_speed_let_go() {
+        for (fraction, peak_max) in [(0.5, 6.0), (1.0, 10.0)] {
+            let (peak, settled) = drive_release("stock", fraction);
+            assert!(peak < peak_max, "{fraction} of the cap: peak {peak:.2} km/h over the release");
+            assert!(settled.abs() < 1.0, "{fraction} of the cap: settled {settled:.2} km/h from the release");
+        }
+    }
+
     // A concrete host permits exact read-only physics diagnostics, without adding downcasts to
     // Host. Configuration matches build_free_host; factory acceptance above remains the gate.
     fn diagnostic_host(model: &str, state: FreeRideState) -> FreeRideHost {

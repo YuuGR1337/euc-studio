@@ -257,11 +257,20 @@ DEFAULT 1000 N·m/rad, 60 N·m·s/rad, 180 N·m), so they give under a bump and 
   an acceleration, net of drag, instead of a lean. It leans for the ask plus the drag at the speed
   now, `tan(lean) = (a + drag) / g`. It also follows a reference speed that the asks add up to,
   adding `manual_drive_kp` (1.2 /s) per m/s that the reference leads. An ask carries the reference at
-  most 0.5 m/s past the wheel, so a wheel the firmware holds back does not wind the rider up. The
+  most 0.5 m/s past the wheel, so a wheel the firmware holds back does not wind the rider up. Letting
+  go of an ask that the wheel still lags stops the reference at the wheel; before, it stayed up to
+  the band ahead, and a half throttle let go at 20 km/h settled at 21.3 km/h instead of 20.0. The
   reference never follows the wheel's speed ripple (about ±0.25 m/s at 2.5 Hz at 40 km/h): a
-  clamp to the measured speed ratcheted it down and lost 7 km/h in 10 s. With no ask after a half
-  throttle to 40 km/h the speed overshoots to 44 km/h as the lean returns and stays at 40-44 km/h
-  for 10 s. A brake after a ride eases near the stop (at most
+  clamp to the measured speed ratcheted it down and lost 7 km/h in 10 s. As the lean returns
+  after a push, the wheel drives forward under the rider and runs on: a half throttle let go at
+  20 km/h peaks 4.7 km/h higher (full throttle 8.1 km/h) and settles back at the speed let go, and
+  after a half throttle to 40 km/h the speed stays at 39-44 km/h for 10 s. The owner's ride log
+  (2026-10-17) shows the same run-on: pushes of about 2.2 m/s² end in about 0.74 s (80 to 20 % of
+  the push, a lean rate near 18°/s), and the speed rose 0.6-7.9 km/h (median 3.0) from the
+  let-go to the peak. A faster drive lean (100°/s) was tried: built that fast, it kicked the
+  pedals nose up at a launch, the wheel rolled back and the rider fell; let go that fast, it did
+  not lower the peak. So drive mode keeps `manual_lean_rate_deg_s` (30°/s). A brake after a ride
+  eases near the stop (at most
   2.5 /s times the reference) and ends at zero. The rider holds the stop while the brake stays,
   and a brake let go below 0.5 m/s also stops; the wheel then rocks within ±0.6 km/h while the
   pedals settle. Only a new back ask from rest reverses. In a

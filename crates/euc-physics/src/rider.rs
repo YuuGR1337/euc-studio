@@ -226,6 +226,8 @@ pub struct RiderController {
     drive_peak: f64,
     /// Manual drive: the last step braked a ride (the ask against the reference).
     drive_braking: bool,
+    /// Manual drive: the last step's ask, m/s² (after the tiltback ease).
+    drive_ask: f64,
 }
 
 /// How the rider steers in one step.
@@ -265,6 +267,7 @@ impl RiderController {
             drive_stop: None,
             drive_peak: 0.0,
             drive_braking: false,
+            drive_ask: 0.0,
         }
     }
 
@@ -468,6 +471,7 @@ impl RiderController {
                         self.drive_speed = s.speed;
                         self.drive_stop = None;
                         self.drive_peak = 0.0;
+                        self.drive_ask = 0.0;
                         Intent::Accel(s.gravity * s.lean.tan() - s.drag.decel(s.speed))
                     }
                 };
@@ -564,6 +568,7 @@ impl RiderController {
             self.drive_speed = s.speed;
             self.drive_stop = None;
             self.drive_peak = 0.0;
+            self.drive_ask = 0.0;
             return 0.0;
         }
         let mut accel = eased_accel(asked, felt, s, &c);
@@ -583,6 +588,16 @@ impl RiderController {
         if braked && accel.abs() < DRIVE_IDLE_MPS2 && self.drive_speed.abs() < DRIVE_STOP_FROM_MPS {
             self.drive_speed = 0.0;
             self.drive_peak = 0.0;
+        }
+        // Letting go of an ask the wheel still lags: the rider stops leaning for more, so the
+        // reference stops at the wheel instead of carrying it on to the band's edge.
+        let let_go = std::mem::replace(&mut self.drive_ask, accel);
+        if let_go.abs() >= DRIVE_IDLE_MPS2
+            && accel.abs() < DRIVE_IDLE_MPS2
+            && (self.drive_speed - s.speed) * let_go > 0.0
+            && s.speed * self.drive_speed > 0.0
+        {
+            self.drive_speed = s.speed;
         }
         if stopping && accel * self.drive_speed < 0.0 {
             let most = DRIVE_STOP_RATE_PER_S * self.drive_speed.abs();
@@ -709,6 +724,40 @@ mod tests {
         rider.set_intent(Intent::Accel(-1.0));
         rider.ankle_torque(&sense(8.0));
         assert!((rider.drive_speed() - 8.5).abs() < 1e-9, "{}", rider.drive_speed());
+    }
+
+    #[test]
+    fn drive_release_stops_the_reference_at_the_wheel() {
+        // A push the wheel lags: the reference runs the band ahead. Let go: it stops at the wheel.
+        let mut rider = driver(5.0);
+        rider.set_intent(Intent::Accel(2.0));
+        for _ in 0..1000 {
+            rider.ankle_torque(&sense(5.0));
+        }
+        assert!((rider.drive_speed() - 5.5).abs() < 1e-9, "{}", rider.drive_speed());
+        rider.set_intent(Intent::Accel(0.0));
+        rider.ankle_torque(&sense(5.2));
+        assert_eq!(rider.drive_speed(), 5.2, "let go: the reference stops at the wheel");
+        assert!(rider.desired_lean().abs() < 1e-12, "no lead, no ask, no drag: upright");
+        // It then holds there through the wheel's ripple (no ratchet).
+        rider.ankle_torque(&sense(5.4));
+        rider.ankle_torque(&sense(5.0));
+        assert_eq!(rider.drive_speed(), 5.2);
+        // A brake the wheel lags, let go at speed: the same from below.
+        rider.set_intent(Intent::Accel(-2.0));
+        for _ in 0..1000 {
+            rider.ankle_torque(&sense(5.2));
+        }
+        assert!((rider.drive_speed() - 4.7).abs() < 1e-9, "{}", rider.drive_speed());
+        rider.set_intent(Intent::Accel(0.0));
+        rider.ankle_torque(&sense(5.0));
+        assert_eq!(rider.drive_speed(), 5.0);
+        // A wheel already past the reference does not pull it along.
+        rider.set_intent(Intent::Accel(1.0));
+        rider.ankle_torque(&sense(5.0));
+        rider.set_intent(Intent::Accel(0.0));
+        rider.ankle_torque(&sense(5.6));
+        assert!((rider.drive_speed() - 5.001).abs() < 1e-9, "{}", rider.drive_speed());
     }
 
     #[test]
