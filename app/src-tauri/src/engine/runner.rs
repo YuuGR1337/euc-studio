@@ -1173,6 +1173,8 @@ impl Sim {
         host.drain_ble_tx(&mut self.ble);
         host.drain_tones(&mut self.tones);
         let ride = host.ride_sound(&self.snapshot);
+        // What touched the ground this sample; FR6 S2 hands it to the audio beside the ride.
+        let _contacts = host.take_contact_digest();
         self.recordings.ingest(&self.snapshot, &self.events, &self.ble, host.outputs().as_ref());
         if self.audio_playing
             && let Some(audio) = &self.audio

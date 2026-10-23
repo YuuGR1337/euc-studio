@@ -290,6 +290,13 @@ DEFAULT 1000 N·m/rad, 60 N·m·s/rad, 180 N·m), so they give under a bump and 
   an 80 % pack with headroom left, so the plant is being calibrated against the owner's ride log.
 - **Foot state.** `Physics::feet()` reports each foot: contact, the pedal's normal load and friction,
   and how far the sole has moved on its deck since the model was built (slip) and above it (lift).
+- **Ground contacts for sound.** `Physics::take_contact_digest()` gives what touched the ground
+  (the geoms of `GROUND_GROUP`) since the last call, for Free Ride's impact and scrape sounds: the
+  tyre's, the shell's and the rider's impulse above their resting load, `∫(F − F_rest)⁺ dt` (the
+  resting load follows the load over 0.5 s for the tyre, 0.2 s for shell and rider, so a body that
+  lies still makes no new thud), the tyre load's fastest rise, the largest shell or pedal contact
+  force with its slip speed (a scrape), and the rider's part with the largest share (head, trunk,
+  arm, leg or foot). It only reads the contacts: the simulation is the same with or without it.
 - **Leaving.** A step-off, a let-go and (contact feet) a lost footing release the pedal welds or
   switch the sole-pedal pairs off, so the feet pass the decks, and stop every joint motor and aid.
   A step-off adds

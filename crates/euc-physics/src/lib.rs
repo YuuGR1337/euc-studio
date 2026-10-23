@@ -19,6 +19,7 @@
 //! the IMU site is the shell frame moved up to the sensor.
 
 mod anthropometry;
+mod contacts;
 pub mod map;
 mod mjcf;
 mod params;
@@ -30,6 +31,7 @@ use euc_telemetry::{BodyInfo, BodyRole, Geom, GeomKind, Pose};
 use mujoco_rs::prelude::*;
 use thiserror::Error;
 
+pub use contacts::ContactDigest;
 pub use map::{GeneratedMapSpec, Ground, GroundSample, HeightMap, MapFeature, MapFeatureKind};
 pub use params::{
     Articulation, Assist, LetGo, ParamError, Rider, RiderControl, RiderModel, Setup, Shapes, Shell, Solid, Suspension,
@@ -612,6 +614,8 @@ pub struct Physics {
     drive_cut: bool,
     /// The streaming world's window and box pool, when the ground is a world.
     world: Option<world::Window>,
+    /// What touched the ground since the host last took it (sound).
+    contacts: contacts::ContactWatch,
 }
 
 impl std::fmt::Debug for Physics {
@@ -685,13 +689,12 @@ impl Physics {
         let tire_friction = [tire.friction, 0.01, tire.crr * tire.radius_m];
         let world =
             setup.world.clone().map(|ground| world::Window::new(ground, &mut data, tire_friction)).transpose()?;
-        let rider = RiderController::new(setup.rider.control);
         let half_weight = 0.5 * setup.rider.mass_kg * setup.gravity;
         let mut physics = Self {
             data,
             ids,
+            rider: RiderController::new(setup.rider.control),
             setup,
-            rider,
             total_mass,
             body_ids,
             machine,
@@ -721,6 +724,7 @@ impl Physics {
             letting_go: None,
             drive_cut: false,
             world,
+            contacts: contacts::ContactWatch::default(),
         };
         physics.settle();
         Ok(physics)
@@ -845,6 +849,12 @@ impl Physics {
     /// The streaming world under this run, if the ground is one.
     pub fn world_ground(&self) -> Option<&WorldGround> {
         self.world.as_ref().map(world::Window::ground)
+    }
+
+    /// What touched the ground since the last call, for sound: the tyre's, the shell's and the
+    /// rider's impacts and the shell's scrape ([`ContactDigest`]). The next digest starts empty.
+    pub fn take_contact_digest(&mut self) -> ContactDigest {
+        self.contacts.take()
     }
 
     /// The world's surface under the wheel as of the last world tick (every
@@ -1260,6 +1270,8 @@ impl Physics {
         self.distance_m += att.speed * TIMESTEP_S;
         // Contact loads are consistent only now: this step's contacts with this step's forces.
         self.soles_loaded = self.feet().is_none_or(|feet| feet.iter().any(|foot| foot.in_contact));
+        let roots = contacts::Roots { wheel: self.ids.wheel, shell: self.ids.shell, bodies: &self.body_ids };
+        self.contacts.observe(&self.data, roots, TIMESTEP_S);
         if let Some(normals) = self.weld_normals() {
             let follow = TIMESTEP_S / SOLE_LOAD_TIME_S;
             for (load, normal) in self.sole_normal_n.iter_mut().zip(normals) {

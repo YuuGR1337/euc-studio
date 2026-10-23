@@ -929,6 +929,9 @@ impl Host for FreeRideHost {
         let surface = self.physics().ground_surface();
         ride_sound(snapshot, pole_pairs, surface)
     }
+    fn take_contact_digest(&mut self) -> Option<euc_physics::ContactDigest> {
+        Some(Self::physics_of(&mut self.session).take_contact_digest())
+    }
     fn handler_counters(&self) -> Option<super::tune::HandlerCounters> {
         self.session.machine().isr_metrics_available().then(|| super::tune::handler_counters(self.session.machine()))
     }
