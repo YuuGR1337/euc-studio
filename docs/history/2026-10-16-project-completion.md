@@ -1,5 +1,8 @@
 # Project Completion Implementation Plan
 
+> **Historical plan (2026-10-16).** Written to steer the agents that built this stage; it describes the state of
+> its date, not the current one. See [project status](../project-status.md) and [the docs index](../README.md).
+
 > **For agentic workers:** Use superpowers:executing-plans or superpowers:subagent-driven-development for assigned tasks. Keep isolated worktrees and file ownership.
 
 **Goal:** Complete the missing desktop workflows and expose physical model limits without claiming unsupported hardware accuracy.
@@ -10,7 +13,7 @@
 
 **Spec:** User approval of the source audit in this chat; docs/roadmap.md; app/DESIGN.md; SAFETY.md.
 
-**Coverage:** [Model and workflow matrix](../../models/coverage-matrix.md). Feature delivery does not establish physical validity.
+**Coverage:** [Model and workflow matrix](../models/coverage-matrix.md). Feature delivery does not establish physical validity.
 
 ## Global Constraints
 
@@ -34,7 +37,7 @@
 
 Checked boxes below identify source implementation and review. They do not claim runtime or hardware validation.
 Automated verification now runs with user authorization. The request ledger records current results and open checks.
-See [requests and phase status](../../project-status.md). An implementation checkbox does not close its runtime acceptance criteria.
+See [requests and phase status](../project-status.md). An implementation checkbox does not close its runtime acceptance criteria.
 
 ## Task 1: Tune workspace (Goodall)
 

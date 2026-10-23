@@ -225,6 +225,11 @@ def main(argv: list[str] | None = None) -> int:
         help="in GitHub Actions: export MUJOCO_DYNAMIC_LINK_DIR and put the DLL folder on PATH (Windows)",
     )
     args = parser.parse_args(argv)
+    if args.github and "GITHUB_ENV" not in os.environ:
+        parser.error(
+            "--github writes to GitHub Actions' environment files and runs only there (GITHUB_ENV is not set); "
+            "run without it to print the library folder, or with --print-env"
+        )
 
     os_name, root = fetch(args.dest.resolve())
     lib = root / "lib"

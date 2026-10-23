@@ -1,24 +1,26 @@
 import { AnimatePresence, motion } from "motion/react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { smooth } from "../../design/motion.ts";
 import { series } from "../../design/tokens.ts";
 import { cx } from "../../lib/cx.ts";
 import { engine, useEngineVersion, useLive } from "../../engine/index.ts";
-import { type CameraMode, useUi } from "../../state/ui.ts";
+import { type CameraMode, cameraContextOf, useUi } from "../../state/ui.ts";
 import { Gauge } from "../../ui/Gauge.tsx";
-import { Crosshair, Orbit, RotateCcw } from "../../ui/icons.tsx";
+import { Crosshair, Orbit, RotateCcw, Unicycle } from "../../ui/icons.tsx";
 import { Button } from "../../ui/Button.tsx";
 import { Pill } from "../../ui/Pill.tsx";
 import { RollingNumber, RollingText } from "../../ui/RollingNumber.tsx";
 import { SegmentedControl } from "../../ui/SegmentedControl.tsx";
 import { Tooltip } from "../../ui/Tooltip.tsx";
 import { Wait } from "../../ui/Wait.tsx";
+import { FreeRideOverlay } from "../freeRide/FreeRideOverlay.tsx";
 import { PitchProtractor } from "./PitchProtractor.tsx";
 import { ManualButton, ManualHud } from "./ManualHud.tsx";
 import { useManualRiding } from "./manual.ts";
 import { LOW_FPS, type Quality } from "./quality.ts";
 import { Scene } from "./Scene.tsx";
 import { WheelOutputs } from "./WheelOutputs.tsx";
+import { useSoundMix } from "./useSoundMix.ts";
 import { slopeAt } from "./terrain.ts";
 import { type GroundView, sampleGround } from "./ground.ts";
 import { shellHeading, wheelPosition } from "./poses.ts";
@@ -254,11 +256,16 @@ export function Viewport({
 }) {
   const camera = useUi((s) => s.camera);
   const setCamera = useUi((s) => s.setCamera);
+  useSoundMix();
   const [scene, setScene] = useState<{ quality: Quality; renderer: string } | null>(null);
   const [drawn, setDrawn] = useState(false);
   const [worldError, setWorldError] = useState<string | null>(null);
   const ready = SCENE_OFF || scene !== null;
   useManualRiding(active);
+  // Ride and Free Ride each keep their own camera (Side and Chase by default).
+  useEngineVersion();
+  const runMode = engine.status.runMode;
+  useEffect(() => useUi.getState().setCameraContext(cameraContextOf(runMode)), [runMode]);
 
   return (
     <div
@@ -304,10 +311,17 @@ export function Viewport({
               onValueChange={setCamera}
               options={[
                 {
+                  value: "chase",
+                  label: "Chase",
+                  icon: <Unicycle />,
+                  tooltip: "Camera behind the rider; it widens with speed",
+                  shortcut: "c",
+                },
+                {
                   value: "follow",
-                  label: "Follow",
+                  label: "Side",
                   icon: <Crosshair />,
-                  tooltip: "Camera follows the wheel",
+                  tooltip: "Camera follows the wheel from the side",
                   shortcut: "c",
                 },
                 {
@@ -331,6 +345,7 @@ export function Viewport({
           </div>
           <div className="absolute top-0 left-1/2 -translate-x-1/2">
             <ManualHud />
+            <FreeRideOverlay />
           </div>
           <div className="pointer-events-auto">
             <Pitch />

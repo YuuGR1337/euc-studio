@@ -5,7 +5,17 @@ import globals from "globals";
 import tseslint from "typescript-eslint";
 
 export default tseslint.config(
-  { ignores: ["dist", "node_modules", "src-tauri", "test-results", "playwright-report"] },
+  // src/vendor: third-party source kept as published (see its README).
+  {
+    ignores: [
+      "dist",
+      "node_modules",
+      "src-tauri",
+      "test-results",
+      "playwright-report",
+      "src/vendor",
+    ],
+  },
   {
     files: ["**/*.{ts,tsx}"],
     extends: [js.configs.recommended, ...tseslint.configs.strict],

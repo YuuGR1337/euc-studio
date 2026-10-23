@@ -1,7 +1,7 @@
 import { ContactShadows, Environment, Grid, Lightformer } from "@react-three/drei";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { useReducedMotion } from "motion/react";
-import { Suspense, useEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { accents, surface } from "../../design/tokens.ts";
 import { compare, useCompareVersion, type CompareRun } from "../../engine/compare.ts";
@@ -19,6 +19,9 @@ import {
   rendererName,
 } from "../ride/quality.ts";
 import { TerrainStrip } from "../ride/TerrainStrip.tsx";
+import { Outdoor } from "../ride/outdoor/Outdoor.tsx";
+import { WorldCamera, WorldSurface } from "../ride/WorldSurface.tsx";
+import { WorldView } from "../ride/worldView.ts";
 import { useWheelModel } from "../ride/wheelModel.ts";
 
 // The Compare workspace's 3D view: run A drawn normally, run B as a translucent ghost over it.
@@ -49,6 +52,19 @@ function wheelOf(run: CompareRun, out: THREE.Vector3): THREE.Vector3 | null {
   const o = i * POSE_FLOATS;
   return out.set(p[o] as number, p[o + 2] as number, -(p[o + 1] as number));
 }
+
+/** A run's rider body (the "rider" role) in three.js coordinates, or null without poses. */
+function bodyOf(run: CompareRun, out: THREE.Vector3): THREE.Vector3 | null {
+  const p = run.latest.poses;
+  const i = run.bodies.findIndex((b) => b.role === "rider");
+  if (!p || i < 0) return null;
+  const o = i * POSE_FLOATS;
+  return out.set(p[o] as number, p[o + 2] as number, -(p[o + 1] as number));
+}
+
+/** On a world, the rings, the shadows and the contact pools follow run A. */
+const followA = (out: THREE.Vector3) => wheelOf(compare.a, out);
+const subjectA = { wheel: followA, body: (out: THREE.Vector3) => bodyOf(compare.a, out) };
 
 /** Where each run's wheel is: from its pose (live), or by distance from A, which stays put (demo). */
 function wheels(): void {
@@ -232,6 +248,9 @@ export function CompareScene({ active, onReady, onFirstFrame }: CompareSceneProp
   const high = quality === "high";
   const colour = accents[accent].accent;
   const live = compare.kind === "live";
+  // A `[world]` scenario: both runs ride the same city, drawn once under its own sky.
+  const frame = compare.world ?? null;
+  const world = useMemo(() => (frame ? new WorldView(frame) : null), [frame]);
 
   return (
     <Canvas
@@ -251,11 +270,19 @@ export function CompareScene({ active, onReady, onFirstFrame }: CompareSceneProp
       }}
       aria-label="3D view of both runs: A solid, B as a ghost"
     >
-      <color attach="background" args={[surface.bg]} />
-      <fog attach="fog" args={[surface.bg, 10, 45]} />
+      {!world && <color attach="background" args={[surface.bg]} />}
+      {!world && <fog attach="fog" args={[surface.bg, 10, 45]} />}
       <Suspense fallback={null}>
-        <Lights />
-        {compare.terrain ? (
+        {world ? (
+          <>
+            <Outdoor world={world} quality={quality} follow={subjectA} />
+            <WorldSurface world={world} quality={quality} follow={followA} />
+            <WorldCamera />
+          </>
+        ) : (
+          <Lights />
+        )}
+        {world ? null : compare.terrain ? (
           <group rotation={[-Math.PI / 2, 0, 0]}>
             <TerrainStrip profile={compare.terrain} />
           </group>
@@ -277,18 +304,21 @@ export function CompareScene({ active, onReady, onFirstFrame }: CompareSceneProp
             </>
           )
         )}
-        <FollowA>
-          <ContactShadows
-            key={quality}
-            position={[0, 0.001, 0]}
-            opacity={0.7}
-            scale={3.5}
-            blur={2.2}
-            far={0.9}
-            resolution={high ? 512 : 256}
-            frames={high ? Infinity : 1}
-          />
-        </FollowA>
+        {/* On a world the ground's contact pools (Outdoor) ground the wheel instead. */}
+        {!world && (
+          <FollowA>
+            <ContactShadows
+              key={quality}
+              position={[0, 0.001, 0]}
+              opacity={0.7}
+              scale={3.5}
+              blur={2.2}
+              far={0.9}
+              resolution={high ? 512 : 256}
+              frames={high ? Infinity : 1}
+            />
+          </FollowA>
+        )}
       </Suspense>
       <FollowCamera still={!high} />
       <FirstFrame onFirstFrame={onFirstFrame} />

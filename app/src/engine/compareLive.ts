@@ -25,6 +25,7 @@ import {
   type ScenarioInfo,
   type TerrainProfile,
 } from "./types.ts";
+import { validFrame, type WorldFrame } from "./world.ts";
 
 type Message =
   | {
@@ -45,6 +46,7 @@ type Message =
       bodies_a: BodyInfo[];
       bodies_b: BodyInfo[];
       terrain: TerrainProfile | null;
+      world?: WorldFrame | null;
       tolerance_file: string;
       tolerance_note: string | null;
     }
@@ -154,6 +156,7 @@ export class LiveCompare implements CompareClient {
   status: CompareStatus = { state: "idle", message: "", t: 0, duration: 0, rtf: 0 };
   summary: CompareSummary | null = null;
   terrain: TerrainProfile | null = null;
+  world: WorldFrame | null = null;
   request: CompareRequest | null = null;
   tolerance: CompareClient["tolerance"] = null;
   streamHz = 50;
@@ -257,6 +260,7 @@ export class LiveCompare implements CompareClient {
         for (const buffer of early?.a ?? []) this.a.push(buffer);
         for (const buffer of early?.b ?? []) this.b.push(buffer);
         this.terrain = m.terrain;
+        this.world = validFrame(m.world) ? m.world : null;
         this.streamHz = m.stream_hz;
         this.tolerance = { file: m.tolerance_file, note: m.tolerance_note };
         this.status = { ...this.status, duration: m.duration_s };

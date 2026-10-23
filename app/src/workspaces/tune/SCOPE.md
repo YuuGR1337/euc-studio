@@ -109,12 +109,13 @@ Memory writes remain unsupported. Quirk switches restart the run on Ours-custom 
 
 - Nine trigger state-machine tests cover capture, pause, missing values, termination, bounds, resets, and manual Hold.
 - Eleven Chromium checks use the production workspace and controlled transport replies. They exercise capture controls, stale responses, quick resets, and 1280×720 layout.
-- The complete frontend suite passes 259 tests. TypeScript and full frontend ESLint checks pass.
+- The complete frontend suite passed 259 tests when Tune landed (2026-10-16). TypeScript and full frontend ESLint checks passed.
 - Separate native acceptance passes sixteen tests, including cached stock and actual runner lifecycle cases. Browser fixtures do not establish native firmware behavior. Full Tauri IPC invocation remains unchecked.
 
 See [EXTENSIONS.md](EXTENSIONS.md) for capture and handler-counter details.
 
-Changed files:
+Files of the first Tune change (later changes added `QuirkPanel.tsx`, `TriggerControls.tsx` and
+`HandlerTable.tsx`):
 
 - `app/src/engine/tune.ts`
 - `app/src/workspaces/tune/TuneWorkspace.tsx`

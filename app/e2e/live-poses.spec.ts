@@ -39,6 +39,9 @@ const capsule = (radius: number, half: number, z: number) => ({
   pos: [0, 0, z],
   quat: [1, 0, 0, 0],
 });
+// The feet carry the engine's sole box, so the rider figure binds to these bodies as it does to
+// the engine's (riderFigure/skeleton.ts).
+const sole = { kind: "box", size: [0.12, 0.045, 0.03], pos: [0.03, 0, -0.05], quat: [1, 0, 0, 0] };
 const bodies = BODIES.map(([name, role]) => ({
   name,
   role,
@@ -47,7 +50,9 @@ const bodies = BODIES.map(([name, role]) => ({
       ? []
       : name === "rider"
         ? [capsule(0.13, 0.2, 0.25), { ...capsule(0.1, 0, 0.62), kind: "sphere" }]
-        : [capsule(0.06, 0.18, -0.2)],
+        : name.endsWith("_foot")
+          ? [sole]
+          : [capsule(0.06, 0.18, -0.2)],
 }));
 /** A finished "Ride to 20 km/h and stop" at 40 s: physics frame (z up), w x y z quaternions. */
 const FINAL: Record<string, [number, number, number]> = {
@@ -103,8 +108,9 @@ test.afterAll(async () => {
   await server?.close();
 });
 
-async function open(page: Page) {
-  await page.goto(base);
+/** The Ride workspace; `query` "?quality=low" gives the low-quality view (a demand frameloop). */
+async function open(page: Page, query = "") {
+  await page.goto(base.replace("#/ride", `${query}#/ride`));
   await expect(page.getByTestId("viewport")).toHaveAttribute("data-scene", "ready", {
     timeout: 60_000,
   });
@@ -116,15 +122,22 @@ function send(page: Page, message: unknown) {
 }
 
 /**
- * One sample at `t` with the poses of FINAL and `speed` (other channels 0), as
+ * One sample at `t` with the poses of FINAL moved `dx` along x and `speed` (other channels 0), as
  * crates/euc-telemetry lays out a batch: to the ride's stream, or to a comparison's run A or B.
  */
 function sendBatch(
   page: Page,
   t: number,
-  { to = "stream", speed = 0 }: { to?: "stream" | "a" | "b"; speed?: number } = {},
+  {
+    to = "stream",
+    speed = 0,
+    dx = 0,
+  }: { to?: "stream" | "a" | "b"; speed?: number; dx?: number } = {},
 ) {
-  const poses = BODIES.flatMap(([name]) => [...(FINAL[name] ?? [0, 0, 0]), 1, 0, 0, 0]);
+  const poses = BODIES.flatMap(([name]) => {
+    const [x, y, z] = FINAL[name] ?? [0, 0, 0];
+    return [x + dx, y, z, 1, 0, 0, 0];
+  });
   const layout = {
     header: [BATCH_MAGIC, BATCH_VERSION, BATCH_FLAG_POSES, BATCH_HEADER_BYTES],
     channels: CHANNELS.length,
@@ -162,11 +175,16 @@ function sendBatch(
   );
 }
 
-function status(page: Page, state: string, t: number) {
+function status(
+  page: Page,
+  state: string,
+  t: number,
+  { epoch = 1, firmware = "stock" }: { epoch?: number; firmware?: string } = {},
+) {
   return send(page, {
     type: "status",
     run_mode: "scenario",
-    run_epoch: 1,
+    run_epoch: epoch,
     buttons_ready: false,
     power_button_ready: false,
     state,
@@ -175,7 +193,7 @@ function status(page: Page, state: string, t: number) {
     build: "Fixture",
     backend: "fixture",
     scenario: "ride-20kmh-stop",
-    firmware: "stock",
+    firmware,
     t_s: t,
     rtf: 0,
     target_rtf: 1,
@@ -199,6 +217,21 @@ function drawnBodies(page: Page) {
     },
     BODIES.map(([name]) => name) as string[],
   );
+}
+
+/** The rider figure: whether its rig is mounted and shown, and where its pelvis is (physics frame). */
+function drawnFigure(page: Page) {
+  return page.evaluate(() => {
+    const get = (window as unknown as { __eucScene?: () => { scene: import("three").Scene } })
+      .__eucScene;
+    const rig = get?.().scene.getObjectByName("rider-figure-rig");
+    const pelvis = rig?.getObjectByName("rider-pelvis");
+    return {
+      mounted: !!rig,
+      shown: !!rig?.visible,
+      pelvis: pelvis ? pelvis.position.toArray().map((v) => +v.toFixed(3)) : null,
+    };
+  });
 }
 
 test("draws a finished run's last frame after a reload, though the frame came before its bodies", async ({
@@ -229,8 +262,11 @@ test("hides bodies until a frame of them arrives, never at the origin", async ({
   await send(page, { type: "bodies", bodies });
   await status(page, "paused", 0);
   await expect.poll(async () => (await drawnBodies(page)).every((b) => b.at)).toBe(true);
+  await expect.poll(async () => (await drawnFigure(page)).mounted).toBe(true);
   await page.waitForTimeout(500);
   expect((await drawnBodies(page)).map((b) => b.visible)).toEqual(BODIES.map(() => false));
+  // The figure is not a child of the body groups: it hides itself until all its bodies are posed.
+  expect((await drawnFigure(page)).shown).toBe(false);
   await sendBatch(page, 40);
   await expect
     .poll(async () => (await drawnBodies(page)).map((b) => b.visible))
@@ -238,6 +274,98 @@ test("hides bodies until a frame of them arrives, never at the origin", async ({
   expect((await drawnBodies(page)).find((b) => b.name === "left_foot")?.at).toEqual([
     80, 0.1, 0.307,
   ]);
+  await expect
+    .poll(() => drawnFigure(page))
+    .toEqual({ mounted: true, shown: true, pelvis: [80.02, 0, 1.171] });
+
+  // A new body list (the next run) hides the bodies and the figure again until that list's first
+  // frame. LiveBodies asks for that frame itself when the list changes, in every view.
+  await send(page, { type: "reset", scenario: "ride-20kmh-stop" });
+  await send(page, { type: "bodies", bodies });
+  await status(page, "paused", 0);
+  const drawn = async () => [
+    (await drawnFigure(page)).shown,
+    ...(await drawnBodies(page)).map((b) => b.visible),
+  ];
+  await expect.poll(drawn).toEqual([false, ...BODIES.map(() => false)]);
+  await page.waitForTimeout(500);
+  expect((await drawnFigure(page)).shown).toBe(false);
+  await sendBatch(page, 40);
+  await expect.poll(async () => (await drawnFigure(page)).shown).toBe(true);
+});
+
+/** How many frames the renderer has drawn: the low-quality view draws only on request. */
+function framesDrawn(page: Page) {
+  return page.evaluate(() => {
+    const get = (
+      window as unknown as {
+        __eucScene?: () => { gl: { info: { render: { frame: number } } } };
+      }
+    ).__eucScene;
+    return get?.().gl.info.render.frame ?? 0;
+  });
+}
+
+/** A finished run (status run number 1) drawn at FINAL. */
+async function finishedRun(page: Page) {
+  await send(page, { type: "reset", scenario: "ride-20kmh-stop" });
+  await send(page, { type: "bodies", bodies });
+  await sendBatch(page, 40);
+  await status(page, "completed", 40);
+  await expect
+    .poll(async () => (await drawnBodies(page)).map((b) => b.visible))
+    .toEqual(BODIES.map(() => true));
+}
+
+// The low-quality view draws only on request: on the Ticker's clock when the run moved, on an
+// orbit drag, or when the scene graph changes. These checks never ask for a frame themselves. They
+// wait on what the page did, never on a fixed time: a slow page (a loaded machine, a first shader
+// compile) only takes longer. A missed redraw still fails, since nothing else redraws this view.
+
+test("low quality: a new body list with the same names hides the old bodies at once", async ({
+  page,
+}) => {
+  await open(page, "?quality=low");
+  await finishedRun(page);
+  // The next run, as an attach sends it: a reset, then a new list with the same names. The
+  // reset's own frame is drawn first; only the new list can ask for the frame that hides the
+  // finished run's bodies.
+  const before = await framesDrawn(page);
+  await send(page, { type: "reset", scenario: "ride-20kmh-stop" });
+  await expect.poll(() => framesDrawn(page)).toBeGreaterThan(before);
+  await send(page, { type: "bodies", bodies });
+  await expect
+    .poll(async () => (await drawnBodies(page)).map((b) => b.visible))
+    .toEqual(BODIES.map(() => false));
+  expect((await drawnFigure(page)).shown).toBe(false);
+});
+
+test("low quality: a paused new run after a firmware switch shows its first pose without play", async ({
+  page,
+}) => {
+  await open(page, "?quality=low");
+  await finishedRun(page);
+  // A firmware switch rebuilds a finished run paused. The runner sends a reset and an empty body
+  // list, the new run's status, then a reset, its bodies and one sample at t 0. A reset sets t
+  // to 0 too, so the sample's time alone does not move the Ticker.
+  const next = { epoch: 2, firmware: "ours-clean" };
+  await send(page, { type: "reset", scenario: "ride-20kmh-stop" });
+  await send(page, { type: "bodies", bodies: [] });
+  await status(page, "starting", 0, next);
+  await expect
+    .poll(async () => (await drawnBodies(page)).map((b) => b.visible))
+    .toEqual(BODIES.map(() => null));
+  await send(page, { type: "reset", scenario: "ride-20kmh-stop" });
+  await send(page, { type: "bodies", bodies });
+  await expect
+    .poll(async () => (await drawnBodies(page)).map((b) => b.visible))
+    .toEqual(BODIES.map(() => false));
+  await sendBatch(page, 0, { dx: -70 });
+  await status(page, "paused", 0, next);
+  await expect
+    .poll(async () => (await drawnBodies(page)).find((b) => b.name === "left_foot"))
+    .toEqual({ name: "left_foot", visible: true, at: [10, 0.1, 0.307] });
+  await expect.poll(async () => (await drawnFigure(page)).shown).toBe(true);
 });
 
 /** What a comparison's runs hold: sample times, speeds and the latest frame's float count. */

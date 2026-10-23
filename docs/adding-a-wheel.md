@@ -38,7 +38,7 @@ The loader can accept text for a core that the simulator cannot run.
 | RISC-V | Unsupported | Add CPU, trap, interrupt, memory, image, startup, and toolchain support. |
 | Other wheel protocols | Begode code supplies the current protocol behavior | Add protocol code and connect each caller. A profile string does not supply a plugin. |
 | Several CPUs in one wheel | `Machine` owns one CPU | Implement node scheduling and communication before claiming this support. |
-| OTA and real flashing | No implemented `euc flash` command | Complete M6 separately, including recovery and safety gates. |
+| OTA and real flashing | `euc flash` runs the gated flasher against a simulated wheel and the offline gates only ([flasher](spec/flasher.md)); no real flash | A new wheel needs its own bootloader facts, recovery image and gates; complete M6 first. |
 
 `crates/euc-sim/src/cpu.rs` selects `own` or optional `unicorn`.
 Unicorn is a development oracle under the `unicorn` feature.
@@ -234,8 +234,8 @@ Resolve each required status transition, interrupt, DMA request, and reset effec
 `Machine` uses the Cortex-M exception controller in `crates/euc-core/src/nvic.rs`.
 Its default-handler detection currently scans vector entries 16 through 75.
 Review `crates/euc-sim/src/machine.rs` for another vector count.
-CPU timing uses fixed CPI and estimated exception costs.
-See [CPU timing](models/cpu-timing.md) before making timing claims.
+CPU timing uses fixed CPI and estimated exception costs by default; `--timing flash` selects the per-instruction
+flash timing model of our core. See [CPU timing](models/cpu-timing.md) before making timing claims.
 
 ## 5. Describe the plant and protocol
 
@@ -270,7 +270,7 @@ Another protocol needs explicit caller changes and evidence.
 The desktop also uses Begode decoders in `app/src-tauri/src/engine/phone.rs` and `host.rs`.
 Review output device names and types in that directory.
 `app/src-tauri/src/engine/firmware.rs` loads embedded profiles and output layouts.
-`app/src-tauri/src/engine/scenarios.rs` embeds two scenarios and scans root scenario files in development builds.
+`app/src-tauri/src/engine/scenarios.rs` embeds every shipped root scenario and scans root scenario files in development builds.
 A nested scenario folder does not enter that scan.
 Add release scenario registration separately when desktop support enters scope.
 
@@ -328,7 +328,7 @@ Our image needs a valid `.euc_info` block for the board.
 Stock images need a matching pin when that block is absent.
 A sealed block also needs matching length and CRC.
 The gate does not authenticate signatures.
-The CLI does not implement `euc image seal`.
+`euc image seal` fills the length and CRC of an unsigned development BIN image.
 See [the image specification](spec/euc-info.md) for the format and planned signature field.
 
 The simulator file path does not automatically run the complete image gate.
@@ -403,7 +403,7 @@ Use public synthetic inputs and generic rider settings.
 ### Required evidence checklist
 
 - [ ] Record revision, profile origin, wheel ID, board revision, and firmware hashes.
-- [ ] Record CPU backend, CPI, exception timing, quantum size, sample rate, seed, and plant grid.
+- [ ] Record CPU backend, timing model (`fixed` or `flash`), CPI, exception timing, quantum size, sample rate, seed, and plant grid.
 - [ ] Record settings, generic rider inputs, assist settings, terrain, and model uncertainties.
 - [ ] Show stock boot, telemetry, safe command replies, resets, and calibration state.
 - [ ] Show balance, acceleration, braking, and stopping with the live plant.
@@ -479,7 +479,7 @@ An image gate result does not prove OTA recovery.
 - [ ] Obtain separate hardware authorization and a bench plan.
 - [ ] Resolve unknown MCU, sensor, gate-driver, drive-mode, and dead-time facts.
 - [ ] Establish a complete private SWD backup, including the bootloader, before the first flash.
-- [ ] Establish the official stock image as the first flash under the future flasher gates.
+- [ ] Establish the official stock image as the first flash under the flasher gates ([flasher](spec/flasher.md)).
 - [ ] Demonstrate update fault recovery in simulation before any hardware update.
 - [ ] Use a current-limited supply and keep the wheel off the ground.
 - [ ] Compare bench traces with simulator traces before any ride consideration.
@@ -487,4 +487,4 @@ An image gate result does not prove OTA recovery.
 Keep backups and bench captures private.
 Do not issue real service or drive-mode commands from this guide.
 Do not infer hardware safety from estimated plant values.
-Report remaining implementation gaps to the integration owner before release claims.
+Report remaining implementation gaps in an issue before release claims.

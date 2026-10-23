@@ -24,6 +24,16 @@ phase_start_s = 6.0
 speed_kmh = [[0, 0]]
 settings = "tarik-2026-10-15"
 
+# Plain flat floor on purpose (the only shipped scenario off the city): in the city (seed 42, the
+# spawn arterial, ideal road) the height field is not mirror-symmetric as the flat plane is, so the
+# ride gets a small roll; during the full-battery brake from 70 km/h the rigid rider's roll grows
+# from 0.5 deg at 22.0 s to 9.7 deg at 23.5 s and the wheel falls at 23.68 s at 15 km/h, on stock
+# and compat, at all three quanta. That is the rider model's marginal roll stability under hard
+# braking, not the firmware: docs/models/scenarios.md, "City world (W2)", has the roll trace.
+# Back to the city once the rigid rider's roll control holds a hard brake (open item).
+[world]
+flat = "City height-field asymmetry exposes marginal roll stability of the rigid rider under hard braking (roll 0.5 -> 9.7 deg in 1.5 s, falls at 15 km/h); flat until the roll-control fix (open item; roll trace in docs/models/scenarios.md, City world (W2))."
+
 [rider]
 model = "rigid_ankle_v1"
 mass_kg = 80.0

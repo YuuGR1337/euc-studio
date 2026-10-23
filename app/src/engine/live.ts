@@ -427,6 +427,11 @@ export class LiveEngine implements EngineClient {
     return this.requestAudioStatus("engine_sound", { enabled });
   }
 
+  async setSoundMix(gain: number, ride: boolean): Promise<void> {
+    await this.connected;
+    await invoke("engine_sound_mix", { volume: Math.min(1, Math.max(0, gain)), bed: ride });
+  }
+
   refreshAudioStatus(): Promise<void> {
     return this.requestAudioStatus("engine_audio_status");
   }

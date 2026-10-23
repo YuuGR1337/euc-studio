@@ -180,13 +180,13 @@ PYO3_PYTHON=/opt/homebrew/bin/python3 cargo clippy --manifest-path app/src-tauri
 | ----------------------------------------- | ------------------------- | ------------------------------------------------------- |
 | Production queue and responder            | Complete                  | No substitute transport                                 |
 | Real mapped Session and RideHost          | Complete                  | Cached pinned stock image                               |
-| Actual runner thread and command ordering | Complete                  | Uses the parent's test-only audio-free constructor      |
+| Actual runner thread and command ordering | Complete                  | Uses a test-only audio-free constructor                 |
 | Tauri command wrapper and webview IPC     | Incomplete                | Tauri mock runtime support in the test dependency setup |
 | Renderer Hold/Rearm generation            | Separate browser evidence | No native acquisition API owns these generations        |
 | Trigger capture storage                   | Frontend scope            | Native snapshots remain read-only requests              |
-| Raw memory writes and runtime quirks      | Not implemented           | Outside this acceptance work                            |
+| Raw memory writes and runtime quirks      | Not implemented           | Outside this acceptance work (runtime quirks: SIL, M5)  |
 
-The parent supplies `Runner::start_without_audio_for_test(factory, scenario, backend, recordings, manual)`.
+The integration supplies `Runner::start_without_audio_for_test(factory, scenario, backend, recordings, manual)`.
 That test-only constructor uses the common startup path with no native audio handle.
 Production `Runner::start` still initializes native audio before simulation startup.
 These tests make no claim about physical audio output or startup sound.

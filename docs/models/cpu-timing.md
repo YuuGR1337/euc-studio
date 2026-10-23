@@ -171,6 +171,9 @@ It prints both timings' numbers.
 
 ## Scenario robustness on stock
 
+These runs used the rigid rider on the flat floor: they predate the articulated default and the scenarios on the
+city (W2). The verdicts on the city are in [project status](../project-status.md#city-world-w2-2026-10-23).
+
 All 20 shipped scenarios ran on stock at quanta 4000, 3000 and 2000 with both timings, from `63801a2` plus these changes.
 The fixed-timing reports match the accepted baseline (`target/fw-scratch/resume-accepted/matrix/`) byte for byte, except wall time.
 
@@ -347,8 +350,8 @@ snapshot. Fixed-CPI prototype runs excluded exception overhead; the flash-model 
   18 MHz; one IMU read is about 0.5 k cycles per tick (0.3 %).
 - **ADC conversion time (not modeled).** The FOC is interrupt-driven (`TIM8_UP` starts the
   injected group, `ADC1_2` on JEOC runs the loop); nothing busy-waits, so the CPU load is the same.
-- **The app's "ISR 31 %".** It comes from the synthetic source (`app/src/sim/synthetic.ts`); the
-  live engine never fills `isr_load_pct`.
+- **The app's "ISR 31 %".** It came from the synthetic source (`app/src/sim/synthetic.ts`). Since then the live
+  engine fills `isr_load_pct` from the CPU's exception cycles when exception timing is on (`Session::step`).
 
 Not modeled, small (ESTIMATE, not checked): the RTC `RTOFF` wait after clearing `SECF` (up to
 3 RTC clocks, 48 µs per tick, at most 2.4 %), and bus contention from the WS2812 DMA at 800 kHz

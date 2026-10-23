@@ -1,5 +1,6 @@
 // Manual riding in the Ride workspace. W/S or Up/Down lean forward and back, A/D or Left/Right
-// turn, a gamepad's left stick does both; the first push takes the rider from the scenario. While
+// turn, a gamepad's left stick does both (its triggers lean and its D-pad acts as the arrows);
+// the first push takes the rider from the scenario. While
 // riding by hand, Space steps off and Esc gives the rider back to the scenario (Space pauses the
 // run otherwise). M toggles it from anywhere in Ride. The input goes to the engine at most
 // 30 times a second, and only when it changed.
@@ -8,6 +9,7 @@ import { useEffect } from "react";
 import { create } from "zustand";
 import { engine } from "../../engine/index.ts";
 import { onFrame } from "../../lib/frameloop.ts";
+import { readPad } from "../../lib/rideControls.ts";
 import {
   KeyRider,
   NEUTRAL,
@@ -16,7 +18,6 @@ import {
   isNeutral,
   rideAction,
   sameInput,
-  stickInput,
 } from "../../lib/riderInput.ts";
 import { useUi } from "../../state/ui.ts";
 
@@ -148,7 +149,13 @@ function tick(now: number, dt: number) {
     return;
   }
   const pad = firstPad();
-  const stick = pad ? stickInput(pad.axes[0] ?? 0, pad.axes[1] ?? 0) : NEUTRAL;
+  // The shared gamepad reading (lib/rideControls.ts): the stick past its radial dead zone, the
+  // triggers (right forward, left back) and the D-pad, the strongest push per axis.
+  const reading = pad ? readPad(pad) : null;
+  const stick: RiderInput =
+    reading && !reading.invalid
+      ? { lean: reading.intent.lean, steer: reading.intent.steer }
+      : NEUTRAL;
   if (!isNeutral(stick)) take("gamepad");
   if (!useManual.getState().active) return;
   const input = combine(keys.step(dt), stick);

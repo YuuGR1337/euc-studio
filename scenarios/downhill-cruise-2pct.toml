@@ -13,10 +13,22 @@ release_s = 2.5
 speed_kmh = [[0, 0], [6, 0], [10, 20], [34, 20], [38, 0]]
 settings = "tarik-2026-10-15"
 
-[terrain]
+# City world (docs/models/world.md): seed 42, from the spawn on the arterial (row 0) heading east;
+# the whole city falls 2 % along the ride from 25 m (built up over 10 m): a [world] incline
+# in place of the old [terrain] strip. Otherwise an ideal road (hills = 0, no road defects).
+[world]
+seed = 42
+revision = 2
 slope_pct = -2.0
 slope_start_m = 25.0
-length_m = 250.0
+
+[world.densities]
+hills = 0.0
+potholes = 0.0
+manholes = 0.0
+cracks = 0.0
+rough_patches = 0.0
+wet_patches = 0.0
 
 [[expect]]
 check = "upright"

@@ -1,6 +1,6 @@
 [package]
 name = "euc-cli"
-description = "The `euc` command: fetch, import and validate firmware for EUC Studio"
+description = "The `euc` command: firmware, images, simulator runs, recordings, BLE replay and gated flashing for EUC Studio"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

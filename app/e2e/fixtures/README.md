@@ -1,4 +1,19 @@
-# Display layout fixture
+# e2e fixtures
+
+The browser suites with their own `e2e/*.config.ts` run the real frontend against controlled fixtures. No fixture
+runs firmware, the simulator or native audio. Run a suite from `app/`, for example
+`pnpm exec playwright test -c e2e/live-poses.config.ts`.
+
+| Fixture                                               | Suites                                 | What it is                                                                                                                        |
+| ----------------------------------------------------- | -------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `live-wire.ts`                                        | live-poses, camera-modes, rider-figure | Stands in for the Tauri transport of the live and compare engine clients; the spec delivers messages and batches in Tauri's order |
+| `rider-poses.json`                                    | rider-figure                           | Rider body lists and pose frames taken from engine recordings of scenario runs; no script regenerates it                          |
+| `free-ride-controls.ts`                               | free-ride-controls                     | An engine that answers as the play-mode Free Ride engine does                                                                     |
+| `tune-probes.ts`                                      | tune-capture                           | Controlled Tune catalog and snapshot replies                                                                                      |
+| `world-chunks.ts`, `world-payload.ts`                 | world-view                             | Synthetic city chunks; with `WORLD_PAYLOAD_BIN` set to euc-world's payload example, real generated chunks instead                 |
+| `wheel-output-engine.ts`, `wheel-output-layouts.json` | wheel-outputs                          | Display and light layouts from the profile, with a controlled engine (below)                                                      |
+
+## Display layout fixture
 
 `wheel-output-layouts.json` contains public geometry from the Begode Extreme profile.
 The native `DisplayLayout::parse` and `LightsLayout::parse` adapters export the geometry.

@@ -1,5 +1,8 @@
 # Desktop change review
 
+> **Historical review (2026-10-16).** Written during the agent-built desktop work; it describes the state of its
+> date, not the current one. See [project status](../project-status.md) and [the docs index](../README.md).
+
 ## Review steps
 
 | Step | State | Evidence |

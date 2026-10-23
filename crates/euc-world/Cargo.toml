@@ -17,6 +17,9 @@ crc32fast = { workspace = true, optional = true }
 miniz_oxide = { version = "0.8", optional = true, default-features = false, features = ["with-alloc"] }
 serde.workspace = true
 
+[dev-dependencies]
+serde_json.workspace = true
+
 [[bin]]
 name = "euc-world-preview"
 path = "src/bin/preview.rs"

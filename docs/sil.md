@@ -93,7 +93,7 @@ again. Two sessions at once (Compare) run two copies.
 **Image and probes.** A SIL machine boots a synthetic 1 KiB image: a vector table whose reset vector names thread
 mode and whose handled interrupts each name a context of their own (every other one shares the default handler,
 which the machine reports as a blocker, as for an image). The probes are those of
-`profiles/begode-extreme/probes.toml` (`tools/gen_probes.py --emit-sil` writes the same list for the library,
+`profiles/begode-extreme/probes.toml` (`firmware/tools/gen_probes.py --emit-sil` writes the same list for the library,
 which measures its own offsets). After every quantum the backend copies them into emulated SRAM from
 `0x20000000`, so `Session` reads them like an image's variables: cut-off flags, scenario checks, `euc sim
 compare`, recordings and Tune work unchanged.

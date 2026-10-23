@@ -53,6 +53,9 @@ pub enum RiderModel {
     ArticulatedSagittalV1,
     /// The articulated model with each sole on its own pedal through contact.
     ArticulatedContactV1,
+    /// The articulated model with lateral legs (hip ab/adduction and rotation, ankle roll), feet
+    /// welded to the pedals.
+    ArticulatedLateralV1,
 }
 
 impl RiderModel {
@@ -62,6 +65,7 @@ impl RiderModel {
             Self::RigidAnkleV1 => "rigid_ankle_v1",
             Self::ArticulatedSagittalV1 => "articulated_sagittal_v1",
             Self::ArticulatedContactV1 => "articulated_contact_v1",
+            Self::ArticulatedLateralV1 => "articulated_lateral_v1",
         }
     }
 }
@@ -72,6 +76,7 @@ impl From<euc_physics::RiderModel> for RiderModel {
             euc_physics::RiderModel::RigidAnkleV1 => Self::RigidAnkleV1,
             euc_physics::RiderModel::ArticulatedSagittalV1 => Self::ArticulatedSagittalV1,
             euc_physics::RiderModel::ArticulatedContactV1 => Self::ArticulatedContactV1,
+            euc_physics::RiderModel::ArticulatedLateralV1 => Self::ArticulatedLateralV1,
         }
     }
 }
@@ -92,12 +97,25 @@ pub struct ModelAids {
     /// External yaw torque cap, N·m.
     pub steer_max_nm: f64,
     /// External roll stiffness on the articulated upper body, N·m/rad: contact feet do not hold
-    /// the body to the shell (`articulated_contact_v1` only; absent for the other models).
+    /// the body to the shell, and the lateral legs are only as strong as a person's
+    /// (`articulated_contact_v1` and `articulated_lateral_v1`; absent for the other models). The
+    /// lateral rider's upper-body and shell springs lean wheel and rider together, as one machine.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub upper_body_roll_stiffness: f64,
     /// External roll damping on the articulated upper body, N·m·s/rad (as above).
     #[serde(default, skip_serializing_if = "is_zero")]
     pub upper_body_roll_damping: f64,
+    /// External yaw stiffness on the articulated upper body, N·m/rad: the yaw aid turned the
+    /// upper body with the shell (`articulated_lateral_v1` before its hips turned the body with
+    /// the shell; absent since, and for the other models).
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub upper_body_steer_kp: f64,
+    /// External yaw damping on the articulated upper body, N·m·s/rad (as above).
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub upper_body_steer_kd: f64,
+    /// External yaw torque cap on the articulated upper body, N·m (as above).
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub upper_body_steer_max_nm: f64,
 }
 
 #[allow(clippy::trivially_copy_pass_by_ref)] // serde's skip_serializing_if passes a reference.
@@ -107,17 +125,22 @@ fn is_zero(value: &f64) -> bool {
 
 impl ModelAids {
     /// The aids a rider and its assist settings run with: the shell's roll spring and the yaw
-    /// aid for every model, and for contact feet the same roll spring on the upper body.
+    /// aid for every model, and for contact feet and lateral legs the same roll spring on the
+    /// upper body.
     pub fn of(rider: &euc_physics::Rider, assist: &euc_physics::Assist) -> Self {
-        let contact = rider.model.has_contact_feet();
+        let upper = rider.model.upper_body_aids();
+        let c = rider.control;
         Self {
             roll_stiffness: assist.roll_stiffness,
             roll_damping: assist.roll_damping,
-            steer_kp: rider.control.steer_kp,
-            steer_kd: rider.control.steer_kd,
-            steer_max_nm: rider.control.steer_max_nm,
-            upper_body_roll_stiffness: if contact { assist.roll_stiffness } else { 0.0 },
-            upper_body_roll_damping: if contact { assist.roll_damping } else { 0.0 },
+            steer_kp: c.steer_kp,
+            steer_kd: c.steer_kd,
+            steer_max_nm: c.steer_max_nm,
+            upper_body_roll_stiffness: if upper { assist.roll_stiffness } else { 0.0 },
+            upper_body_roll_damping: if upper { assist.roll_damping } else { 0.0 },
+            upper_body_steer_kp: 0.0,
+            upper_body_steer_kd: 0.0,
+            upper_body_steer_max_nm: 0.0,
         }
     }
 }
@@ -144,7 +167,24 @@ pub struct RecordingContext {
     pub world: Option<WorldRecord>,
     /// External aid strengths.
     pub model_aids: ModelAids,
+    /// The rider's leg joints, for a model whose joints changed under one id while it was built in
+    /// stages (`articulated_lateral_v1`: 12 joints from 2026-10-23, 14 with the knees' rotation
+    /// from L2); absent for the other models.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub rider_joints: Vec<String>,
 }
+
+/// The leg joints a recording of `model` names ([`RecordingContext::rider_joints`]).
+pub fn rider_joints(model: euc_physics::RiderModel) -> Vec<String> {
+    if model.has_lateral_legs() {
+        euc_physics::leg_joint_names(model).into_iter().map(str::to_owned).collect()
+    } else {
+        Vec::new()
+    }
+}
+
+/// The most leg joints a recording may name.
+const MAX_RIDER_JOINTS: usize = 32;
 
 /// A streaming world as a recording names it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -257,11 +297,19 @@ impl RecordingContext {
             aids.steer_max_nm,
             aids.upper_body_roll_stiffness,
             aids.upper_body_roll_damping,
+            aids.upper_body_steer_kp,
+            aids.upper_body_steer_kd,
+            aids.upper_body_steer_max_nm,
         ]
         .iter()
         .any(|value| !value.is_finite() || *value < 0.0)
         {
             return Err("recording model_aids must be finite and not negative".into());
+        }
+        if self.rider_joints.len() > MAX_RIDER_JOINTS
+            || self.rider_joints.iter().any(|name| name.is_empty() || name.len() > 64)
+        {
+            return Err("recording rider_joints must name at most 32 joints".into());
         }
         if serde_json::to_vec(self).map_err(|e| e.to_string())?.len() > MAX_CONTEXT_BYTES {
             return Err("recording context exceeds 128 KiB".into());
@@ -296,6 +344,7 @@ impl RecordingContext {
             height_map: None,
             world: setup.world.as_ref().map(WorldRecord::of),
             model_aids: ModelAids::of(&setup.rider, &setup.assist),
+            rider_joints: rider_joints(setup.rider.model),
         }
     }
 }
@@ -522,7 +571,7 @@ mod tests {
 
     #[test]
     fn context_round_trips_every_rider_model_and_fills_in_the_schema() {
-        for model in ["rigid_ankle_v1", "articulated_sagittal_v1", "articulated_contact_v1"] {
+        for model in ["rigid_ankle_v1", "articulated_sagittal_v1", "articulated_contact_v1", "articulated_lateral_v1"] {
             let json = serde_json::json!({ "run_mode": "scenario", "rider_model": model, "model_aids": aids() });
             let context = RecordingContext::from_json(&json).unwrap();
             let mut expected = json.clone();
@@ -542,12 +591,13 @@ mod tests {
     }
 
     #[test]
-    fn contact_feet_record_the_upper_body_roll_aid_and_welded_feet_do_not() {
+    fn contact_feet_and_lateral_legs_record_the_upper_body_aids_and_welded_feet_do_not() {
         let assist = euc_physics::Assist::default();
         for (model, upper) in [
             (euc_physics::RiderModel::RigidAnkleV1, 0.0),
             (euc_physics::RiderModel::ArticulatedSagittalV1, 0.0),
             (euc_physics::RiderModel::ArticulatedContactV1, assist.roll_stiffness),
+            (euc_physics::RiderModel::ArticulatedLateralV1, assist.roll_stiffness),
         ] {
             let rider = euc_physics::Rider { model, ..euc_physics::Rider::default() };
             let aids = ModelAids::of(&rider, &assist);
@@ -555,13 +605,44 @@ mod tests {
             let json = serde_json::to_value(aids).unwrap();
             // Absent unless the model has the aid, so welded and rigid contexts stay as before.
             assert_eq!(json.get("upper_body_roll_stiffness").is_some(), upper > 0.0, "{model:?}: {json}");
+            // The lateral hips turn the body with the shell: no model has a yaw aid on the body.
+            assert_eq!(aids.upper_body_steer_kp, 0.0);
+            assert!(json.get("upper_body_steer_kd").is_none(), "{model:?}: {json}");
             assert_eq!(serde_json::from_value::<ModelAids>(json).unwrap(), aids);
         }
+        // A recording of the lateral rider before then still reads.
+        let mut older = aids();
+        older["upper_body_steer_kp"] = 2000.0.into();
+        let json =
+            serde_json::json!({ "run_mode": "scenario", "rider_model": "articulated_lateral_v1", "model_aids": older });
+        assert_eq!(RecordingContext::from_json(&json).unwrap().model_aids.upper_body_steer_kp, 2000.0);
         let mut bad = aids();
         bad["upper_body_roll_damping"] = (-1.0).into();
         let json =
             serde_json::json!({ "run_mode": "scenario", "rider_model": "articulated_contact_v1", "model_aids": bad });
         assert!(RecordingContext::from_json(&json).is_err());
+    }
+
+    #[test]
+    fn the_lateral_rider_names_its_joints_and_the_others_do_not() {
+        for model in [
+            euc_physics::RiderModel::RigidAnkleV1,
+            euc_physics::RiderModel::ArticulatedSagittalV1,
+            euc_physics::RiderModel::ArticulatedContactV1,
+        ] {
+            assert!(rider_joints(model).is_empty(), "{model:?}");
+        }
+        let joints = rider_joints(euc_physics::RiderModel::ArticulatedLateralV1);
+        assert_eq!(joints.len(), 14);
+        assert!(joints.iter().any(|name| name == "left_knee_rotation"));
+        let json = serde_json::json!({
+            "run_mode": "scenario", "rider_model": "articulated_lateral_v1", "model_aids": aids(), "rider_joints": joints
+        });
+        let context = RecordingContext::from_json(&json).unwrap();
+        assert_eq!(context.rider_joints.len(), 14);
+        let mut bad = json;
+        bad["rider_joints"] = serde_json::json!([""]);
+        assert!(RecordingContext::from_json(&bad).is_err());
     }
 
     #[test]

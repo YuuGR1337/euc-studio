@@ -7,7 +7,7 @@ import { engine } from "../../engine/index.ts";
 import type { CameraMode } from "../../state/ui.ts";
 import type { GroundView } from "./ground.ts";
 import { visualFrame } from "./poses.ts";
-import { ChaseCamera, spring } from "./cameraTracking.ts";
+import { ChaseCamera, ChaseView, spring } from "./cameraTracking.ts";
 
 export function CameraRig({
   mode,
@@ -22,6 +22,8 @@ export function CameraRig({
   const controls = useRef<ComponentRef<typeof OrbitControls>>(null);
   const reduce = !!useReducedMotion();
   const rigRef = useRef<ChaseCamera | null>(null);
+  const chaseRef = useRef<ChaseView | null>(null);
+  const scene = useThree((state) => state.scene);
   // Seed Drei before its priority -1 update can aim new controls at the world origin.
   const orbitSeed = useMemo(() => {
     if (mode !== "orbit") return new THREE.Vector3();
@@ -31,11 +33,21 @@ export function CameraRig({
   }, [camera, mode]);
   useFrame((_, dt) => {
     const rig = (rigRef.current ??= new ChaseCamera());
+    const chase = (chaseRef.current ??= new ChaseView());
     if (engine.kind !== "demo" && !visualFrame().poses) {
       rig.initialized = false;
+      chase.rig.reset();
       movingRef.current = false;
       return;
     }
+    if (mode === "chase") {
+      // The Side view starts over when it is chosen again.
+      rig.initialized = false;
+      movingRef.current = chase.step(camera, scene, dt, reduce, rig, map);
+      return;
+    }
+    // Leaving Chase: the base field of view, no bank, and a fresh start next time.
+    chase.leave(camera);
     if (mode === "follow") {
       movingRef.current = rig.follow(camera, dt, reduce, map);
       return;

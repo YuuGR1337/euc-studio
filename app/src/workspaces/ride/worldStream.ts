@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { worldApi } from "../../engine/world.ts";
+import { withContactAo } from "./outdoor/contactAo.ts";
 import type { Quality } from "./quality.ts";
 import { CHUNK_M, type ChunkMeshArrays, type ChunkProp } from "./worldMesh.ts";
 import { WorldView } from "./worldView.ts";
@@ -33,13 +34,13 @@ interface Loaded {
 const PROP_SHAPES: { geometry: THREE.BufferGeometry; colour: string; lift: number }[][] = [
   // Lamp post: a 7 m pole and its head.
   [
-    { geometry: new THREE.CylinderGeometry(0.06, 0.08, 7, 8), colour: "#3A3D42", lift: 3.5 },
+    { geometry: new THREE.CylinderGeometry(0.06, 0.08, 7, 8), colour: "#4A4E54", lift: 3.5 },
     { geometry: new THREE.BoxGeometry(0.5, 0.12, 0.22), colour: "#E8E2C8", lift: 6.95 },
   ],
   // Tree: trunk and canopy.
   [
-    { geometry: new THREE.CylinderGeometry(0.12, 0.16, 3, 8), colour: "#4A3626", lift: 1.5 },
-    { geometry: new THREE.IcosahedronGeometry(1.9, 1), colour: "#2F4A2A", lift: 4.2 },
+    { geometry: new THREE.CylinderGeometry(0.12, 0.16, 3, 8), colour: "#5A4430", lift: 1.5 },
+    { geometry: new THREE.IcosahedronGeometry(1.9, 1), colour: "#3F6436", lift: 4.2 },
   ],
   // Bench, bin, hydrant, bollard.
   [{ geometry: new THREE.BoxGeometry(1.8, 0.45, 0.55), colour: "#5C4330", lift: 0.45 }],
@@ -187,7 +188,7 @@ export class WorldStream {
     texture.generateMipmaps = true;
     texture.anisotropy = 4;
     texture.needsUpdate = true;
-    const material = this.groundTemplate.clone();
+    const material = withContactAo(this.groundTemplate.clone());
     material.map = texture;
     const ground = new THREE.Mesh(geometry, material);
     ground.name = `world-chunk-${key}`;
@@ -206,6 +207,7 @@ export class WorldStream {
       boxes.name = `world-solids-${key}`;
       boxes.position.copy(ground.position);
       boxes.receiveShadow = true;
+      boxes.castShadow = true;
       this.root.add(boxes);
     }
     this.loaded.set(key, { lod: chunk.lod, ground, texture, boxes, props: chunk.props });
@@ -262,6 +264,7 @@ export class WorldStream {
         });
         mesh.instanceMatrix.needsUpdate = true;
         mesh.computeBoundingSphere();
+        mesh.castShadow = true;
         mesh.name = `world-props-${kind}-${index}`;
         this.propGroup.add(mesh);
       });

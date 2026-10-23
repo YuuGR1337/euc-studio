@@ -1,0 +1,54 @@
+name: Feature request
+description: Propose a new capability, a scenario, a model improvement or a wheel to support.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please look at the [roadmap board](https://github.com/users/tarikbc/projects/3) first: the idea may already
+        have an issue you can comment on.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Studio (desktop app)
+        - Free Ride
+        - Engine or CLI (euc)
+        - Physics, rider, tyre or world
+        - Scenarios or compare
+        - Our firmware (compat, clean, SIL)
+        - Python bindings
+        - Flasher
+        - Other wheels, brands or processors
+        - Docs or release
+        - Other or not sure
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What you want to do and what stops you today.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: What should change. For a model change, say how a scenario would show it.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives
+      description: Other ways you considered, and why this one is better.
+  - type: checkboxes
+    id: rules
+    attributes:
+      label: Checks
+      options:
+        - label: I searched the existing issues and the roadmap board.
+          required: true
+        - label: I can help build or test this.

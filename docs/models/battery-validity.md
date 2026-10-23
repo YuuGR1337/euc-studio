@@ -69,7 +69,12 @@ The app must report model exhaustion separately from a firmware cutoff or rider 
 `bus_v`, `bus_a`, `soc`, and torque still describe the last accepted electrical state.
 They must not describe later engine time after a validity error.
 
-The parent needs these connections:
+Update, 2026-10-23: the connection exists. `Live::step_to` (`crates/euc-sim/src/plant.rs`) stops the step when
+the battery leaves its validity range, `Machine::run` (`crates/euc-sim/src/machine.rs`) halts with the fatal
+blocker `model-validity`, and `euc sim run` fails a halted run (`crates/euc-cli/src/sim.rs`), so the stop cannot
+become a passing ride report. The table below is the plan this section first recorded.
+
+The plan named these connections:
 
 | Component | Required change |
 |---|---|
@@ -79,9 +84,7 @@ The parent needs these connections:
 | `euc-sim/src/scenario.rs` | Preserve the error and prevent a passing verdict |
 | Bridge, recording, CLI, and app | Carry a structured error, the last accepted electrical cycle, and the pack index when present |
 
-The parent must define any new result fields across these consumers together.
-The existing ride snapshot does not carry the new error.
-Until the parent completes this connection, the library stop alone does not prevent a false successful ride report.
+New result fields must be defined across these consumers together.
 
 Existing standalone callers must handle the new `Battery::step` result.
 All eight existing battery test call sites now use `unwrap()` for accepted steps.

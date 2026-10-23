@@ -3,7 +3,8 @@
 ## Scope and assumptions
 
 `euc-flash-sim` models one application slot in memory. It has no hardware access or transport.
-The vendor OTA wire protocol is **UNKNOWN**. This model defines no Begode bootloader protocol or BLE commands.
+The vendor OTA wire protocol is **UNKNOWN**. This model defines no Begode bootloader protocol or BLE commands;
+the flasher's emulated bootloader models them as assumptions ([flasher](flasher.md)).
 It models application storage transactions for later software scenarios.
 
 The caller supplies a validated wheel profile and synthetic flash geometry.
@@ -88,9 +89,9 @@ Reports contain no image bytes. Callers must keep private input data out of publ
 
 ## Integration and proposed verification
 
-The parent will add the crate to workspace default members and update the lockfile.
-The parent can connect this library to a later software scenario runner.
-Any future transport needs separate protocol evidence and a separate safety design.
+Update, 2026-10-23: the crate is a workspace default member, and `euc-flasher` builds its simulated wheel's
+application slot on it. The flasher's fault campaign exercises it ([flasher](flasher.md)).
+Any real transport needs separate protocol evidence and a separate safety design.
 
 Proposed scenarios use generated images with synthetic profiles or valid development info blocks.
 They cover successful updates, every fault phase, persistent transient faults, corruption, and a clean recovery transaction.

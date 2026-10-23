@@ -120,7 +120,7 @@ Image lengths and load addresses must also match.
 The packager checks complete ELF file hashes separately, including symbols and debug data.
 It detects input changes during validation and staging.
 It validates the staged copies again before the app build.
-Those copies remain fixed while other agents change source or build files.
+Those copies stay fixed while source or build files change.
 The packager removes the temporary copies after completion or failure.
 
 The output includes only the validated four files:
@@ -144,5 +144,5 @@ The desktop uses `app.path().resource_dir()?.join("firmware")` as the bundled fi
 The runtime also checks BIN/ELF equality and the current probe layout.
 The packaging gate does not replace the runtime probe check.
 
-Parent must freeze the integrated source before the final package build.
-Parent must review that new artifact before installation.
+Freeze the source before the final package build.
+Review the new artifact before you install it.

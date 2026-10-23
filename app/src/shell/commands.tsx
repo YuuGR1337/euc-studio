@@ -10,7 +10,13 @@ import {
   useReplay,
 } from "../engine/index.ts";
 import { prepareBuzzerAudio } from "../engine/buzzerAudio.ts";
-import { WORKSPACE_IDS, useUi } from "../state/ui.ts";
+import { type CameraMode, WORKSPACE_IDS, nextCamera, useUi } from "../state/ui.ts";
+
+const CAMERA_TITLES: Record<CameraMode, string> = {
+  chase: "Chase",
+  follow: "Side",
+  orbit: "Orbit",
+};
 import type { PaletteCommand } from "../ui/CommandPalette.tsx";
 import {
   Bell,
@@ -225,12 +231,12 @@ export function useCommands(): PaletteCommand[] {
       },
       {
         id: "view.camera",
-        title: ui.camera === "follow" ? "Orbit camera" : "Follow camera",
+        title: `${CAMERA_TITLES[nextCamera(ui.camera, ui.cameraContext)]} camera`,
         group: "View",
         icon: <Camera />,
         shortcut: "c",
-        keywords: ["camera", "3d", "viewport", "orbit", "follow"],
-        run: () => ui.setCamera(ui.camera === "follow" ? "orbit" : "follow"),
+        keywords: ["camera", "3d", "viewport", "orbit", "follow", "chase", "side"],
+        run: () => ui.setCamera(nextCamera(ui.camera, ui.cameraContext)),
       },
       {
         id: "view.buzzer",

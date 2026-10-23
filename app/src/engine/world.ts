@@ -56,6 +56,17 @@ export interface WorldSpec {
   revision: number;
   biome: "city";
   densities: WorldDensities;
+  /** A whole-world grade for a slope test (euc_world::Incline); absent in an ordinary city. */
+  incline?: WorldIncline;
+}
+
+/** A whole-world grade along `direction` from `start_m` past `origin` (euc_world::Incline). */
+export interface WorldIncline {
+  origin: [number, number];
+  direction: [number, number];
+  slope_pct: number;
+  start_m: number;
+  ramp_m: number;
 }
 
 /** A world free ride's choice: its seed and densities. */

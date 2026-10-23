@@ -14,7 +14,6 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::Densities;
 use crate::det::{self, Rect, Stream, V2, hash};
 use crate::features::{CTX_REACH_M, Ctx, Feature, Prop, PropKind, SPAWN_CLEAR_M, curb_cut};
 use crate::fields;
@@ -332,7 +331,7 @@ fn fits(ctx: &Ctx, origin: V2, u: V2, v: V2, width: f64, depth: f64) -> Option<f
     }
     let mut ground_min = f64::INFINITY;
     for sample in footprint_samples(width, depth) {
-        ground_min = ground_min.min(fields::lot_height(ctx.seed, inside(sample)?));
+        ground_min = ground_min.min(fields::lot_height(&ctx.relief, inside(sample)?));
     }
     Some(ground_min)
 }
@@ -432,10 +431,10 @@ fn plaza(ctx: &Ctx, s: &mut Stream, front: V2, u: V2, v: V2) -> Option<(ParcelKi
     for steps in first..=PLAZA_STEPS[1] {
         // An apron in front of short stairs keeps the ramp strip inside the parcel.
         let apron = (RAMP_WIDTH_M + 0.3 - (steps - 1) as f64 * tread).max(0.0);
-        let base = fields::lot_height(ctx.seed, at(STAIRS_U0_M + stairs_width / 2.0, apron));
+        let base = fields::lot_height(&ctx.relief, at(STAIRS_U0_M + stairs_width / 2.0, apron));
         let platform_v = apron + (steps - 1) as f64 * tread;
         let top = base + steps as f64 * riser;
-        let ramp_base = fields::lot_height(ctx.seed, at(ramp_u0, platform_v - RAMP_WIDTH_M / 2.0));
+        let ramp_base = fields::lot_height(&ctx.relief, at(ramp_u0, platform_v - RAMP_WIDTH_M / 2.0));
         if top - ramp_base < 0.3 {
             continue;
         }
@@ -447,7 +446,7 @@ fn plaza(ctx: &Ctx, s: &mut Stream, front: V2, u: V2, v: V2) -> Option<(ParcelKi
         let depth = platform_v + platform_depth;
         let mut fits = true;
         for [pu, pv] in footprint_samples(width, depth) {
-            let ground = fields::lot_height(ctx.seed, at(pu, pv));
+            let ground = fields::lot_height(&ctx.relief, at(pu, pv));
             let on_stairs = pu >= STAIRS_U0_M && pu <= STAIRS_U0_M + stairs_width && pv >= apron && pv < platform_v;
             let limit = if pv >= platform_v {
                 top - riser
@@ -506,14 +505,15 @@ fn park_trees(ctx: &Ctx, parcel: &Parcel, props: &mut Vec<Prop>) {
 }
 
 /// The kept parcels anchored in one tile. A pure function of the seed, densities and tile.
-pub(crate) fn tile(seed: u64, densities: &Densities, key: TileKey) -> Vec<Kept> {
+pub(crate) fn tile(spec: &crate::WorldSpec, key: TileKey) -> Vec<Kept> {
+    let seed = spec.seed;
     let anchors = Rect::new(
         [key.a as f64 * TILE_M, key.b as f64 * TILE_M],
         [(key.a + 1) as f64 * TILE_M, (key.b + 1) as f64 * TILE_M],
     );
     let ctx_rect = anchors.grow(TILE_CTX_MARGIN_M);
     let edges = roads::edges_near(seed, ctx_rect, CTX_REACH_M);
-    let ctx = Ctx::new(seed, densities, &edges, ctx_rect);
+    let ctx = Ctx::new(spec, &edges, ctx_rect);
     let k = CONFLICT_CELLS;
     let (a0, b0) = (key.a * TILE_CELLS, key.b * TILE_CELLS);
     let (a1, b1) = (a0 + TILE_CELLS - 1, b0 + TILE_CELLS - 1);

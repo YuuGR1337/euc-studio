@@ -18,6 +18,7 @@ mod lights;
 mod native_audio;
 mod phone;
 pub mod recordings;
+mod ride_sound;
 mod runner;
 mod scenarios;
 pub mod tune;
@@ -92,6 +93,12 @@ pub fn engine_connect(
 #[tauri::command]
 pub fn engine_sound(state: State<'_, EngineState>, enabled: bool) -> Result<native_audio::AudioStatus, String> {
     with_runner(&state, |runner| runner.set_sound(enabled))
+}
+
+/// The master volume (0 to 1) of the buzzer and the ride bed, and whether the bed sounds.
+#[tauri::command]
+pub fn engine_sound_mix(state: State<'_, EngineState>, volume: f64, bed: bool) -> Result<(), String> {
+    with_runner(&state, |runner| runner.set_sound_mix(volume, bed))?
 }
 
 #[tauri::command]

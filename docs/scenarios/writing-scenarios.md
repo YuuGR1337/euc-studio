@@ -58,8 +58,8 @@ Record the timing settings with each result. See [CPU timing](../models/cpu-timi
 | `push` | no | Pushes on the rider, `[[start s, newtons forward, duration s], ...]`; overlapping pushes add up. |
 | `[rider]`, `[rider.control]` | no | The rider, below. |
 | `[assist]` | no | The roll aid, below. |
-| `[terrain]` | no | The ground, below; flat without it. |
-| `[world]` | no | A generated city instead of `[terrain]`, below. |
+| `[world]` | no | The ground: a generated city, below. Every shipped scenario has one; start new scenarios with it. |
+| `[terrain]` | no | A synthetic 1-D strip instead (below), for a test whose exact shape is the point. Without `[world]` or `[terrain]` the ground is an infinite plane. |
 | `[[timeline]]` | no | Faults, below. |
 | `[[inject]]` | no | BLE commands, below. |
 | `[[expect]]` | no | Checks, below. |
@@ -76,22 +76,30 @@ Every field has a default; give only what you change. The model is described in
 
 The default rider is articulated (`articulated_sagittal_v1`): an upper body on two legs with hip,
 knee and ankle hinges, the feet welded to the pedals. `model = "articulated_contact_v1"` is the same
-rider with each sole on its own pedal through friction contact (opt-in). The rigid rider
+rider with each sole on its own pedal through friction contact (opt-in), and
+`model = "articulated_lateral_v1"` the rider with legs that also move sideways and twist, on soft
+knees (opt-in, built in stages). The rigid rider
 (`model = "rigid_ankle_v1"`) stays for controlled comparisons with the results before 2026-10-22: a
 scenario that measures the firmware against that baseline on purpose pins it and says why in its
 header. `euc sim run --rider-model ...` overrides the scenario's model for one run.
 
 | Field | Default | Meaning |
 |---|---|---|
-| `model` | `"articulated_sagittal_v1"` | Or `"rigid_ankle_v1"`, or `"articulated_contact_v1"` (contact feet, opt-in; see [body.md](../models/body.md#the-articulated-rider-default)). |
+| `model` | `"articulated_sagittal_v1"` | Or `"rigid_ankle_v1"`, or `"articulated_contact_v1"` (contact feet, opt-in; see [body.md](../models/body.md#the-articulated-rider-default)), or `"articulated_lateral_v1"` (lateral legs, opt-in; see [body.md](../models/body.md#the-lateral-rider-opt-in)). |
 | `mass_kg` | 80 | Rider mass; every segment's mass scales with it. |
 | `height_m` | 1.78 | Standing height; every segment's length scales with it. |
 | `ankle_above_pedals_m` | 0.08 | Ankle joints above the pedals, shoe included. |
 | `com_above_pedals_m` | 1.0 | Height of the rider's centre of mass above the pedals. |
 | `gyration_m` | 0.35 | Radius of gyration of the rigid body (the articulated upper body's inertia). |
 | `cda_m2` | 0.6 | Drag area of rider and wheel. |
+| `tuck_cda_m2` | 0.42 | Drag area at a full crouch, riding by hand only (Free Ride's crouch). A scenario's own riding keeps `cda_m2`. |
 | `articulation.joint_kp`, `articulation.joint_kd`, `articulation.joint_max_nm` | 1000, 60, 180 | Hip and knee posture: stiffness (N·m/rad), damping (N·m·s/rad), strongest torque per joint (N·m). |
 | `articulation.sole_friction`, `articulation.sole_contact_time_s` | 1.0, 0.005 | Sole-on-pedal friction and contact softness (s), for `articulated_contact_v1`. |
+| `articulation.soft_knee_rad` | 0.52 | Knee bend of the riding stance (rad), for `articulated_lateral_v1`. |
+| `articulation.foot_offset_m` | 0.015 | How far each foot stands outside its pedal's centre (m), for `articulated_lateral_v1`. |
+| `articulation.hip_adduction_max_nm`, `articulation.hip_rotation_max_nm`, `articulation.knee_rotation_max_nm`, `articulation.ankle_roll_max_nm` | 150, 50, 25, 35 | Strongest hip ab/adduction, hip rotation, tibial rotation and ankle roll per joint (N·m), for `articulated_lateral_v1`. |
+| `articulation.pad_friction`, `articulation.pad_contact_time_s`, `articulation.pad_preload_n` | 0.3, 0.03, 20 | A leg on a side pad: friction, contact softness (s), and how hard it rests there (N), for `articulated_lateral_v1`. |
+| `articulation.turn_crouch`, `articulation.turn_spread`, `articulation.turn_press_n_per_rad` | 0.5, 1.3, 100 | Per radian of a turn's lean: how much deeper the knees bend (rad), how far the inside knee swings out from its pad (rad) and how much harder the outside leg rests on its pad (N), for `articulated_lateral_v1`. |
 | `control.lean_kp`, `control.lean_kd` | 6000, 900 | Ankle stiffness (N·m/rad) and damping (N·m·s/rad) about the lean. |
 | `control.ankle_max_nm` | 400 | Strongest ankle torque, both legs. Contact feet carry less: about 70 N·m backward and 120 N·m forward for the default rider, while the centre of pressure stays under the soles. |
 | `control.speed_kp`, `control.speed_ki` | 0.6, 0.03 | Acceleration asked per m/s of speed error, and its integral. |
@@ -101,6 +109,8 @@ header. `euc sim run --rider-model ...` overrides the scenario's model for one r
 | `control.tiltback_ease_kmh_per_deg` | 1.5 | Speed given up per degree beyond that (`0`: ignores tiltback). |
 | `control.tiltback_ease_brake` | 1.0 | Strongest braking while easing off, m/s². |
 | `control.steer_kp`, `control.steer_kd`, `control.steer_max_nm` | 2000, 200, 60 | How the rider keeps the line (world +x). |
+| `control.manual_turn_rate_max_rad_s`, `control.manual_turn_lean_max_deg`, `control.manual_turn_lean_rate_deg_s`, `control.manual_lean_rate_deg_s` | 2.5, 35, 60, 30 | Riding by hand only (Free Ride, Ride's manual mode): the turn cap at a stop, the lean into turns and how fast the leans change. A scenario's own riding never uses them. |
+| `control.manual_drive_lean_max_deg`, `control.manual_drive_kp` | 22, 1.2 | Free Ride's drive mode only: the largest lean when asked for an acceleration, and how hard the rider holds the speed the asks add up to. A scenario's own riding never uses them. |
 
 For example, a rider who ignores tiltback and leans harder:
 
@@ -248,7 +258,10 @@ the shell holds it upright:
 `roll_stiffness` (5000 N·m/rad) and `roll_damping` (500 N·m·s/rad). Set `roll_stiffness = 0.0` to
 see the wheel fall over sideways.
 
-### The ground: `[terrain]` and `[[terrain.feature]]`
+### A synthetic ground: `[terrain]` and `[[terrain.feature]]`
+
+The shipped scenarios ride the city (`[world]`, below). A strip suits a test that needs an exact,
+synthetic shape: a rectangular pothole of a given length, a bump of a given profile.
 
 | Field | Default | Meaning |
 |---|---|---|
@@ -263,6 +276,7 @@ Each `[[terrain.feature]]` has a `kind`:
 |---|---|---|
 | `pothole` | `at_m`, `depth_m`, `length_m` | A hole with steep walls. |
 | `bump` | `at_m`, `height_m`, `length_m` | A smooth hump, `height · (1 − cos)/2` over its length. |
+| `curb` | `at_m`, `height_m`, `yaw_deg` (default 0) | A step up onto a sidewalk with a sharp edge: a box whose face crosses the path at `at_m`, turned `yaw_deg` from square on (within ±80, its face 1 m or more ahead of the start across the strip). The path rides it for 4 m / cos(yaw). |
 
 A feature must start at 1 m or later, end before `length_m`, be at least 8 cm long, and have a depth
 or height between 0 and 1 m. Features add to the slope. The path runs along world +x; the ground is a
@@ -283,11 +297,25 @@ has either a non-flat `[terrain]` or `[world]`, never both.
 | `biome` | `"city"` | The only biome. |
 | `start` | the spawn | `{ x_m, y_m, heading_deg }`: the ground point under the wheel and its heading, world coordinates (heading 0 is world +x, left positive). |
 | `route` | none | Waypoints `[[x, y], ...]` in world metres, at most 256. After release the rider steers for the next one and moves on within 1 m of it; after the last it holds its heading. |
-| `[world.densities]` | the defaults | How often things occur (`potholes`, `manholes`, `cracks`, `rough_patches`, `wet_patches`, `speed_bumps`, `crosswalks`, `driveways`, `plazas`, `props`); see models/world.md. |
+| `slope_pct` | 0 | A grade over the whole city along the start heading, percent (within ±40; negative is downhill), for a slope test. Streets, buildings and features follow it; the ground behind its start is unchanged. |
+| `slope_start_m` | 0 | Where the grade starts, metres ahead of the start. |
+| `slope_ramp_m` | 10 | Over which it builds up (a parabola, no kink), as `[terrain]`'s. |
+| `[world.densities]` | the defaults | How often things occur (`potholes`, `manholes`, `cracks`, `rough_patches`, `wet_patches`, `speed_bumps`, `crosswalks`, `driveways`, `plazas`, `props`), and `hills`, the scale of the terrain's relief (1 by default, 0 a level city, up to 2); see models/world.md. |
+
+Where the road itself is not the test, use an ideal road: `hills = 0` and no `potholes`,
+`manholes`, `cracks`, `rough_patches` or `wet_patches`. The speed, braking and electrical runs in
+`scenarios/` do that on the spawn arterial, and say why in their notes. A level platform of a plaza
+suits a standstill; a real pothole, curb or stairs suits a terrain test.
+
+To ride the plain flat floor on purpose, write `[world]` with only `flat = "<reason>"`: the reason is
+required and no other `[world]` key goes with it. Use it only when the city exposes a model limit
+that is not the test; `full-effort-70kmh-stop-soc100` is the one shipped example.
 
 `euc-world-preview --seed <n> --print` (models/world.md, "Preview") draws a world and lists its
-plazas, which helps to pick a start and a route. The acceptance runs in `scenarios/world/` are
-examples: a curb up straight on and at 30°, a curb down, a pothole, stairs down and a ramp up.
+plazas, which helps to pick a start and a route. The shipped scenarios are examples (`scenarios/`:
+the spawn arterial, a plaza, two real potholes, a 2 % and a 20 % grade), and so are the acceptance
+runs in `scenarios/world/`: a curb up straight on and at 30°, a curb down, a pothole, stairs down and
+a ramp up.
 `sim compare` and the studio run them like any scenario; the studio draws the world around the
 wheel.
 
@@ -373,43 +401,37 @@ the run with an error before it starts.
 
 ## Two worked examples
 
-### A road with three potholes
+### A city pothole
 
-Potholes 1, 2 and 3 cm deep, 20 m apart, ridden at 20 km/h:
+A real 2 cm pothole of the city (seed 42), ridden at 20 km/h after a level, straight approach of
+50 m (`euc-world-preview` draws the area, so the approach can be checked by eye):
 
 ```toml
-# Three potholes of growing depth at 20 km/h, on the maintainer's settings.
+# A 2 cm city pothole at 20 km/h, on the maintainer's settings.
 #
 # Rider: the default rider.
 schema = 1
-name = "three-potholes-20kmh"
-description = "Ride over potholes 1, 2 and 3 cm deep at 20 km/h: does the wheel stay up?"
+name = "city-pothole-20kmh"
+description = "Ride into a 2 cm deep city pothole at 20 km/h: does the wheel stay up?"
 wheel = "begode-extreme"
-seconds = 30.0
+seconds = 25.0
 release_s = 2.5
 speed_kmh = [[0, 0], [6, 0], [11, 20]]
 settings = "tarik-2026-10-15"
 
-[terrain]
-length_m = 150.0
+# The pothole at (-31.13, -70.91), 50 m south of the start; a level city (hills = 0) with no other
+# defects on the approach. Potholes keep their density, so this one is there.
+[world]
+seed = 42
+revision = 2
+start = { x_m = -31.13, y_m = -20.91, heading_deg = -90.0 }
 
-[[terrain.feature]]
-kind = "pothole"
-at_m = 50.0
-depth_m = 0.01
-length_m = 0.5
-
-[[terrain.feature]]
-kind = "pothole"
-at_m = 70.0
-depth_m = 0.02
-length_m = 0.5
-
-[[terrain.feature]]
-kind = "pothole"
-at_m = 90.0
-depth_m = 0.03
-length_m = 0.5
+[world.densities]
+hills = 0.0
+manholes = 0.0
+cracks = 0.0
+rough_patches = 0.0
+wet_patches = 0.0
 
 # The safety verdict.
 [[expect]]
@@ -423,7 +445,7 @@ check = "no_cutoff"
 check = "record"
 signal = "distance_m"
 stat = "first_above"
-threshold = 90.0
+threshold = 50.0
 
 [[expect]]
 check = "record"
@@ -444,12 +466,13 @@ stat = "max"
 from_s = 15.0
 ```
 
-The `distance_m` record tells when the last pothole comes (at about 27 s), so a later check can start
+The `distance_m` record tells when the pothole comes (at about 17.5 s), so a later check can start
 just before it.
 
-### A bump, then a slope
+### A synthetic bump, then a slope
 
-A 6 cm speed bump at 15 km/h, then an 8 % climb that builds up from 60 m:
+When the shape is the test, a `[terrain]` strip gives it exactly: a 6 cm bump at 15 km/h, then an
+8 % climb that builds up from 60 m:
 
 ```toml
 # A 6 cm speed bump at 15 km/h, then an 8 % climb, on the maintainer's settings.

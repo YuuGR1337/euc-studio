@@ -2,12 +2,36 @@ import * as THREE from "three";
 import { engine } from "../../engine/index.ts";
 import type { CameraMode } from "../../state/ui.ts";
 import { type GroundView, sampleGround } from "./ground.ts";
+import { POSE_FLOATS } from "../../engine/telemetry.gen.ts";
 import { visualFrame, visualShellHeading, visualWheelPosition } from "./poses.ts";
+import { ChaseRig, meshObstruction } from "./chaseRig.ts";
 import { slopeAt } from "./terrain.ts";
 
 const UP = new THREE.Vector3(0, 1, 0);
 const TAU = Math.PI * 2;
 export const INITIAL_CAMERA: [number, number, number] = [-3.6, 2.15, 2.2];
+
+/**
+ * The shell's up vector in three.js coordinates from the frame being drawn, or null before poses
+ * (the Chase view banks with it).
+ */
+export function visualShellUp(out: THREE.Vector3): THREE.Vector3 | null {
+  const frame = visualFrame();
+  const poses = frame.source === engine ? frame.poses : null;
+  const body = engine.bodies.findIndex((info) => info.role === "shell");
+  if (!poses || body < 0) return null;
+  const offset = body * POSE_FLOATS;
+  const w = poses[offset + 3] as number;
+  const x = poses[offset + 4] as number;
+  const y = poses[offset + 5] as number;
+  const z = poses[offset + 6] as number;
+  if (![w, x, y, z].every(Number.isFinite)) return null;
+  // The body's z axis in the physics frame (z up), then MuJoCo (x, y, z) → three.js (x, z, -y).
+  const ux = 2 * (x * z + w * y);
+  const uy = 2 * (y * z - w * x);
+  const uz = 1 - 2 * (x * x + y * y);
+  return out.set(ux, uz, -uy);
+}
 
 /** Exact critically damped spring for a fixed target over this frame. No frame-rate-dependent lerp. */
 export function spring(
@@ -177,5 +201,83 @@ export class ChaseCamera {
       Math.abs(this.speedVelocity) > 0.02 ||
       frame.time < engine.latest.t - 0.0001
     );
+  }
+}
+
+/** The field of view of the Side and Orbit views, degrees (Scene.tsx's camera). */
+export const BASE_FOV = 42;
+/** Seconds between two searches of the scene for world solids (they stream in and out). */
+const SOLIDS_EVERY_S = 0.5;
+/** The Chase view's size for a wheel without a rider (the Side view frames it at 1.9 m vs 3.6 m). */
+const WHEEL_ONLY_SCALE = 0.5;
+
+/**
+ * The Chase view (chaseRig.ts) fed from the frame being drawn: the wheel, its heading, speed and
+ * lean, the ground under it, and the world's solids that stop the camera.
+ */
+export class ChaseView {
+  readonly rig = new ChaseRig();
+  private readonly wheel = new THREE.Vector3();
+  private readonly shellUp = new THREE.Vector3();
+  private readonly solids: THREE.Object3D[] = [];
+  private readonly obstruction = meshObstruction(this.solids);
+  private solidsAge = Infinity;
+  private generation = -1;
+  private source: typeof engine | null = null;
+
+  /** One frame; returns whether the view still moves toward its targets. */
+  step(
+    camera: THREE.Camera,
+    scene: THREE.Object3D,
+    dt: number,
+    reduce: boolean,
+    follow: ChaseCamera,
+    map?: GroundView | null,
+  ): boolean {
+    const frame = visualFrame();
+    if (this.generation !== frame.generation || this.source !== engine) this.rig.reset();
+    this.generation = frame.generation;
+    this.source = engine;
+    const wheel = this.wheel;
+    if (engine.kind === "demo" || !visualWheelPosition(wheel)) wheel.set(0, 0.23, 0);
+    // World solids (buildings, walls, curbs) stop the camera; the stream adds and drops them.
+    this.solidsAge += dt;
+    if (this.solidsAge >= SOLIDS_EVERY_S) {
+      this.solidsAge = 0;
+      this.solids.length = 0;
+      scene.traverse((object) => {
+        if (object.name.startsWith("world-solids-")) this.solids.push(object);
+      });
+    }
+    const speed = engine.latest.speed;
+    // A wheel alone (the demo, a riderless run) is framed at about half a rider's distance.
+    const rider = engine.bodies.some((body) => body.role === "rider");
+    const moving = this.rig.step(
+      {
+        scale: rider ? 1 : WHEEL_ONLY_SCALE,
+        wheel,
+        ground: follow.groundHeight(wheel.x, wheel.z, map),
+        heading: visualShellHeading(this.rig.yaw),
+        speedMps: Number.isFinite(speed) ? speed / 3.6 : 0,
+        shellUp: visualShellUp(this.shellUp),
+        groundAt: (x, z) => follow.groundHeight(x, z, map),
+        obstruction: this.obstruction,
+      },
+      dt,
+      reduce,
+    );
+    if (camera instanceof THREE.PerspectiveCamera) this.rig.apply(camera);
+    return moving;
+  }
+
+  /** Leaving the Chase view: the base field of view, no bank, and a fresh start next time. */
+  leave(camera: THREE.Camera): void {
+    if (!this.rig.initialized) return;
+    this.rig.reset();
+    camera.up.copy(UP);
+    if (camera instanceof THREE.PerspectiveCamera && camera.fov !== BASE_FOV) {
+      camera.fov = BASE_FOV;
+      camera.updateProjectionMatrix();
+    }
   }
 }

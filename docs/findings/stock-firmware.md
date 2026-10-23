@@ -10,7 +10,7 @@ Neither a short comparison window nor the older measurements establish complete 
 
 **Timing version.** The detailed measurements below use the former CPI 1.25 model, without exception overhead.
 The current default is CPI 2.0 with exception costs.
-See [current timing results](../models/cpu-timing.md#scenario-validation) for the new scenario checks.
+See [current timing results](../models/cpu-timing.md#previous-scenario-validation) for the new scenario checks.
 To reproduce the older timing, add `--cpi 1.25 --no-exception-timing` with the firmware builds listed below.
 
 What the simulator shows about the stock Begode Extreme controller firmware (build GW1825007), for
@@ -99,7 +99,7 @@ fault and alert 0x40.
 
 **Current timing check.** Clean's full-battery outcome is now borderline across quantum sizes.
 The 30% and PWM-disabled cases still hold on clean at all three sizes.
-See [CPU timing results](../models/cpu-timing.md#scenario-validation). The detailed numbers below use the historical timing.
+See [CPU timing results](../models/cpu-timing.md#previous-scenario-validation). The detailed numbers below use the historical timing.
 
 **Behaviour.** A rider who keeps accelerating past what the motor can give, and ignores the tiltback,
 meets the voltage limit. The back-EMF and the winding's reactance use up the headroom, the q-current
@@ -245,7 +245,7 @@ before the suspension, the 2 cm pothole turned the shell at up to 1360 °/s and 
 
 **Status.** PRELIMINARY. The gyro range and the slow recovery are the firmware's own. How fast a real
 pothole turns the shell depends on the suspension's stroke and linkage (estimates) and the rider's
-knees (not modelled).
+knees (the rigid rider has none; the articulated default has knees, but no impact study used it yet).
 
 **Clean profile.** Runs the gyro at ±2000 °/s and re-anchors faster after a saturated sample
 (`GYRO_500DPS_CLIP` off): its attitude error is 0.7° (3 cm) and 0.5° (5 cm). In the 5 cm pothole it
@@ -301,6 +301,16 @@ sizes.
 
 **Status.** CONFIRMED in sim that nothing but the tip-over ends the drive. How long a real riderless
 wheel stays up depends on how the rider steps off; in the model it is set by the sideways push.
+
+**Check later (city, W2; not a verified firmware fact).** Since the scenarios ride the city, the
+15 km/h step-off still cuts at all three quantum sizes (stock at 17.26 s, 2.26 s after the step-off,
+at 0.6 km/h; 5 km/h: 0.77 s after, at 7.1 km/h), but at sizes 4000 and 2000 the fall ends with the
+wheel on its nose (pitch about 81°, roll near 0°) and the tire on the ground. After the cut the stock
+PWM stays at 98-101 % for about 0.8 s, then decays slowly (77 % at 18.45 s, 17 % at 19.45 s, 9 % at
+21.45 s, Iq about 6 A), the wheel turns at up to 16 km/h and the machine crawls about 10 m on its nose;
+it still rolls at 3.4 km/h at 22 s. On the flat floor, and at size 3000, it ended on its side and
+stopped. Whether the stock cut leaves this drive on, and whether a real wheel can crawl like this, is
+to be checked.
 
 **Clean profile.** The same cut-offs, plus riderless detection (`RIDERLESS_UNDETECTED` off, a
 load-drop rule): 1.0 s after the 15 km/h step-off clean suspects a riderless wheel, beeps and applies

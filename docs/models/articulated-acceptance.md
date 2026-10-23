@@ -11,7 +11,7 @@ They use `articulated_sagittal_v1`, real MuJoCo body motion, and the public phys
 They use no firmware image, electrical plant, hardware, private body data, or recording.
 The initial acceptance work changed no production source, model parameter, safety threshold, or control default.
 The merge corrections appear below.
-Generated-map acceptance and recording UI remain with the parent.
+Generated-map acceptance and the recording UI were separate work.
 
 The fixture uses the existing generic rigid-axle wheel and its 48-part tire.
 It retains the selected rider mass, joint gains, torque caps, release rules, and external balance aids.
@@ -131,7 +131,7 @@ Actual results:
 - Strict Clippy for the articulated test target: passed.
 - Rust formatting and whitespace checks: passed.
 
-The full crate run also includes the parent's generated-map tests. This work does not change those tests.
+The full crate run also includes the generated-map tests. This work does not change those tests.
 No production defect appeared in these cases. No production source change was needed.
 
 Additional check commands:

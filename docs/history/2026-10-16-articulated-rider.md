@@ -1,5 +1,8 @@
 # Physical articulated rider: implementation and next slice
 
+> **Historical plan (2026-10-16).** Written to steer the agents that built this stage; it describes the state of
+> its date, not the current one. See [project status](../project-status.md) and [the docs index](../README.md).
+
 Status: implemented first vertical slice, 2026-10-16.
 This is a software model, not human validation.
 

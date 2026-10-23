@@ -4,11 +4,12 @@
 
 The scan was cleaned and completed: flat panels and round parts were trued, the tire was rebuilt with
 a regular tread, and the motor covers, rim ring, display window, rear roller parts, battery packs,
-rear shock, rear linkage, rear handle, pedal decks and brackets and (as an ESTIMATE) the side pad
+rear shock, rear linkage, rear handle, front handle arms, pedal decks and brackets and the side pad
 covers were modelled. `docs/hardware/geometry.md` explains each step;
 `profiles/begode-extreme/geometry.toml` holds the measurements.
 
-Parts that follow the owner's photos (2026-10-16) or an estimate, to be refined from his measurements:
+Parts that follow the owner's photos (2026-10-16 and 2026-10-22) or an estimate, to be refined from the
+owner's measurements:
 
 - **Rear shock.** DNM coil-over without reservoir, 200 mm eye to eye and 750 lb/in (MEASURED by the
   owner), 56 mm x 115 mm spring. It runs forward and down from its top eye on the rocker, under the
@@ -20,13 +21,23 @@ Parts that follow the owner's photos (2026-10-16) or an estimate, to be refined 
   the rocker pin to its own pin on the carriage, above the shock's bottom eye. Both carriage points
   are INFERRED and the carriage's clevis and plates are ESTIMATES: they are hidden in every photo
   (`docs/hardware/geometry.md`, "Rear linkage").
-- **Side pad covers: ESTIMATE.** Not in the scan. Sculpted moulded covers of black plastic,
-  grained like the shell, with steel screw heads (the maker's lettering is left out): the shape
-  comes from a two-view reconstruction of the owner's photos of a removed cover and a parts
-  diagram; the size (401 mm long) and the place on the wheel are estimates until the owner's tape
-  length and a photo of it mounted (`docs/hardware/geometry.md`, "Pad covers").
-- **Rear handle.** Orange CNC U-handle with a black grip bar. The arms' outer faces are in the
-  scan; their three windows, blind pocket, foot and the grip position follow the owner's photos.
+- **Side pad covers.** Not in the scan. Sculpted moulded covers of black plastic (one smooth
+  moulding with rounded edges), grained like the shell, with steel screw heads (no lettering or
+  logo): the shape comes from a
+  two-view reconstruction of the owner's photos of a removed cover; the size (366 mm long) and the
+  place on the wheel are measured on the owner's photo with the cover mounted. The back is cut to
+  the packs: flush on their outer faces and wrapping round their front and rear ends
+  (`docs/hardware/geometry.md`, "Pad covers").
+- **Front handle.** The same orange CNC part family as the rear handle (the owner): per side the
+  parts diagram's L-shaped plate placed on the owner's mounted side photo (a foot bolted to the
+  frame top by 2 x 2 socket-head screws, pocketed windows with see-through centres), and a black
+  20 mm crossbar (the scan's tube).
+- **Rear handle.** Orange CNC U-handle with a black 20 mm grip bar. The arms' outer faces are in
+  the scan; their outline, pocketed windows, dog-leg pocket, foot, socket-head screws and the grip
+  position follow the owner's photos.
+- **Internal fender and cable.** In the scan, over the tyre. The fender rides on the carriage
+  (`fender` moves with the axle); the cable bundle to its front end flexes (`cable` has a travel
+  morph target).
 - **Pedals.** The decks were not on the wheel for the scan. Deck, hinge rod and bracket follow the
   owner's tape photo (300 mm long) and a parts diagram: outline, hexagonal cut-outs on the
   diagram's lattice, a plain centre strip (the maker's lettering is left out), bright machined
@@ -35,9 +46,9 @@ Parts that follow the owner's photos (2026-10-16) or an estimate, to be refined 
 
 | File                      | Triangles | Size    | Use                  |
 | ------------------------- | --------- | ------- | -------------------- |
-| `begode-extreme-lod0.glb` | 340k      | 2.9 MB  | close-ups            |
-| `begode-extreme-lod1.glb` | 134k      | 1.4 MB  | default view         |
-| `begode-extreme-lod2.glb` | 48k       | 0.43 MB | far away, thumbnails |
+| `begode-extreme-lod0.glb` | 350k      | 2.9 MB  | close-ups            |
+| `begode-extreme-lod1.glb` | 146k      | 1.4 MB  | default view         |
+| `begode-extreme-lod2.glb` | 54k       | 0.48 MB | far away, thumbnails |
 
 The files use meshopt compression (`EXT_meshopt_compression`, `KHR_mesh_quantization`). three.js
 loads them with `GLTFLoader` and the `MeshoptDecoder`; drei's `useGLTF` enables it by default.
@@ -59,9 +70,9 @@ begode-extreme
    ├─ roller_sleeve_left, roller_sleeve_right   rear roller halves (smoked grey): the RGB tail light
    ├─ roller_center_band
    ├─ ble_led            blue status LED of the Bluetooth data board
-   ├─ rear_handle        orange CNC U-handle with the black grip bar
+   ├─ rear_handle        orange CNC U-handle: arms, black grip bar, screws
    ├─ speaker_left, speaker_right   roller end caps (speakers)
-   ├─ handle             side plates and tube
+   ├─ handle             front handle: orange CNC arms, black crossbar, screws
    ├─ headlight
    ├─ headlight_lens     the four lenses to light
    ├─ display_window     smoked glass; TEXCOORD_0 spans the T16-007 LED panel
@@ -70,12 +81,14 @@ begode-extreme
    ├─ shock_mount        the carriage's clevis and bottom shaft, the plates and pin for the link:
    │                     moves with the axle
    ├─ link_bottom        the link's lower pin and its plates, origin on the pin
+   ├─ fender             internal fender over the tyre: moves with the axle
+   ├─ cable              cable bundle to the fender: morph target "travel_100mm" (see below)
    ├─ rocker             both rocker plates, the top-eye and rocker-pin cross tubes and spacers,
    │                     chrome bolt heads: turns about z
    ├─ link               both link plates: turns about z on the rocker pin
    ├─ pedal_mount_left, pedal_mount_right   hinge brackets (black block, bright flange)
-   ├─ axle
-   ├─ pad_cover_left, pad_cover_right   side pad covers (ESTIMATE), static
+   ├─ axle               axle stubs: move with the axle
+   ├─ pad_cover_left, pad_cover_right   side pad covers on the packs, static
    └─ pedal_left, pedal_right   origin on the hinge pin: fold about x
 ```
 
@@ -85,7 +98,10 @@ begode-extreme
   `shock_mount` has its origin on the bottom eye, `link_bottom` on the link's lower pin, `rocker`
   on its frame pivot and `link` on the rocker pin; at rest the five origins are the linkage at full
   extension (`profiles/begode-extreme/geometry.toml` `[suspension] linkage_pivots_xz_m`). With the
-  axle `t` metres up the rods, `shock_mount` moves by `t` up the rods (0.13 degrees rearward). In
+  axle `t` metres up the rods, `shock_mount`, `fender` and `axle` move by `t` up the rods (0.13
+  degrees rearward), and each primitive of `cable` has one morph target ("travel_100mm", in the
+  mesh's `extras.targetNames`) that moves its vertices up to 0.100 m up the rods (all the way where
+  the cable lies in the tyre's path, less up to 60 mm away from it): set its weight to `t / 0.100`. In
   the turning reading (the default) `link_bottom` moves with it, the rocker turns about z until the
   link's length fits between the rocker pin and the link's lower pin, and the link turns to point
   at that pin; in the fixed reading the rocker, the link and `link_bottom` stay still. The shock
@@ -103,3 +119,12 @@ begode-extreme
   `ble_led` have their own materials, so the app can make them
   emissive. `profiles/begode-extreme/lights.toml` places the LED rings inside the sleeves.
 - **Colours.** Each part has its own PBR material; ambient occlusion is baked into the vertex colours.
+
+## Changing the model
+
+No script in this repository builds these files: they are edited as glTF and committed as they are.
+To change a part, edit all three levels of detail with a glTF editor, keep the node names and axes
+above, keep the measurements in `profiles/begode-extreme/geometry.toml` in step, and mark a value
+nobody measured as an ESTIMATE in `docs/hardware/geometry.md`. The local macOS package refuses
+untracked model files and checks the model hashes against the frontend build. The open model
+follow-ups are on the [roadmap board](https://github.com/users/tarikbc/projects/3).

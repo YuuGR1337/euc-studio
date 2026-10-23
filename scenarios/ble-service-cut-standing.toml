@@ -17,6 +17,22 @@ speed_kmh = [[0, 0]]
 settings = "tarik-2026-10-15"
 # Rider: the default rider, standing still.
 
+# City world (docs/models/world.md): seed 42, on the level paver platform of the plaza at
+# (48.1, -108.0), 15.9 x 6.4 m, the wheel in its middle, at least 3 m from every edge. Ideal ground
+# (hills = 0, no road defects): a standstill test.
+[world]
+seed = 42
+revision = 2
+start = { x_m = 48.1, y_m = -108.01, heading_deg = 0.0 }
+
+[world.densities]
+hills = 0.0
+potholes = 0.0
+manholes = 0.0
+cracks = 0.0
+rough_patches = 0.0
+wet_patches = 0.0
+
 [[inject]]
 at_s = 10.0
 bytes = "c"

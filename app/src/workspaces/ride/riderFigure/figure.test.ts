@@ -1,0 +1,220 @@
+import { describe, expect, it } from "vitest";
+import * as THREE from "three";
+import { RIDER_BLOCKOUT as B } from "../../../vendor/euc-thrills/tuning.ts";
+import { GAME_TO_BODY, RiderFigure } from "./figure.ts";
+import { ANKLE_ABOVE_PEDAL, articulatedBodies, nodesFor, standArticulated } from "./fixtures.ts";
+import { buildRiderRig } from "./rig.ts";
+import { STREET_KIT } from "./streetKit.ts";
+import { type RiderBinding, bindRider, poseSkeleton, skeletonPose } from "./skeleton.ts";
+
+const world = (object: THREE.Object3D, local: THREE.Vector3) => {
+  object.updateWorldMatrix(true, false);
+  return local.clone().applyMatrix4(object.matrixWorld);
+};
+
+function posed(options: Parameters<typeof standArticulated>[2] = {}) {
+  const bodies = articulatedBodies();
+  const binding = bindRider(bodies) as RiderBinding;
+  const nodes = nodesFor(bodies);
+  standArticulated(bodies, nodes, options);
+  const pose = skeletonPose();
+  expect(poseSkeleton(binding, nodes, pose)).toBe(true);
+  const figure = new RiderFigure();
+  figure.pose(binding, pose, 1 / 60);
+  figure.rig.root.updateMatrixWorld(true);
+  return { binding, pose, figure };
+}
+
+describe("rider figure", () => {
+  it("builds every part with vertex colours and normals, and frees it all", () => {
+    const rig = buildRiderRig();
+    const meshes: THREE.Mesh[] = [];
+    rig.root.traverse((o) => {
+      if (o instanceof THREE.Mesh) meshes.push(o);
+    });
+    expect(meshes).toHaveLength(26);
+    for (const mesh of meshes) {
+      expect(mesh.geometry.getAttribute("color")).toBeDefined();
+      expect(mesh.geometry.getAttribute("normal")).toBeDefined();
+      expect((mesh.material as THREE.MeshStandardMaterial).vertexColors).toBe(true);
+    }
+    let freed = 0;
+    for (const mesh of meshes) mesh.geometry.addEventListener("dispose", () => freed++);
+    rig.dispose();
+    expect(freed).toBe(meshes.length);
+  });
+
+  it("wears the street kit: a mirrored visor, a mirror on the left, no printed sheet", () => {
+    expect(STREET_KIT.atlas).toBeUndefined();
+    const rig = buildRiderRig();
+    const named = (name: string) => {
+      const mesh = rig.root.getObjectByName(name);
+      if (!(mesh instanceof THREE.Mesh)) throw new Error(`no ${name}`);
+      return mesh;
+    };
+    const visor = named("rider-face").material as THREE.MeshStandardMaterial;
+    expect(visor.metalness).toBe(1);
+    expect(visor.roughness).toBeLessThan(0.1);
+    // The mirror's glass is the visor's material, out on the rider's left (+x) of the helmet.
+    expect(named("rider-mirror-glass").material).toBe(visor);
+    rig.root.updateMatrixWorld(true);
+    const mirror = new THREE.Box3().setFromObject(named("rider-mirror"));
+    const helmet = new THREE.Box3().setFromObject(named("rider-face").parent as THREE.Object3D);
+    expect(mirror.getCenter(new THREE.Vector3()).x).toBeGreaterThan(0.15);
+    expect(helmet.max.x).toBeGreaterThan(mirror.max.x - 1e-9);
+    rig.root.traverse((o) => {
+      if (o instanceof THREE.Mesh)
+        expect((o.material as THREE.MeshStandardMaterial).map).toBeNull();
+    });
+    rig.dispose();
+  });
+
+  it("keeps the legs' wheel side near the physics contact, the outside baggy", () => {
+    const rig = buildRiderRig();
+    for (const leg of rig.legs) {
+      let inner = 0;
+      let outer = 0;
+      for (const part of [leg.thigh, leg.shin])
+        for (const child of part.children) {
+          if (!(child instanceof THREE.Mesh)) continue;
+          const position = (child as THREE.Mesh).geometry.getAttribute("position");
+          for (let i = 0; i < position.count; i++) {
+            // In a leg's frame +x is the rider's left: the wheel side is -x on the left leg.
+            const x = position.getX(i) * leg.side;
+            inner = Math.max(inner, -x);
+            outer = Math.max(outer, x);
+          }
+        }
+      // The lateral rider's knee ball, shin and calf touch the pads about 5 cm from the axis.
+      expect(inner).toBeLessThan(0.0625);
+      expect(outer).toBeGreaterThan(0.09);
+    }
+    rig.dispose();
+  });
+
+  it("turns the game's joint frame into the physics body frame", () => {
+    const along = (x: number, y: number, z: number) =>
+      new THREE.Vector3(x, y, z)
+        .applyQuaternion(GAME_TO_BODY)
+        .toArray()
+        .map((v) => +v.toFixed(9));
+    expect(along(1, 0, 0)).toEqual([0, 1, 0]); // the rider's left
+    expect(along(0, 1, 0)).toEqual([0, 0, 1]); // up
+    expect(along(0, 0, 1)).toEqual([1, 0, 0]); // forward
+  });
+
+  it("puts each leg part on its physics bodies: thigh hip to knee, shin knee to ankle", () => {
+    const { pose, figure } = posed({ kneeBend: 0.5 });
+    for (const [i, leg] of figure.rig.legs.entries()) {
+      const at = pose.legs[i];
+      if (!at) throw new Error("no leg");
+      expect(
+        world(leg.thigh, new THREE.Vector3(0, -B.thighLength, 0)).distanceTo(at.knee),
+      ).toBeLessThan(1e-6);
+      expect(
+        world(leg.shin, new THREE.Vector3(0, -B.shinLength, 0)).distanceTo(at.ankle),
+      ).toBeLessThan(1e-6);
+      // The knee faces forward (physics +x) and the boot's toe too.
+      expect(world(leg.thigh, new THREE.Vector3(0, -B.thighLength / 2, 1)).x).toBeGreaterThan(
+        at.knee.x,
+      );
+      expect(world(leg.foot, new THREE.Vector3(0, 0, 1)).x).toBeGreaterThan(at.ankle.x + 0.99);
+    }
+  });
+
+  it("stands the boots' soles on the pedal tread, below the physics ankle", () => {
+    const { pose, figure } = posed();
+    for (const [i, leg] of figure.rig.legs.entries()) {
+      const box = new THREE.Box3().setFromObject(leg.boot);
+      const ankle = pose.legs[i]?.ankle as THREE.Vector3;
+      expect(box.min.z).toBeCloseTo(ankle.z - ANKLE_ABOVE_PEDAL, 2);
+    }
+  });
+
+  it("tops the helmet at the physics head, and keeps part of a forward lean off the head", () => {
+    const { binding, figure } = posed();
+    const box = new THREE.Box3().setFromObject(figure.rig.neck);
+    expect(box.max.z - 1.2).toBeCloseTo(binding.headTop, 2);
+    expect(figure.rig.neck.rotation.x).toBeCloseTo(0, 9);
+    const leaning = posed({ pitch: 0.3 }).figure;
+    expect(leaning.rig.neck.rotation.x).toBeCloseTo(-0.3 * B.headStabilizationFactor, 6);
+    const folded = posed({ pitch: 1.2 }).figure;
+    expect(folded.rig.neck.rotation.x).toBeCloseTo(-B.headStabilizationMax, 6);
+  });
+
+  describe("arm carriage", () => {
+    const bodies = articulatedBodies();
+    const binding = bindRider(bodies) as RiderBinding;
+    const nodes = nodesFor(bodies);
+    const pose = skeletonPose();
+    const ride = (figure: RiderFigure, speed: number, seconds: number, lean = 0) => {
+      for (let t = 0; t < seconds; t += 1 / 60) {
+        standArticulated(bodies, nodes, { at: new THREE.Vector3(speed * t, 0, 1.2), lean });
+        poseSkeleton(binding, nodes, pose);
+        figure.pose(binding, pose, 1 / 60);
+      }
+      figure.rig.root.updateMatrixWorld(true);
+    };
+    /** Right (0) or left (1) arm: the hand from the pelvis, world. */
+    const hand = (figure: RiderFigure, i: number) =>
+      (figure.rig.arms[i]?.hand as THREE.Object3D)
+        .getWorldPosition(new THREE.Vector3())
+        .sub(pose.pelvis);
+    /** The elbow's interior angle, rad. */
+    const elbowAngle = (figure: RiderFigure, i: number) => {
+      const arm = figure.rig.arms[i];
+      if (!arm) throw new Error("no arm");
+      const s = arm.shoulder.getWorldPosition(new THREE.Vector3());
+      const e = arm.elbow.getWorldPosition(new THREE.Vector3());
+      const h = arm.hand.getWorldPosition(new THREE.Vector3());
+      return s.sub(e).angleTo(h.sub(e));
+    };
+
+    it("rides the arms bent and loose, the knuckles out, a little lower and closer at speed", () => {
+      const figure = new RiderFigure();
+      ride(figure, 0, 1);
+      expect(figure.speedMps).toBeCloseTo(0, 9);
+      const still = [hand(figure, 0), hand(figure, 1)];
+      for (const i of [0, 1]) {
+        const angle = elbowAngle(figure, i);
+        expect(angle).toBeGreaterThan(1.6);
+        expect(angle).toBeLessThan(2.6);
+        // The knuckles (the hand's +z) face outward: the right hand's to -y, the left's to +y.
+        const side = i === 0 ? -1 : 1;
+        const arm = figure.rig.arms[i] as { hand: THREE.Object3D };
+        const out = new THREE.Vector3(0, 0, 1).transformDirection(arm.hand.matrixWorld);
+        expect(out.y * side).toBeGreaterThan(0.5);
+      }
+      // Never a mirror: the right hand rides a little further forward.
+      expect(still[0]?.x).toBeGreaterThan((still[1]?.x ?? 0) + 0.01);
+      ride(figure, 20, 3);
+      expect(figure.speedMps).toBeCloseTo(20, 1);
+      const riding = hand(figure, 0);
+      expect(riding.z).toBeLessThan((still[0]?.z ?? 0) - 0.02);
+      expect(Math.abs(riding.y)).toBeLessThan(Math.abs(still[0]?.y ?? 0));
+    });
+
+    it("swings the high-side arm out and drops the low-side hand in a lean", () => {
+      const upright = new RiderFigure();
+      ride(upright, 5, 1);
+      const figure = new RiderFigure();
+      // Leaning right: the left arm is on the high side.
+      ride(figure, 5, 1, 0.3);
+      expect(figure.leanRad).toBeCloseTo(0.3, 2);
+      const left = hand(figure, 1);
+      const right = hand(figure, 0);
+      const pelvisLeft = new THREE.Vector3(0, 1, 0).applyQuaternion(pose.pelvisQuaternion);
+      const pelvisUp = new THREE.Vector3(0, 0, 1).applyQuaternion(pose.pelvisQuaternion);
+      expect(left.dot(pelvisLeft)).toBeGreaterThan(hand(upright, 1).y + 0.1);
+      expect(left.dot(pelvisUp)).toBeGreaterThan(hand(upright, 1).z + 0.05);
+      expect(right.dot(pelvisUp)).toBeLessThan(hand(upright, 0).z - 0.05);
+    });
+  });
+
+  it("ignores a jump (a reset or a seek) as a speed", () => {
+    const { binding, pose, figure } = posed();
+    pose.pelvis.x += 50;
+    figure.pose(binding, pose, 1 / 60);
+    expect(figure.speedMps).toBe(0);
+  });
+});

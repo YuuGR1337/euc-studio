@@ -1,12 +1,17 @@
-//! Native macOS buzzer output. The live runner owns this service; Compare must not use it.
+//! Native macOS sound: the wheel's buzzer and, in a free ride, the ride bed (motor, tyre, wind:
+//! ride_sound.rs). The live runner owns this service; Compare must not use it.
 //!
 //! Start before firmware stepping. Reset once per run, then submit every sampled simulation
 //! frontier, including batches with no tone changes. Audio never reconstructs a past boot.
+//! Both voices play on simulated time; the master volume scales both, and the bed can be faded
+//! out on its own (a hidden window) while the buzzer goes on.
 
 use std::collections::VecDeque;
 use std::fmt;
 
 pub use super::host::Tone;
+use super::ride_sound::Bed;
+pub use super::ride_sound::Ride;
 const SILENT: Tone = Tone { t_s: 0.0, hz: 0.0, duty: 0.0 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -32,6 +37,9 @@ const SAMPLE_RATE: f64 = 48_000.0;
 const LEAD_FRAMES: u64 = 2_880; // 60 ms scheduling margin, not a recording/replay buffer.
 const MAX_EVENTS: usize = 2_048;
 const MAX_BATCH: usize = 128;
+/// The master volume follows the panel over this, s; the bed fades in or out over `BED_FADE_S`.
+const VOLUME_GLIDE_S: f64 = 0.05;
+const BED_FADE_S: f64 = 0.3;
 
 pub use platform::NativeBuzzer;
 
@@ -108,6 +116,7 @@ mod platform {
         rate: f64,
         len: usize,
         tones: [Tone; MAX_BATCH],
+        ride: Option<Ride>,
     }
     // A fixed-size channel preallocates the tone payloads. submit() allocates no payload or Vec.
     #[allow(clippy::large_enum_variant)]
@@ -116,6 +125,7 @@ mod platform {
         Playing(u64, bool, Control),
         Enabled(bool, Control),
         Feed(Batch),
+        Mix(f64, bool),
     }
 
     struct Inner {
@@ -189,7 +199,15 @@ mod platform {
 
         /// Submit every source frontier, even with no changes. Never waits for the audio thread.
         /// rate is simulated seconds per audio second; it changes timing, never carrier frequency.
-        pub fn submit(&self, epoch: u64, sim_time: f64, rate: f64, tones: &[Tone]) -> Result<(), AudioError> {
+        /// `ride` is the free ride's sample for the bed; None quiets it (any other run).
+        pub fn submit(
+            &self,
+            epoch: u64,
+            sim_time: f64,
+            rate: f64,
+            tones: &[Tone],
+            ride: Option<Ride>,
+        ) -> Result<(), AudioError> {
             self.check_epoch(epoch)?;
             if self.inner.shared.fault.load(Ordering::Acquire) {
                 return Err(failure(self.status().error.unwrap_or_else(|| "Native audio is unavailable".into())));
@@ -197,7 +215,7 @@ mod platform {
             if tones.len() > MAX_BATCH {
                 return self.fail(failure(format!("Native audio batch exceeds {MAX_BATCH} tone changes")));
             }
-            let mut batch = Batch { epoch, time: sim_time, rate, len: tones.len(), tones: [SILENT; MAX_BATCH] };
+            let mut batch = Batch { epoch, time: sim_time, rate, len: tones.len(), tones: [SILENT; MAX_BATCH], ride };
             batch.tones[..tones.len()].copy_from_slice(tones);
             self.enqueue(Message::Feed(batch))
         }
@@ -216,6 +234,15 @@ mod platform {
 
         pub fn status(&self) -> AudioStatus {
             lock(&self.inner.shared.status).clone()
+        }
+
+        /// The master volume (0 to 1, both voices) and whether the ride bed sounds (false while
+        /// the window is hidden). A preference: it never waits for the audio thread.
+        pub fn set_mix(&self, volume: f64, bed: bool) -> Result<(), AudioError> {
+            if !volume.is_finite() || !(0.0..=1.0).contains(&volume) {
+                return Err(failure("Sound volume must be between 0 and 1"));
+            }
+            self.enqueue(Message::Mix(volume, bed))
         }
 
         /// PCM samples successfully enqueued, and samples with nonzero amplitude. Not speaker proof.
@@ -361,7 +388,13 @@ mod platform {
                             continue;
                         }
                         let result = if enabled && playing {
-                            scheduler.push(batch.epoch, batch.time, batch.rate, &batch.tones[..batch.len])
+                            scheduler.push_ride(
+                                batch.epoch,
+                                batch.time,
+                                batch.rate,
+                                &batch.tones[..batch.len],
+                                batch.ride,
+                            )
                         } else {
                             scheduler.observe(batch.epoch, batch.time, batch.rate, &batch.tones[..batch.len])
                         };
@@ -369,6 +402,7 @@ mod platform {
                             shared.fail(&error);
                         }
                     }
+                    Message::Mix(volume, bed) => scheduler.mix(volume, bed),
                 }
             }
             if !shared.fault.load(Ordering::Acquire) {
@@ -662,8 +696,8 @@ mod platform {
             let (tx, _rx) = mpsc::sync_channel(1);
             let proxy =
                 NativeBuzzer { inner: Arc::new(Inner { tx, shared, wake: thread::current(), join: Mutex::new(None) }) };
-            proxy.submit(1, 0.0, 1.0, &[]).unwrap();
-            assert!(proxy.submit(1, 0.01, 1.0, &[]).is_err());
+            proxy.submit(1, 0.0, 1.0, &[], None).unwrap();
+            assert!(proxy.submit(1, 0.01, 1.0, &[], None).is_err());
             assert_eq!(proxy.status().state, "error");
             assert!(proxy.status().error.unwrap().contains("queue is full"));
         }
@@ -731,7 +765,7 @@ mod platform {
                 }
                 // This deliberately lags the actual 1x source clock throughout the silent start.
                 let rate = if time < 0.29 { 0.9034 } else { 1.0 };
-                audio.submit(1, time, rate, &edges[first..next]).unwrap();
+                audio.submit(1, time, rate, &edges[first..next], None).unwrap();
                 assert_eq!(audio.status().state, "ready", "{:?}", audio.status());
                 if time >= 0.8 {
                     break;
@@ -766,7 +800,17 @@ mod platform {
         pub fn reset(&self, _epoch: u64, _time: f64) -> Result<(), AudioError> {
             Ok(())
         }
-        pub fn submit(&self, _epoch: u64, _time: f64, _rate: f64, _tones: &[Tone]) -> Result<(), AudioError> {
+        pub fn submit(
+            &self,
+            _epoch: u64,
+            _time: f64,
+            _rate: f64,
+            _tones: &[Tone],
+            _ride: Option<Ride>,
+        ) -> Result<(), AudioError> {
+            Ok(())
+        }
+        pub fn set_mix(&self, _volume: f64, _bed: bool) -> Result<(), AudioError> {
             Ok(())
         }
         pub fn set_playing(&self, _epoch: u64, _playing: bool) -> Result<(), AudioError> {
@@ -806,6 +850,16 @@ struct Scheduler {
     source_tone: Tone,
     events: VecDeque<Scheduled>,
     synth: Synth,
+    /// The free ride's samples for the bed, on the same clock as the tones (None quiets it).
+    rides: VecDeque<(u64, Option<Ride>)>,
+    /// The last batch carried a ride sample.
+    riding: bool,
+    bed: Bed,
+    /// The master volume and the bed's gate: targets, and where they are now.
+    volume: f64,
+    volume_now: f64,
+    bed_on: bool,
+    bed_now: f64,
 }
 
 impl Scheduler {
@@ -820,7 +874,18 @@ impl Scheduler {
             source_tone: SILENT,
             events: VecDeque::with_capacity(MAX_EVENTS),
             synth: Synth::new(),
+            rides: VecDeque::with_capacity(MAX_EVENTS),
+            riding: false,
+            bed: Bed::new(),
+            volume: 1.0,
+            volume_now: 1.0,
+            bed_on: true,
+            bed_now: 1.0,
         }
+    }
+    fn mix(&mut self, volume: f64, bed: bool) {
+        self.volume = volume.clamp(0.0, 1.0);
+        self.bed_on = bed;
     }
     fn reset(&mut self, epoch: u64, time: f64) -> Result<(), AudioError> {
         if !time.is_finite() || time < 0.0 || self.epoch.is_some_and(|old| epoch < old) {
@@ -865,8 +930,24 @@ impl Scheduler {
         }
         Ok(())
     }
+    #[cfg(test)]
     fn push(&mut self, epoch: u64, time: f64, rate: f64, tones: &[Tone]) -> Result<(), AudioError> {
+        self.push_ride(epoch, time, rate, tones, None)
+    }
+    fn push_ride(
+        &mut self,
+        epoch: u64,
+        time: f64,
+        rate: f64,
+        tones: &[Tone],
+        ride: Option<Ride>,
+    ) -> Result<(), AudioError> {
         self.validate(epoch, time, rate, tones)?;
+        if let Some(ride) = &ride
+            && (!ride.valid() || ride.t_s < self.last_time || ride.t_s > time)
+        {
+            return Err(failure("Invalid or out-of-batch ride sound sample"));
+        }
         if (time - self.last_time) / rate > 1.0 {
             return Err(failure("Native audio source interval exceeded the bounded scheduling window"));
         }
@@ -917,20 +998,47 @@ impl Scheduler {
         for tone in tones {
             self.events.push_back(Scheduled { frame: mapped(tone.t_s).round() as u64, tone: *tone });
         }
+        // The bed is a set of gliding parameters, not edges: a late sample takes effect now.
+        if ride.is_some() || self.riding {
+            let at = ride.map_or(time, |r| r.t_s);
+            let frame = (mapped(at).round() as u64).max(self.cursor);
+            if self.rides.len() < MAX_EVENTS {
+                self.rides.push_back((frame, ride));
+            }
+            self.riding = ride.is_some();
+        }
         self.offset = Some(offset);
         self.frontier = frontier.round() as u64;
         self.observe(epoch, time, rate, tones)
     }
     fn render(&mut self, output: &mut [f32]) -> Result<(), AudioError> {
         let mut underrun = false;
+        let volume_rate = 1.0 - (-1.0 / (SAMPLE_RATE * VOLUME_GLIDE_S)).exp();
+        let bed_step = 1.0 / (SAMPLE_RATE * BED_FADE_S);
         for sample in output {
             while self.events.front().is_some_and(|event| event.frame <= self.cursor) {
                 if let Some(event) = self.events.pop_front() {
                     self.synth.tone(event.tone);
                 }
             }
+            while self.rides.front().is_some_and(|(frame, _)| *frame <= self.cursor) {
+                match self.rides.pop_front() {
+                    Some((_, Some(ride))) => self.bed.set(&ride),
+                    Some((_, None)) => self.bed.quiet(),
+                    None => {}
+                }
+            }
+            self.volume_now += (self.volume - self.volume_now) * volume_rate;
+            self.bed_now =
+                if self.bed_on { (self.bed_now + bed_step).min(1.0) } else { (self.bed_now - bed_step).max(0.0) };
             if self.cursor < self.frontier {
-                *sample = self.synth.next();
+                let buzzer = f64::from(self.synth.next());
+                let bed = if self.bed.silent() || self.bed_now == 0.0 {
+                    0.0
+                } else {
+                    self.bed_now * self.bed.next(self.synth.target_gain > 0.0)
+                };
+                *sample = ((buzzer + bed) * self.volume_now).clamp(-0.9, 0.9) as f32;
             } else {
                 *sample = 0.0;
                 underrun |= self.synth.target_gain > 0.0;
@@ -945,6 +1053,9 @@ impl Scheduler {
         self.cursor = 0;
         self.frontier = 0;
         self.synth = Synth::new();
+        self.rides.clear();
+        self.riding = false;
+        self.bed = Bed::new();
     }
 }
 
@@ -1226,5 +1337,77 @@ mod tests {
         s.render(&mut [0.0; 4800]).unwrap();
         assert!(s.push(1, 1.11, 0.9034, &[tone(1.001, 2700.0)]).is_err());
         assert!(s.events.is_empty());
+    }
+
+    fn ride(t_s: f64, speed_mps: f64) -> Ride {
+        Ride {
+            t_s,
+            electrical_hz: 26.0 * speed_mps / (std::f64::consts::TAU * 0.2251),
+            phase_current_a: 20.0,
+            speed_mps,
+            knob_hz: 15.0 * speed_mps / (std::f64::consts::TAU * 0.2251),
+            surface: euc_world::Material::Asphalt,
+            wet: false,
+        }
+    }
+    /// Feeds a free ride at 60 samples a second for `seconds`, rendering as it goes.
+    fn ride_for(s: &mut Scheduler, from: f64, seconds: f64, speed: f64, tones: &[Tone]) -> Vec<f32> {
+        let mut pcm = Vec::new();
+        let steps = (seconds * 60.0).round() as usize;
+        for i in 1..=steps {
+            let t = from + i as f64 / 60.0;
+            let mine: Vec<Tone> = tones.iter().copied().filter(|x| x.t_s > t - 1.0 / 60.0 && x.t_s <= t).collect();
+            s.push_ride(1, t, 1.0, &mine, Some(ride(t, speed))).unwrap();
+            let mut block = vec![0.0; 800];
+            s.render(&mut block).unwrap();
+            pcm.extend(block);
+        }
+        pcm
+    }
+
+    #[test]
+    fn a_free_ride_sounds_on_simulated_time_and_quiets_when_its_samples_stop() {
+        let mut s = scheduler();
+        let pcm = ride_for(&mut s, 0.0, 1.0, 10.0, &[]);
+        // Nothing before the lead, then the bed.
+        assert_eq!(energy(&pcm[..LEAD_FRAMES as usize - 1]), 0.0);
+        assert!(energy(&pcm[frame(0.5)..]) > 1e-6);
+        // A batch with no ride sample (a scenario run, say) quiets it; it never errors.
+        let mut tail = Vec::new();
+        for i in 1..=30 {
+            s.push(1, 1.0 + i as f64 / 60.0, 1.0, &[]).unwrap();
+            let mut block = vec![0.0; 800];
+            s.render(&mut block).unwrap();
+            tail.extend(block);
+        }
+        assert!(energy(&tail[tail.len() - 4800..]) < 1e-9);
+    }
+
+    #[test]
+    fn the_master_volume_scales_both_voices_and_a_hidden_window_quiets_only_the_bed() {
+        let loud = {
+            let mut s = scheduler();
+            let pcm = ride_for(&mut s, 0.0, 1.0, 10.0, &[]);
+            energy(&pcm[frame(0.5)..])
+        };
+        let mut s = scheduler();
+        s.mix(0.5, true);
+        let pcm = ride_for(&mut s, 0.0, 1.0, 10.0, &[]);
+        let half = energy(&pcm[frame(0.5)..]);
+        assert!((half / loud - 0.25).abs() < 0.05, "half {half} loud {loud}");
+        // Hidden: the bed fades out over 0.3 s; a beep still sounds.
+        let mut s = scheduler();
+        s.mix(1.0, false);
+        let pcm = ride_for(&mut s, 0.0, 1.0, 10.0, &[tone(0.7, 2700.0), tone(0.8, 0.0)]);
+        assert!(energy(&pcm[frame(0.4)..frame(0.7)]) < 1e-12);
+        assert!(energy(&pcm[frame(0.72)..frame(0.8)]) > 1e-3);
+    }
+
+    #[test]
+    fn a_ride_sample_outside_its_batch_or_out_of_range_is_refused() {
+        let mut s = scheduler();
+        assert!(s.push_ride(1, 0.1, 1.0, &[], Some(ride(0.2, 5.0))).is_err());
+        assert!(s.push_ride(1, 0.1, 1.0, &[], Some(Ride { speed_mps: f64::NAN, ..ride(0.1, 5.0) })).is_err());
+        s.push_ride(1, 0.1, 1.0, &[], Some(ride(0.1, 5.0))).unwrap();
     }
 }

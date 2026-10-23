@@ -304,6 +304,11 @@ export interface EngineClient {
   readonly audio?: NativeAudioStatus;
   /** Apply the sound preference to native output. Failures do not stop the simulator. */
   setSound?(enabled: boolean): Promise<void>;
+  /**
+   * Native output's master gain (0 to 1, the buzzer and the ride sound) and whether the ride
+   * sound plays (false while the window is hidden). Failures do not stop the simulator.
+   */
+  setSoundMix?(gain: number, ride: boolean): Promise<void>;
   /** Refresh native device status without changing the sound preference. */
   refreshAudioStatus?(): Promise<void>;
   readonly status: EngineStatus;

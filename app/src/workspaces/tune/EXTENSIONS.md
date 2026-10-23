@@ -29,16 +29,14 @@ Paused intervals show no percentage measurement.
 Counter decreases and session changes discard the baseline.
 The table identifies simulator cycle estimates separately from physical timing measurements.
 
-## Parent-owned wiring
+## Native wiring
 
-The parent adds `Host::handler_counters() -> Option<super::tune::HandlerCounters>` with a default `None` result.
-The RideHost implementation returns `Some(super::tune::handler_counters(self.session.machine()))`.
-The StillHost implementation can return `Some(super::tune::handler_counters(&self.machine))`.
-The parent calls `tune::respond_with_handlers` from the runner.
-Its last argument is `|host| host.handler_counters()`.
-The parent confirmed this wiring during implementation.
-The obsolete `respond` wrapper is removed.
-This worker does not modify host or runner files.
+`Host::handler_counters() -> Option<super::tune::HandlerCounters>` has a default `None` result
+(`app/src-tauri/src/engine/host.rs`).
+The ride host and the still host return `Some(super::tune::handler_counters(...))` from their machine, and the Free
+Ride host does too (`free_ride.rs`).
+The runner calls `tune::respond_with_handlers` with `|host| host.handler_counters()` as its last argument
+(`runner.rs`).
 
 ## Scope ledger
 

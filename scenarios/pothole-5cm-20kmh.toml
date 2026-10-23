@@ -1,13 +1,14 @@
 # PRELIMINARY: the rear suspension is modelled (measured spring; stroke and linkage ratio are
 # estimates), but the rider has no knees and the tire is a soft contact. Do not tune this run to pass.
 #
-# pothole-20kmh with a 5 cm deep hole: the far edge dips the shell to about -42° for 0.06-0.09 s and
-# turns it faster than the stock gyro's ±500 °/s. Stock and compat ride through on a wrong attitude: the
-# clipped gyro leaves them believing about +1° while the shell is 2-5° nose down. Clean reads the true dip
-# (±2000 °/s, GYRO_500DPS_CLIP) and its error angle passes 40° for up to 0.06 s; the stock 22 ms error
-# detector would cut there and the wheel would fall, so clean waits the pitch detector's 105 ms
-# (ERROR_CUTOFF_22MS) and rides through. docs/models/scenarios.md and docs/findings/stock-firmware.md
-# (finding 7) have the numbers; firmware/docs/cutoffs.md has the cut-off rules.
+# pothole-20kmh with a deeper city pothole, 4.9 cm deep and 0.60 m across: the speed dips from 20.1 to
+# 15.6 km/h, the suspension bottoms (68 mm), Iq reaches 247 A, and the shell pitches 5.1° nose down
+# at up to about 110 °/s (1 kHz samples), inside the stock gyro's ±500 °/s (stock, all three quanta;
+# docs/models/scenarios.md, "City world (W2)"). On the current body model the dip no longer passes
+# 40° and the gyro does not clip, on the flat floor either (3.8°, 88 °/s before W2): finding 7 in
+# docs/findings/stock-firmware.md (a dip to about -42°, past the gyro's range, and clean's
+# GYRO_500DPS_CLIP and ERROR_CUTOFF_22MS answers to it) comes from an earlier model and is to be
+# measured again. firmware/docs/cutoffs.md has the cut-off rules.
 #
 # The outcome is decided by the mechanics within 0.1 s, faster than the firmware's balance loop can
 # change much, and it depends on the body model. The `record` checks always pass; `upright` and
@@ -22,14 +23,21 @@ speed_kmh = [[0, 0], [6, 0], [11, 20]]
 settings = "tarik-2026-10-15"
 # Rider: the default rider (it eases off when the pedals tip back).
 
-[terrain]
-length_m = 120.0
+# City world (docs/models/world.md): seed 42, a real pothole on a local street, 4.9 cm deep and
+# 0.60 m across, at (-28.33, 214.60), reached after 50 m heading north on a level, straight
+# approach with nothing else on it. Level city (hills = 0) with manholes, cracks, rough and wet
+# patches off so the approach stays clean; potholes keep their density (this one is among them).
+[world]
+seed = 42
+revision = 2
+start = { x_m = -28.33, y_m = 164.6, heading_deg = 90.0 }
 
-[[terrain.feature]]
-kind = "pothole"
-at_m = 50.0
-depth_m = 0.05
-length_m = 0.5
+[world.densities]
+hills = 0.0
+manholes = 0.0
+cracks = 0.0
+rough_patches = 0.0
+wet_patches = 0.0
 
 [[expect]]
 check = "record"

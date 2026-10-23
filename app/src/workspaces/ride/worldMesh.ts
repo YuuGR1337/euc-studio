@@ -61,31 +61,44 @@ export interface ChunkMeshArrays {
   props: ChunkProp[];
 }
 
-/** Material colours (sRGB), by euc_world::Material code. Muted for the dark studio. */
+/**
+ * Material colours (sRGB), by euc_world::Material code: muted mid-values for daylight under the
+ * Neutral tone mapping, no pure white even in paint (EUC Thrills' palette discipline, MIT).
+ */
 const PALETTE: [number, number, number][] = [
-  [58, 60, 64], // asphalt
-  [86, 84, 80], // worn asphalt
-  [142, 140, 134], // concrete
-  [138, 120, 100], // paving stones
-  [96, 88, 78], // cobblestones
-  [143, 130, 104], // gravel
-  [63, 90, 50], // grass
-  [92, 72, 52], // dirt
-  [216, 214, 207], // paint
-  [58, 67, 80], // metal
+  [114, 118, 124], // asphalt
+  [134, 130, 122], // worn asphalt
+  [178, 174, 164], // concrete
+  [158, 122, 104], // paving stones
+  [130, 120, 108], // cobblestones
+  [164, 150, 124], // gravel
+  [84, 116, 70], // grass
+  [128, 102, 76], // dirt
+  [226, 224, 216], // paint
+  [104, 110, 118], // metal
 ];
-const WET: [number, number, number] = [36, 52, 74];
-const ASPHALT: [number, number, number] = [58, 60, 64];
-const CONCRETE: [number, number, number] = [158, 155, 147];
+const WET: [number, number, number] = [62, 76, 92];
+const ASPHALT: [number, number, number] = [114, 118, 124];
+const CONCRETE: [number, number, number] = [178, 174, 164];
 
 /** Box colours (linear 0..1 after sRGB decode in the shader: given as sRGB here). */
 const BOX_COLOURS: [number, number, number][] = [
-  [158, 155, 147], // curb stone
-  [150, 146, 138], // step
-  [138, 120, 100], // platform (pavers on top; walls the same)
-  [146, 142, 134], // ramp
-  [92, 96, 108], // building (varied per id below)
-  [90, 90, 90], // prop (not sent as boxes)
+  [180, 176, 166], // curb stone
+  [172, 168, 158], // step
+  [158, 122, 104], // platform (pavers on top; walls the same)
+  [170, 166, 156], // ramp
+  [178, 170, 152], // building (varied per id below)
+  [120, 120, 120], // prop (not sent as boxes)
+];
+/** Facade colours a building takes by its position (light plaster, sand, clay, stone, brick). */
+const FACADES: [number, number, number][] = [
+  [189, 181, 160],
+  [186, 168, 148],
+  [170, 172, 174],
+  [152, 158, 168],
+  [172, 150, 134],
+  [206, 198, 182],
+  [132, 112, 100],
 ];
 
 /** Reads one payload. Throws on a malformed buffer. */
@@ -256,7 +269,10 @@ export function buildChunk(chunk: DecodedChunk): ChunkMeshArrays {
     let colour = BOX_COLOURS[box.kind] ?? CONCRETE;
     if (box.kind === 4) {
       const t = hash(Math.round(box.centre[0] * 10), Math.round(box.centre[1] * 10));
-      colour = [74 + 40 * t, 76 + 34 * t, 84 + 22 * t];
+      const base = FACADES[Math.floor(t * FACADES.length)] ?? CONCRETE;
+      const shade =
+        0.92 + 0.16 * hash(Math.round(box.centre[1] * 10), Math.round(box.centre[0] * 10));
+      colour = [base[0] * shade, base[1] * shade, base[2] * shade];
     }
     FACES.forEach((face, f) => {
       const [u, v] = face[0] !== 0 ? [1, 2] : face[1] !== 0 ? [0, 2] : [0, 1];

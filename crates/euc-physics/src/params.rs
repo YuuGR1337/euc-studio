@@ -36,6 +36,9 @@ pub struct Shapes {
     pub tire: Option<Torus>,
     /// Solids of the shell (packs, seat, handle, brackets, pedals), by name.
     pub solids: Vec<Solid>,
+    /// The side pad covers where a leg can rest, as boxes from the packs' outer faces out to
+    /// each face (`pad_<face>_<side>`). Only the lateral rider's legs touch them.
+    pub pads: Vec<Solid>,
 }
 
 /// A torus around the y axis.
@@ -312,6 +315,12 @@ pub enum RiderModel {
     /// in hard braking, the steep low-battery climb and full-effort launches the rider comes off
     /// the pedals (docs/models/body.md).
     ArticulatedContactV1,
+    /// The articulated rider with lateral legs: each hip also abducts and adducts and turns about
+    /// the thigh, each ankle also rolls (inversion and eversion), so the legs can lean the body
+    /// and press the wheel sideways. de Leva's segments, hips at their anatomical width, soft
+    /// knees at rest; both feet welded to the pedals until the rider leaves, with the ankle roll
+    /// kept within what a sole on its pedal can carry. Opt-in (docs/models/body.md).
+    ArticulatedLateralV1,
 }
 
 impl RiderModel {
@@ -321,12 +330,25 @@ impl RiderModel {
             Self::RigidAnkleV1 => "rigid_ankle_v1",
             Self::ArticulatedSagittalV1 => "articulated_sagittal_v1",
             Self::ArticulatedContactV1 => "articulated_contact_v1",
+            Self::ArticulatedLateralV1 => "articulated_lateral_v1",
         }
     }
 
-    /// The rider has legs with hips, knees and ankles (either articulated model).
+    /// The rider has legs with hips, knees and ankles (any articulated model).
     pub const fn is_articulated(self) -> bool {
-        matches!(self, Self::ArticulatedSagittalV1 | Self::ArticulatedContactV1)
+        matches!(self, Self::ArticulatedSagittalV1 | Self::ArticulatedContactV1 | Self::ArticulatedLateralV1)
+    }
+
+    /// The legs also move sideways: hip ab/adduction and rotation, ankle roll.
+    pub const fn has_lateral_legs(self) -> bool {
+        matches!(self, Self::ArticulatedLateralV1)
+    }
+
+    /// The external roll aid holds the upper body as well as the shell: contact feet do not hold
+    /// the body to the shell, and the lateral legs are only as strong as a person's. The lateral
+    /// rider's two springs lean wheel and rider together, as one machine.
+    pub const fn upper_body_aids(self) -> bool {
+        matches!(self, Self::ArticulatedContactV1 | Self::ArticulatedLateralV1)
     }
 
     /// Each sole stands on its pedal through contact instead of a weld.
@@ -351,11 +373,120 @@ pub struct Articulation {
     /// Contact time constant of a sole on its pedal, seconds (MuJoCo `solref`): how much shoe and
     /// pedal give. Used by [`RiderModel::ArticulatedContactV1`].
     pub sole_contact_time_s: f64,
+    /// Knee flexion of the riding stance, radians: a rider rides on soft knees, never locked.
+    /// The rest posture of [`RiderModel::ArticulatedLateralV1`]; a crouch bends on from it.
+    pub soft_knee_rad: f64,
+    /// How far each foot stands out from its pedal's centre, metres
+    /// ([`RiderModel::ArticulatedLateralV1`]).
+    pub foot_offset_m: f64,
+    /// Hip abduction and adduction torque cap, N·m, per hip ([`RiderModel::ArticulatedLateralV1`]).
+    pub hip_adduction_max_nm: f64,
+    /// Hip rotation torque cap, N·m, per hip ([`RiderModel::ArticulatedLateralV1`]).
+    pub hip_rotation_max_nm: f64,
+    /// Tibial rotation torque cap, N·m, per knee ([`RiderModel::ArticulatedLateralV1`]).
+    pub knee_rotation_max_nm: f64,
+    /// Ankle inversion and eversion torque cap, N·m, per ankle
+    /// ([`RiderModel::ArticulatedLateralV1`]). A welded sole carries at most its load times half
+    /// its width on top of that.
+    pub ankle_roll_max_nm: f64,
+    /// Friction between a leg and a side pad (trousers on the cover), sliding coefficient
+    /// ([`RiderModel::ArticulatedLateralV1`]).
+    pub pad_friction: f64,
+    /// Contact time constant of a leg on a pad, seconds (MuJoCo `solref`): how much the calf
+    /// gives ([`RiderModel::ArticulatedLateralV1`]).
+    pub pad_contact_time_s: f64,
+    /// How hard each leg rests on its pad when riding straight, newtons
+    /// ([`RiderModel::ArticulatedLateralV1`]).
+    pub pad_preload_n: f64,
+    /// How much deeper the knees bend in a turn, radians of knee flexion per radian of the
+    /// turn's lean ([`RiderModel::ArticulatedLateralV1`]; ESTIMATE from the owner's report).
+    pub turn_crouch: f64,
+    /// How far the inside knee swings out from its pad in a turn, radians per radian of the
+    /// turn's lean, as far as the knee swings ([`RiderModel::ArticulatedLateralV1`]; ESTIMATE
+    /// from the owner's report).
+    pub turn_spread: f64,
+    /// How much harder the outside leg rests on its pad in a turn, newtons per radian of the
+    /// turn's lean ([`RiderModel::ArticulatedLateralV1`]; ESTIMATE from the owner's report).
+    pub turn_press_n_per_rad: f64,
 }
 
 impl Default for Articulation {
     fn default() -> Self {
-        Self { joint_kp: 1000.0, joint_kd: 60.0, joint_max_nm: 180.0, sole_friction: 1.0, sole_contact_time_s: 0.005 }
+        Self {
+            joint_kp: 1000.0,
+            joint_kd: 60.0,
+            joint_max_nm: 180.0,
+            sole_friction: 1.0,
+            sole_contact_time_s: 0.005,
+            soft_knee_rad: 0.52,
+            foot_offset_m: 0.015,
+            hip_adduction_max_nm: 150.0,
+            hip_rotation_max_nm: 50.0,
+            knee_rotation_max_nm: 25.0,
+            ankle_roll_max_nm: 35.0,
+            pad_friction: 0.3,
+            pad_contact_time_s: 0.03,
+            pad_preload_n: 20.0,
+            turn_crouch: 0.5,
+            turn_spread: 1.3,
+            turn_press_n_per_rad: 100.0,
+        }
+    }
+}
+
+impl Articulation {
+    /// Checks every articulation parameter before model construction.
+    pub fn validate(&self) -> Result<(), ParamError> {
+        for (name, value) in [
+            ("joint_kp", self.joint_kp),
+            ("joint_kd", self.joint_kd),
+            ("joint_max_nm", self.joint_max_nm),
+            ("sole_friction", self.sole_friction),
+            ("hip_adduction_max_nm", self.hip_adduction_max_nm),
+            ("hip_rotation_max_nm", self.hip_rotation_max_nm),
+            ("knee_rotation_max_nm", self.knee_rotation_max_nm),
+            ("ankle_roll_max_nm", self.ankle_roll_max_nm),
+            ("pad_friction", self.pad_friction),
+            ("pad_preload_n", self.pad_preload_n),
+        ] {
+            if !value.is_finite() || value <= 0.0 {
+                return Err(ParamError(format!("rider.articulation.{name} must be finite and positive")));
+            }
+        }
+        for (name, value) in [
+            ("turn_crouch", self.turn_crouch),
+            ("turn_spread", self.turn_spread),
+            ("turn_press_n_per_rad", self.turn_press_n_per_rad),
+        ] {
+            if !value.is_finite() || value < 0.0 {
+                return Err(ParamError(format!("rider.articulation.{name} must be finite and not negative")));
+            }
+        }
+        let offset = self.foot_offset_m;
+        if !offset.is_finite() || offset.abs() > MAX_FOOT_OFFSET_M {
+            return Err(ParamError(format!(
+                "rider.articulation.foot_offset_m must be finite and within ±{MAX_FOOT_OFFSET_M} m"
+            )));
+        }
+        let soft_knee = self.soft_knee_rad;
+        if !soft_knee.is_finite() || !(0.0..=crate::CROUCH_MAX_RAD).contains(&soft_knee) {
+            return Err(ParamError(format!(
+                "rider.articulation.soft_knee_rad must be finite and in [0, {}]",
+                crate::CROUCH_MAX_RAD
+            )));
+        }
+        // MuJoCo needs at least two steps per contact time constant to stay stable.
+        for (name, time) in
+            [("sole_contact_time_s", self.sole_contact_time_s), ("pad_contact_time_s", self.pad_contact_time_s)]
+        {
+            if !time.is_finite() || time < 2.0 * crate::TIMESTEP_S {
+                return Err(ParamError(format!(
+                    "rider.articulation.{name} must be at least {} s",
+                    2.0 * crate::TIMESTEP_S
+                )));
+            }
+        }
+        Ok(())
     }
 }
 
@@ -378,8 +509,12 @@ pub struct Rider {
     pub gyration_m: f64,
     /// Standing height, metres (for drawing).
     pub height_m: f64,
-    /// Drag area of rider and wheel, m².
+    /// Drag area of rider and wheel, m² (upright).
     pub cda_m2: f64,
+    /// Drag area at a full crouch, m², by hand only (Free Ride's crouch): the drag area falls from
+    /// `cda_m2` to this with the knees' bend. ESTIMATE: 30 % under upright; a forward standing
+    /// posture lowers a cyclist's drag area by 23-26 % and a full aero position by about 38 %.
+    pub tuck_cda_m2: f64,
     /// How the rider controls the lean.
     pub control: RiderControl,
     /// When the rider lets go of the pedals of a wheel that goes down.
@@ -419,6 +554,7 @@ impl Default for Rider {
             gyration_m: 0.35,
             height_m: 1.78,
             cda_m2: 0.6,
+            tuck_cda_m2: 0.42,
             control: RiderControl::default(),
             let_go: LetGo::default(),
         }
@@ -467,8 +603,9 @@ pub struct RiderControl {
     pub turn_lean_max_deg: f64,
     /// Fastest change of the lean into a turn, degrees per second.
     pub turn_lean_rate_deg_s: f64,
-    /// Walking speed scale, m/s. Manual turn requests fade linearly to zero below it.
-    /// The heading twist spring fades with squared speed over it; yaw damping does not fade.
+    /// Walking speed scale, m/s. Turn requests fade linearly to zero below it, except under
+    /// manual control (`manual_turn_rate_max_rad_s`). The heading twist spring fades with squared
+    /// speed over it; yaw damping does not fade.
     pub twist_fade_mps: f64,
     /// Twist aid stiffness per radian of heading error, N·m (an external yaw torque on the shell;
     /// the legs have no twist joint).
@@ -483,6 +620,26 @@ pub struct RiderControl {
     /// Experimental delay of rider observations, simulated seconds, 0 through 0.30.
     /// This does not delay the firmware IMU, release guards, or collision solver.
     pub feedback_delay_s: f64,
+    /// Manual control only (Free Ride, Ride's manual mode; `RiderController::set_manual`):
+    /// largest manual turn rate, rad/s, the cap at a stop. With speed the cap falls to what the
+    /// lean into the turn allows (`manual_turn_lean_max_deg`). Manual turns do not fade at
+    /// walking pace: at a stop the twist aid turns the wheel.
+    pub manual_turn_rate_max_rad_s: f64,
+    /// Manual control only: largest lean into a turn, degrees of roll (`turn_lean_max_deg` for
+    /// scripted riding). It also caps the manual turn rate at speed: `tan(lean) = v·rate / g`.
+    pub manual_turn_lean_max_deg: f64,
+    /// Manual control only: fastest change of the lean into a turn, degrees per second.
+    pub manual_turn_lean_rate_deg_s: f64,
+    /// Manual control only: fastest change of the forward lean, degrees per second
+    /// (`lean_rate_deg_s` for scripted riding).
+    pub manual_lean_rate_deg_s: f64,
+    /// Manual drive only (`Intent::Accel`): largest forward or backward lean, degrees
+    /// (`lean_max_deg` everywhere else). It sets the drive caps: `g·tan(lean)` minus or plus drag.
+    pub manual_drive_lean_max_deg: f64,
+    /// Manual drive only: extra acceleration asked per m/s that the reference speed leads the
+    /// measured speed, 1/s (the lead is capped at 0.5 m/s). It holds speed against what the lean
+    /// for the drag alone does not cover.
+    pub manual_drive_kp: f64,
 }
 
 impl Default for RiderControl {
@@ -510,6 +667,12 @@ impl Default for RiderControl {
             steer_max_nm: 60.0,
             command_delay_s: 0.0,
             feedback_delay_s: 0.0,
+            manual_turn_rate_max_rad_s: 2.5,
+            manual_turn_lean_max_deg: 35.0,
+            manual_turn_lean_rate_deg_s: 60.0,
+            manual_lean_rate_deg_s: 30.0,
+            manual_drive_lean_max_deg: 22.0,
+            manual_drive_kp: 1.2,
         }
     }
 }
@@ -537,20 +700,32 @@ impl RiderControl {
             ("steer_kp", self.steer_kp),
             ("steer_kd", self.steer_kd),
             ("steer_max_nm", self.steer_max_nm),
+            ("manual_turn_rate_max_rad_s", self.manual_turn_rate_max_rad_s),
+            ("manual_turn_lean_rate_deg_s", self.manual_turn_lean_rate_deg_s),
+            ("manual_lean_rate_deg_s", self.manual_lean_rate_deg_s),
+            ("manual_drive_kp", self.manual_drive_kp),
         ];
         for (name, value) in nonnegative {
             if !value.is_finite() || value < 0.0 {
                 return Err(ParamError(format!("rider.control.{name} must be finite and nonnegative")));
             }
         }
-        if !self.turn_lean_max_deg.is_finite() || !(0.0..90.0).contains(&self.turn_lean_max_deg) {
-            return Err(ParamError("rider.control.turn_lean_max_deg must be finite and in [0, 90)".into()));
+        for (name, value) in
+            [("turn_lean_max_deg", self.turn_lean_max_deg), ("manual_turn_lean_max_deg", self.manual_turn_lean_max_deg)]
+        {
+            if !value.is_finite() || !(0.0..90.0).contains(&value) {
+                return Err(ParamError(format!("rider.control.{name} must be finite and in [0, 90)")));
+            }
         }
         if !self.twist_fade_mps.is_finite() || self.twist_fade_mps <= 0.0 {
             return Err(ParamError("rider.control.twist_fade_mps must be finite and positive".into()));
         }
-        if !self.lean_max_deg.is_finite() || !(0.0..90.0).contains(&self.lean_max_deg) {
-            return Err(ParamError("rider.control.lean_max_deg must be finite and in [0, 90)".into()));
+        for (name, value) in
+            [("lean_max_deg", self.lean_max_deg), ("manual_drive_lean_max_deg", self.manual_drive_lean_max_deg)]
+        {
+            if !value.is_finite() || !(0.0..90.0).contains(&value) {
+                return Err(ParamError(format!("rider.control.{name} must be finite and in [0, 90)")));
+            }
         }
         if !self.tiltback_feel_deg.is_finite() || !(0.0..=90.0).contains(&self.tiltback_feel_deg) {
             return Err(ParamError("rider.control.tiltback_feel_deg must be finite and in [0, 90]".into()));
@@ -645,6 +820,7 @@ impl Setup {
         let not_negative = [
             ("body.tire.crr", w.tire.crr),
             ("rider.cda_m2", r.cda_m2),
+            ("rider.tuck_cda_m2", r.tuck_cda_m2),
             ("rider.ankle_above_pedals_m", r.ankle_above_pedals_m),
             ("rider.let_go.reaction_s", r.let_go.reaction_s),
             ("assist.roll_stiffness", self.assist.roll_stiffness),
@@ -678,24 +854,7 @@ impl Setup {
         if r.let_go.after_cut_deg > r.let_go.fall_deg || r.let_go.fall_deg > 90.0 {
             return Err(ParamError("rider.let_go thresholds must satisfy 0 < after_cut_deg <= fall_deg <= 90".into()));
         }
-        for (name, value) in [
-            ("joint_kp", r.articulation.joint_kp),
-            ("joint_kd", r.articulation.joint_kd),
-            ("joint_max_nm", r.articulation.joint_max_nm),
-            ("sole_friction", r.articulation.sole_friction),
-        ] {
-            if !value.is_finite() || value <= 0.0 {
-                return Err(ParamError(format!("rider.articulation.{name} must be finite and positive")));
-            }
-        }
-        // MuJoCo needs at least two steps per contact time constant to stay stable.
-        let sole_time = r.articulation.sole_contact_time_s;
-        if !sole_time.is_finite() || sole_time < 2.0 * crate::TIMESTEP_S {
-            return Err(ParamError(format!(
-                "rider.articulation.sole_contact_time_s must be at least {} s",
-                2.0 * crate::TIMESTEP_S
-            )));
-        }
+        r.articulation.validate()?;
         r.control.validate()?;
         if let Some(s) = &w.suspension {
             s.validate()?;
@@ -710,6 +869,10 @@ impl Setup {
         Ok(())
     }
 }
+
+/// How far a lateral rider's foot may stand from its pedal's centre, metres: about half a pedal
+/// deck's width less half a foot's.
+const MAX_FOOT_OFFSET_M: f64 = 0.04;
 
 /// A parameter out of its range.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]

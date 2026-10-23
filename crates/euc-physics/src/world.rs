@@ -2,8 +2,9 @@
 //!
 //! A height-field window of 385 × 385 samples at 1/32 m (a 12 m square) sits in a mocap body and
 //! follows the wheel by whole cells; a pool of mocap boxes carries every vertical face near the
-//! wheel (curbs, steps, plaza walls, ramp sides, buildings, props). Both move only between steps,
-//! on a fixed cadence and on state alone, so a run repeats exactly. A worker thread keeps the
+//! wheel (curbs, steps, plaza walls, ramp sides, buildings, props); a second, 4 m window lies
+//! under a rider who has left the wheel once the rider is near the first window's edge. All of
+//! them move only between steps, on a fixed cadence and on state alone, so a run repeats exactly. A worker thread keeps the
 //! world's chunk cache warm ahead of the wheel; the cache never changes a value, only how soon
 //! it is ready.
 //!
@@ -41,19 +42,35 @@ pub const POOL_SIZE: usize = 128;
 pub const POOL_REACH_M: f64 = 6.0;
 /// Physics steps between world ticks (recentre check, pool refresh, surface under the wheel).
 pub const TICK_STEPS: u64 = 20;
+/// Samples along each side of the rider's window: a 4 m square at the window's cells, under a
+/// rider who has left the wheel and lies beyond the wheel's window.
+pub const RIDER_WINDOW_SAMPLES: usize = 129;
+/// Half the rider's window's side, metres.
+pub const RIDER_WINDOW_HALF_M: f64 = (RIDER_WINDOW_SAMPLES - 1) as f64 / 2.0 * WINDOW_CELL_M;
+/// A rider off the wheel gets its own window once its body's origin is this far from the
+/// window's centre along x or y, metres (its body reaches about 1 m from that origin), and keeps
+/// it until it is back within [`RIDER_RELEASE_M`].
+pub const RIDER_TAKEOVER_M: f64 = WINDOW_HALF_M - 2.0;
+/// See [`RIDER_TAKEOVER_M`].
+pub const RIDER_RELEASE_M: f64 = WINDOW_HALF_M - 2.5;
+/// How far the rider may drift from its window's centre before the window moves, metres.
+pub const RIDER_RECENTRE_M: f64 = 0.5;
 
 /// Height quantum, metres: window heights are multiples of it, so `f32` data is exact.
 const QUANTUM_M: f64 = 1.0 / 65536.0;
 const WINDOW_BASE_M: f64 = 0.5;
 const PARKED_Z_M: f64 = -1000.0;
 const HALF_CELLS: i64 = (WINDOW_SAMPLES as i64 - 1) / 2;
+const RIDER_HALF_CELLS: i64 = (RIDER_WINDOW_SAMPLES as i64 - 1) / 2;
 /// Name of the window's mocap body, hfield and geom.
 pub(crate) const WINDOW: &str = "world_window";
+/// Name of the rider's window's mocap body, hfield and geom.
+pub(crate) const RIDER_WINDOW: &str = "world_rider_window";
 /// Prefix of the pool's mocap bodies.
 pub(crate) const BOX: &str = "world_box_";
 /// Contact settings of every world geom: today's floor, without friction of its own, so the
 /// tire's friction (scaled per surface) and each body's own friction decide.
-const GROUND_CONTACT: &str = r#"friction="0 0 0" condim="3" conaffinity="3""#;
+const GROUND_CONTACT: &str = r#"friction="0 0 0" condim="3" conaffinity="3" group="3""#;
 
 /// Where a world run starts: the wheel's ground point and heading in world coordinates.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -159,14 +176,16 @@ impl WorldGround {
         self.world.surface_at(w[0], w[1])
     }
 
-    /// MJCF `<asset>` line: the window's height field, filled at run time.
+    /// MJCF `<asset>` line: the window's and the rider's window's height fields, filled at run
+    /// time.
     pub(crate) fn asset() -> String {
         format!(
-            r#"  <asset><hfield name="{WINDOW}" nrow="{WINDOW_SAMPLES}" ncol="{WINDOW_SAMPLES}" size="{WINDOW_HALF_M} {WINDOW_HALF_M} {WINDOW_RANGE_M} {WINDOW_BASE_M}"/></asset>"#
+            r#"  <asset><hfield name="{WINDOW}" nrow="{WINDOW_SAMPLES}" ncol="{WINDOW_SAMPLES}" size="{WINDOW_HALF_M} {WINDOW_HALF_M} {WINDOW_RANGE_M} {WINDOW_BASE_M}"/><hfield name="{RIDER_WINDOW}" nrow="{RIDER_WINDOW_SAMPLES}" ncol="{RIDER_WINDOW_SAMPLES}" size="{RIDER_WINDOW_HALF_M} {RIDER_WINDOW_HALF_M} {WINDOW_RANGE_M} {WINDOW_BASE_M}"/></asset>"#
         )
     }
 
-    /// MJCF world-body lines: the window's mocap body and the parked box pool.
+    /// MJCF world-body lines: the window's mocap body, the parked box pool and the parked
+    /// rider's window.
     pub(crate) fn bodies() -> String {
         let mut xml = format!(
             r#"    <body name="{WINDOW}" mocap="true"><geom name="floor" type="hfield" hfield="{WINDOW}" {GROUND_CONTACT}/></body>"#
@@ -178,6 +197,10 @@ impl WorldGround {
                 "\n    <body name=\"{BOX}{k}\" mocap=\"true\" pos=\"0 0 {PARKED_Z_M}\"><geom name=\"{BOX}{k}\" type=\"box\" size=\"0.1 0.1 0.1\" {GROUND_CONTACT}/></body>"
             );
         }
+        let _ = write!(
+            xml,
+            "\n    <body name=\"{RIDER_WINDOW}\" mocap=\"true\" pos=\"0 0 {PARKED_Z_M}\"><geom name=\"{RIDER_WINDOW}\" type=\"hfield\" hfield=\"{RIDER_WINDOW}\" {GROUND_CONTACT}/></body>"
+        );
         xml
     }
 }
@@ -205,9 +228,21 @@ pub(crate) struct Window {
     steps: u64,
     surface: Surface,
     prefetch: Option<mpsc::Sender<[f64; 4]>>,
+    rider: RiderWindow,
     /// Recentres so far, and the cost of the last one on the step thread, seconds.
     pub recentres: u64,
     pub last_recentre_s: f64,
+}
+
+/// The rider's window: the ground under a rider who has left the wheel and lies beyond the
+/// wheel's window.
+struct RiderWindow {
+    hfield_adr: usize,
+    mocap: usize,
+    /// Its centre cell while it holds the rider up; `None` while parked.
+    centre: Option<[i64; 2]>,
+    /// Quantized physics-frame heights at its samples, row by row.
+    heights: Vec<f64>,
 }
 
 impl Window {
@@ -230,6 +265,16 @@ impl Window {
             let mocap = usize::try_from(model.body_mocapid()[body]).map_err(|_| missing(&name))?;
             slots.push(Slot { mocap, geom, solid: None });
         }
+        let rider_hfield =
+            model.name_to_id(MjtObj::mjOBJ_HFIELD, RIDER_WINDOW).ok_or_else(|| missing("rider window hfield"))?;
+        let rider_body =
+            model.name_to_id(MjtObj::mjOBJ_BODY, RIDER_WINDOW).ok_or_else(|| missing("rider window body"))?;
+        let rider = RiderWindow {
+            hfield_adr: model.hfield_adr()[rider_hfield] as usize,
+            mocap: usize::try_from(model.body_mocapid()[rider_body]).map_err(|_| missing("rider window mocap"))?,
+            centre: None,
+            heights: Vec::new(),
+        };
         let tires: Vec<usize> = (0..model.geom_friction().len())
             .filter(|&g| model.id_to_name(MjtObj::mjOBJ_GEOM, g).is_some_and(|n| n == "tire" || n.starts_with("tire_")))
             .collect();
@@ -255,11 +300,12 @@ impl Window {
             steps: 0,
             surface: Surface::of(Material::Asphalt, false),
             prefetch,
+            rider,
             recentres: 0,
             last_recentre_s: 0.0,
             ground,
         };
-        window.heights = window.sample(&Self::lattice([0, 0], |_, _| true));
+        window.heights = window.sample(&Self::lattice(WINDOW_SAMPLES, [0, 0], |_, _| true));
         window.upload(data);
         window.refresh(data, [0.0, 0.0]);
         Ok(window)
@@ -276,14 +322,23 @@ impl Window {
     }
 
     /// Runs before a step: every [`TICK_STEPS`] steps, recentres if the wheel drifted, refreshes
-    /// the pool and the tire friction. `position` and `velocity` are the shell's, physics frame.
-    pub(crate) fn tick(&mut self, data: &mut MjData<Box<MjModel>>, position: [f64; 2], velocity: [f64; 2]) {
+    /// the pool and the tire friction, and keeps a rider off the wheel on the ground. `position`
+    /// and `velocity` are the shell's, `rider` the origin of a rider who has left the pedals,
+    /// physics frame.
+    pub(crate) fn tick(
+        &mut self,
+        data: &mut MjData<Box<MjModel>>,
+        position: [f64; 2],
+        velocity: [f64; 2],
+        rider: Option<[f64; 2]>,
+    ) {
         self.steps += 1;
         if !self.steps.is_multiple_of(TICK_STEPS) {
             return;
         }
         let centre = [self.centre[0] as f64 * WINDOW_CELL_M, self.centre[1] as f64 * WINDOW_CELL_M];
-        if (position[0] - centre[0]).abs() > RECENTRE_M || (position[1] - centre[1]).abs() > RECENTRE_M {
+        let moved = (position[0] - centre[0]).abs() > RECENTRE_M || (position[1] - centre[1]).abs() > RECENTRE_M;
+        if moved {
             let started = std::time::Instant::now();
             self.recentre([(position[0] / WINDOW_CELL_M).round() as i64, (position[1] / WINDOW_CELL_M).round() as i64]);
             self.upload(data);
@@ -291,6 +346,7 @@ impl Window {
             self.last_recentre_s = started.elapsed().as_secs_f64();
         }
         self.refresh(data, position);
+        self.follow_rider(data, rider, moved);
         if let Some(sender) = &self.prefetch {
             let w = self.ground.to_world(position);
             let v = self.ground.to_world([position[0] + velocity[0], position[1] + velocity[1]]);
@@ -299,16 +355,17 @@ impl Window {
         }
     }
 
-    /// Lattice points (physics frame) of the window centred on cell `centre`, row by row, where
-    /// `keep(row, column)` holds.
-    fn lattice(centre: [i64; 2], keep: impl Fn(i64, i64) -> bool) -> Vec<(usize, [f64; 2])> {
-        let n = WINDOW_SAMPLES as i64;
+    /// Lattice points (physics frame) of a window of `samples` per side centred on cell `centre`,
+    /// row by row, where `keep(row, column)` holds.
+    fn lattice(samples: usize, centre: [i64; 2], keep: impl Fn(i64, i64) -> bool) -> Vec<(usize, [f64; 2])> {
+        let n = samples as i64;
+        let half = (n - 1) / 2;
         let mut points = Vec::new();
         for r in 0..n {
             for c in 0..n {
                 if keep(r, c) {
-                    let x = (centre[0] - HALF_CELLS + c) as f64 * WINDOW_CELL_M;
-                    let y = (centre[1] - HALF_CELLS + r) as f64 * WINDOW_CELL_M;
+                    let x = (centre[0] - half + c) as f64 * WINDOW_CELL_M;
+                    let y = (centre[1] - half + r) as f64 * WINDOW_CELL_M;
                     points.push(((r * n + c) as usize, [x, y]));
                 }
             }
@@ -329,7 +386,7 @@ impl Window {
         let n = WINDOW_SAMPLES as i64;
         let [dx, dy] = [to[0] - self.centre[0], to[1] - self.centre[1]];
         let inside = |r: i64, c: i64| (0..n).contains(&(r + dy)) && (0..n).contains(&(c + dx));
-        let fresh = Self::lattice(to, |r, c| !inside(r, c));
+        let fresh = Self::lattice(WINDOW_SAMPLES, to, |r, c| !inside(r, c));
         let values = self.sample(&fresh);
         let mut heights = vec![0.0; self.heights.len()];
         for r in 0..n {
@@ -359,6 +416,65 @@ impl Window {
             *value = ((h - self.z0).clamp(0.0, WINDOW_RANGE_M) / WINDOW_RANGE_M) as f32;
         }
         data.mocap_pos_mut()[self.mocap] = pos;
+    }
+
+    /// Keeps a rider who has left the wheel on the ground: once its origin `rider` is
+    /// [`RIDER_TAKEOVER_M`] from the window's centre, the rider's window lies under it and follows
+    /// it by whole cells. The rider's window shows the ground only outside the wheel's window
+    /// (from its edge on), so the two never double a contact.
+    fn follow_rider(&mut self, data: &mut MjData<Box<MjModel>>, rider: Option<[f64; 2]>, window_moved: bool) {
+        let centre = [self.centre[0] as f64 * WINDOW_CELL_M, self.centre[1] as f64 * WINDOW_CELL_M];
+        let reach = if self.rider.centre.is_some() { RIDER_RELEASE_M } else { RIDER_TAKEOVER_M };
+        let Some(p) = rider.filter(|p| (p[0] - centre[0]).abs().max((p[1] - centre[1]).abs()) > reach) else {
+            if self.rider.centre.take().is_some() {
+                data.mocap_pos_mut()[self.rider.mocap] = [0.0, 0.0, PARKED_Z_M];
+            }
+            return;
+        };
+        let drifted = self.rider.centre.is_none_or(|c| {
+            (p[0] - c[0] as f64 * WINDOW_CELL_M).abs() > RIDER_RECENTRE_M
+                || (p[1] - c[1] as f64 * WINDOW_CELL_M).abs() > RIDER_RECENTRE_M
+        });
+        if drifted {
+            let cell = [(p[0] / WINDOW_CELL_M).round() as i64, (p[1] / WINDOW_CELL_M).round() as i64];
+            self.rider.heights = self.sample(&Self::lattice(RIDER_WINDOW_SAMPLES, cell, |_, _| true));
+            self.rider.centre = Some(cell);
+        }
+        if drifted || window_moved {
+            self.upload_rider(data);
+        }
+    }
+
+    /// Writes the rider's window into the model and data: its samples inside the wheel's window
+    /// (that window's edge excluded) sit at its floor, below the wheel's window's ground.
+    fn upload_rider(&self, data: &mut MjData<Box<MjModel>>) {
+        let Some(cell) = self.rider.centre else { return };
+        let side = RIDER_WINDOW_SAMPLES as i64;
+        let hidden = |k: usize| {
+            let (row, column) = (k as i64 / side, k as i64 % side);
+            let dx = cell[0] - RIDER_HALF_CELLS + column - self.centre[0];
+            let dy = cell[1] - RIDER_HALF_CELLS + row - self.centre[1];
+            dx.abs() < HALF_CELLS && dy.abs() < HALF_CELLS
+        };
+        let low = (0..self.rider.heights.len())
+            .filter(|&k| !hidden(k))
+            .map(|k| self.rider.heights[k])
+            .fold(f64::INFINITY, f64::min);
+        if !low.is_finite() {
+            // The wheel's window covers all of it.
+            data.mocap_pos_mut()[self.rider.mocap] = [0.0, 0.0, PARKED_Z_M];
+            return;
+        }
+        let z0 = low.floor();
+        // SAFETY: only height-field samples change; sizes, counts and the signature stay.
+        let model = unsafe { data.model_mut() };
+        let adr = self.rider.hfield_adr;
+        let field = &mut model.hfield_data_mut()[adr..adr + self.rider.heights.len()];
+        for (k, (value, &h)) in field.iter_mut().zip(&self.rider.heights).enumerate() {
+            // Exact, as in `upload`.
+            *value = if hidden(k) { 0.0 } else { ((h - z0).clamp(0.0, WINDOW_RANGE_M) / WINDOW_RANGE_M) as f32 };
+        }
+        data.mocap_pos_mut()[self.rider.mocap] = [cell[0] as f64 * WINDOW_CELL_M, cell[1] as f64 * WINDOW_CELL_M, z0];
     }
 
     /// Fills the pool with the solids near `position` and sets the tire friction for the surface
@@ -470,6 +586,59 @@ mod tests {
         let q = solid([[0.0, 1.0, 0.0], [-1.0, 0.0, 0.0], [0.0, 0.0, 1.0]]).quaternion();
         let h = std::f64::consts::FRAC_1_SQRT_2;
         assert!((q[0] - h).abs() < 1e-12 && (q[3] - h).abs() < 1e-12, "{q:?}");
+    }
+
+    /// The Begode Extreme without its suspension on world seed 7 (as tests/world.rs).
+    fn setup(model: crate::RiderModel) -> crate::Setup {
+        use crate::{Shapes, Shell, Tire, Torus, Wheel, WheelBody};
+        let mut setup = crate::Setup::new(WheelBody {
+            tire: Tire { radius_m: 0.2251, half_width_m: 0.0407, friction: 0.9, crr: 0.012, contact_time_s: 0.02 },
+            wheel: Wheel { mass_kg: 16.0, spin_inertia_kgm2: 0.487 },
+            shell: Shell {
+                mass_kg: 26.0,
+                com_above_axle_m: 0.10,
+                inertia_kgm2: [0.85, 0.92, 0.46],
+                pedal_below_axle_m: -0.012,
+                imu_above_axle_m: 0.15,
+            },
+            suspension: None,
+            shapes: Some(Shapes { tire: Some(Torus { major_m: 0.1716, minor_m: 0.058 }), ..Shapes::default() }),
+        });
+        setup.rider.model = model;
+        setup.world = Some(WorldGround::at_spawn(WorldSpec::city(7)).unwrap());
+        setup
+    }
+
+    /// A rider who has left the wheel stays on the ground when the wheel goes on far beyond the
+    /// window's reach: the rider's window takes over under it.
+    #[test]
+    fn a_rider_off_the_wheel_stays_on_the_ground_beyond_the_window() {
+        use crate::RiderModel;
+        let steps = |s: f64| (s / crate::TIMESTEP_S).round() as usize;
+        for model in [RiderModel::RigidAnkleV1, RiderModel::ArticulatedSagittalV1, RiderModel::ArticulatedLateralV1] {
+            let mut physics = crate::Physics::new(setup(model)).unwrap();
+            let ground = physics.world_ground().unwrap().clone();
+            for _ in 0..steps(0.5) {
+                physics.step(0.0);
+            }
+            physics.step_off();
+            for _ in 0..steps(1.5) {
+                physics.step(0.0);
+            }
+            // The wheel goes: 9 m ahead at once, beyond the window's reach from the rider.
+            physics.set_held(false);
+            let q = physics.ids.root_qpos;
+            physics.data.qpos_mut()[q] += 9.0;
+            let mut covered = false;
+            for _ in 0..steps(3.0) {
+                physics.step(0.0);
+                let r = physics.rider_position_m();
+                let below = ground.height_m([r[0], r[1]]);
+                assert!(r[2] > below, "{model:?}: the rider at {r:?} is below the ground ({below:.3} m)");
+                covered |= physics.world.as_ref().is_some_and(|w| w.rider.centre.is_some());
+            }
+            assert!(covered, "{model:?}: the rider's window never took over");
+        }
     }
 
     #[test]

@@ -102,6 +102,19 @@ y_m = [-0.0931, 0.0914]
 
 [handle]
 # Front carry handle: a 20 mm tube along y between two side plates. MEASURED (circle fit 0.02 mm)
+# The plates are orange CNC parts of the rear handle's family (the owner): the parts diagram's front
+# handle part, placed by five features of the owner's mounted side photo (back-projected with its
+# solved camera) and its crossbar hole on the tube: residuals 0.9-2.8 mm. Per side an L-shaped plate:
+# a lower body at the front, a foot to the rear bolted to the frame top by 2 x 2 socket-head screws,
+# an arm rising from the body and leaning back to the tube. Three pocketed windows (3 mm deep) with
+# see-through centres (a rounded triangle and a long slot in the arm, a slot in the body), a small
+# slot and a hole in the body. The tube is black.
+arm_faces_y_m = [0.0595, 0.0675]       # MEASURED (scan): inner and outer face, +-y
+arm_foot_outer_y_m = 0.074             # MEASURED (scan): the foot stands out further
+arm_bounds_xz_m = [[0.114, 0.186], [0.367, 0.483]]  # MEASURED (diagram on the photo); the scan's plate outline agrees within 3 mm
+foot_bolts_xz_m = [[0.1263, 0.3768], [0.1385, 0.3767], [0.1261, 0.3866], [0.1385, 0.3872]]  # MEASURED (scan: the socket heads' tops, both sides, +-0.0005); the diagram on the photo agrees within 0.0025
+foot_screw_head = { diameter_m = 0.010, height_m = 0.0065 }  # MEASURED (scan): tops 0.0062-0.0077 above the foot
+body_bolt_xz_m = [0.1689, 0.3811]      # MEASURED (diagram on the photo) +-0.003
 tube_centre_m = [0.1323, 0.0, 0.4738]
 tube_radius_m = 0.0100
 tube_half_length_m = 0.069
@@ -217,21 +230,28 @@ eyelet_width_m = 0.024                  # DNM listing
 motion_ratio = "Two readings (docs/hardware/suspension-linkage.md): rocker turning, 2.3 at rest falling to 1.7 at 93.5 mm (band 1.9-2.7 at rest); rocker fixed, constant 1.5 (1.3-1.7). The physics keeps plant.toml's constant 1.7 until a seat-press video decides"
 
 [rear_handle]
-# Orange anodised CNC U-handle (owner photos 2026-10-16): two flat arms bolted to the frame and
-# through the roller axis, a black round grip bar parallel to the roller, behind it.
+# Orange anodised CNC U-handle (owner photos 2026-10-16 and 2026-10-22): two flat arms bolted to the
+# frame and through the roller axis, a black anodised round grip bar parallel to the roller, behind
+# it. Socket-head cap screws at the roller axis and the grip.
 arm_frame_bolt_m = [-0.115, 0.4150]     # x, z; MEASURED (scan, the lower part of the arm)
 arm_roller_bolt_m = [-0.1868, 0.4491]   # x, z; MEASURED (the roller axis)
 arm_outer_y_m = 0.0587                  # MEASURED: outer face, +-y
 arm_thickness_m = 0.006                 # ESTIMATE
 arm_width_m = 0.030                     # MEASURED (scan, lower part)
-# The arm's lower part ends in a foot at x -0.113 (z 0.387-0.411) and carries three through
-# windows, the upper part a blind pocket; MEASURED on the owner's cover-off photo (camera pose
-# solved from scan points, +-2 mm).
+# MEASURED on the owner's cover-off photo (camera pose solved from 11 scan points, 8 px RMS; edges
+# traced and back-projected onto the arm's outer face, +-2 mm): the arm's lower part ends in a foot
+# at x -0.113 (z 0.387-0.411) and carries three windows; the upper part runs nearly level along its
+# top (z 0.480-0.485) to the grip and down in a dog-leg to the roller, with a dog-leg blind pocket.
+# The two upper windows are pocketed rims (3 mm deep, two steps) around smaller see-through
+# openings; the one by the foot is a pocketed slot.
 arm_foot_x_m = -0.113
 arm_windows_xz_m = [[-0.1683, 0.4382], [-0.1426, 0.4155], [-0.1240, 0.4005]]  # centres, MEASURED
-grip_centre_m = [-0.2455, 0.0, 0.4752]  # MEASURED (photo pose): the grip bolt, 63.5 mm past the roller axis
-grip_diameter_m = 0.026                 # ESTIMATE
-evidence = "lower arms MEASURED (scan); arm windows and grip MEASURED (photo pose); thickness ESTIMATE"
+arm_top_edge_xz_m = [[-0.2004, 0.4795], [-0.2245, 0.4828], [-0.2462, 0.4845]]  # MEASURED (photo)
+arm_end_radius_m = 0.0095               # MEASURED (photo): around the grip bolt
+grip_centre_m = [-0.2447, 0.0, 0.4735]  # MEASURED (photo pose): the grip bolt's socket on its head plane, 62.8 mm past the roller axis
+grip_diameter_m = 0.020                 # MEASURED (photo) +-0.003
+screw_head = { diameter_m = 0.010, top_y_m = 0.0625 }  # MEASURED (scan at the roller screw): 3.8 mm proud of the arm, hex socket
+evidence = "lower arms and screw heads MEASURED (scan); outline, windows, pocket and grip MEASURED (photo pose); thickness ESTIMATE"
 
 [imu]
 # The controller board is inside the body and not visible in the scan. DEFAULT (findings)
@@ -255,7 +275,7 @@ roller = { from = [-0.1868, -0.059, 0.4491], to = [-0.1868, 0.059, 0.4491], radi
 # from (-0.185, 0.378) forward and down to (-0.034, 0.247) ([shock]); this solid moves to it when the
 # physics takes the photo-measured linkage (a physics change, not made yet).
 shock = { from = [-0.1395, 0.0, 0.3675], to = [-0.2265, 0.0, 0.1835], radius = 0.028 }
-# ESTIMATE: rear handle grip bar. The photo puts the grip at (-0.2455, 0.4752) ([rear_handle]);
+# ESTIMATE: rear handle grip bar. The photo puts the grip at (-0.2447, 0.4735) ([rear_handle]);
 # this solid keeps the earlier estimate until a physics change moves it.
 rear_handle_grip = { from = [-0.2515, -0.0527, 0.5042], to = [-0.2515, 0.0527, 0.5042], radius = 0.013 }
 pedal_bracket_left = { centre = [0.0007, 0.1197, -0.0106], half = [0.0228, 0.0154, 0.0207] }
@@ -265,28 +285,32 @@ pedal_left = { centre = [0.0, 0.1763, 0.0075], half = [0.145, 0.0675, 0.0045] }
 pedal_right = { centre = [0.0, -0.1763, 0.0075], half = [0.145, 0.0675, 0.0045] }
 
 # Side pad covers: C-shaped moulded covers of textured black plastic, not in the scan. Shape INFERRED
-# from a two-view reconstruction of the owner's photos of a removed cover (5.5 / 3.1 px RMS) and a
-# retailer's parts diagram; size and place ESTIMATE (docs/hardware/geometry.md "Pad covers"). Left
-# cover; mirror y for the right. Drawing only: no collision solid, no mass.
+# from a two-view reconstruction of the owner's photos of a removed cover (5.5 / 3.1 px RMS); size
+# and place MEASURED from the owner's side photo with the cover mounted (camera 6.9 px RMS on scan
+# points, the cover's points 4.5 px RMS); docs/hardware/geometry.md "Pad covers". Left cover;
+# mirror y (and 1.0 mm further out) for the right. Drawing only: no collision solid, no mass.
 [pad_covers]
 in_scan = false
-length_m = 0.401               # ESTIMATE: 0.372-0.447 (diagram scales), 0.370-0.510 (photo screw heads)
-height_m = 0.320               # ESTIMATE, same scale
-depth_m = 0.106                # INFERRED proportion at that scale (+-20 %): mounting face to the end and round blocks' tops
-heights_m = { arms = 0.060, lettering_block = 0.095, slotted_block_rim = [0.070, 0.092], end_block = 0.108, round_block = 0.108 }  # INFERRED, above the mounting face
+length_m = 0.366               # MEASURED (mounted photo) +-0.008
+height_m = 0.299               # MEASURED (mounted photo) +-0.006
+depth_m = 0.060                # INFERRED (+-20 %): the packs' outer face to the end block's top
+heights_m = { upper_arm = 0.016, lower_arm = 0.018, spine = [0.025, 0.035], slotted_block = [0.045, 0.047], lettering_block = [0.049, 0.052], round_block = 0.052, end_block = 0.060 }  # INFERRED, out from the packs' outer face
 wall_m = 0.0035                # ESTIMATE: open-backed moulded walls
-x_range_m = [-0.205, 0.196]    # ESTIMATE +-0.040: arms' rear ends beside the rocker's rear lobes, spine at the front
-z_range_m = [0.157, 0.476]     # ESTIMATE +-0.040: the upper arm's lower edge just above the rocker plates
-inner_y_m = 0.1025             # on the packs' outer faces (the scan reaches 0.1020 under the footprint)
-outer_y_m = 0.2085             # the end and round blocks; arms at about 0.162
-screws_m = [[-0.119, 0.166, 0.432], [-0.115, 0.164, 0.224], [0.116, 0.169, 0.231]]  # INFERRED: the three visible screw heads (upper arm, lower arm, slotted block)
-# Where the rider's legs can rest (a later leg-pad contact model): outer faces, ESTIMATE
+x_range_m = [-0.182, 0.184]    # MEASURED (mounted photo) +-0.006
+z_range_m = [0.055, 0.354]     # MEASURED (mounted photo) +-0.006: the top 16 mm below the packs' top
+pitch_deg = 2.6                # MEASURED (mounted photo): nose up
+inner_y_m = 0.1012             # flush on the left packs' outer face (scan 0.10105); the right cover on the right packs' (0.10205), 1.0 mm further out
+wrap_y_m = 0.066               # INFERRED: past the packs' front and rear ends the cover wraps their end faces in to here (the arms' undersides on the low photo of the removed cover)
+outer_y_m = 0.1615             # the end block; arms at about 0.117-0.120
+contact_gap_m = { outline_median = 0.0002, outline_p95 = 0.0017, wrap_median = 0.0006, overlap_max = 0.0001 }  # MEASURED on the exported model against the packs
+screws_m = [[-0.104, 0.123, 0.311], [-0.103, 0.122, 0.125], [0.108, 0.126, 0.122]]  # MEASURED (mounted photo; depth INFERRED): the three visible screw heads (upper arm, lower arm, slotted block)
+# Where the rider's legs can rest (a later leg-pad contact model): outer faces (INFERRED depth)
 contact_faces = [
-  { name = "lettering_block_top", x_m = [0.060, 0.118], z_m = [0.376, 0.457], y_m = 0.1980 },
-  { name = "upper_arm", x_m = [-0.116, 0.060], z_m = [0.382, 0.464], y_m = 0.1618 },
-  { name = "end_block_top", x_m = [-0.155, -0.127], z_m = [0.405, 0.442], y_m = 0.2107 },
-  { name = "round_block_top", x_m = [-0.164, -0.108], z_m = [0.256, 0.303], y_m = 0.2105 },
-  { name = "lower_arm", x_m = [-0.158, 0.136], z_m = [0.159, 0.259], y_m = 0.1626 },
+  { name = "lettering_block_top", x_m = [0.059, 0.114], z_m = [0.252, 0.324], y_m = 0.1506 },
+  { name = "upper_arm", x_m = [-0.101, 0.060], z_m = [0.259, 0.336], y_m = 0.1173 },
+  { name = "end_block_top", x_m = [-0.137, -0.111], z_m = [0.288, 0.321], y_m = 0.1613 },
+  { name = "round_block_top", x_m = [-0.155, -0.123], z_m = [0.143, 0.198], y_m = 0.1521 },
+  { name = "lower_arm", x_m = [-0.142, 0.125], z_m = [0.059, 0.159], y_m = 0.1195 },
 ]
 
 # The cleaned render model (public), see app/public/models/begode-extreme/README.md.
@@ -298,7 +322,13 @@ pedal_nodes = ["pedal_left", "pedal_right"]  # node origin on the pin: fold abou
 roller_nodes = ["roller_sleeve_left", "roller_sleeve_right", "roller_center_band", "speaker_left",
                 "speaker_right", "ble_led"]  # sleeves and ble_led are the emissive parts
 handle_nodes = ["rear_handle"]
-pad_cover_nodes = ["pad_cover_left", "pad_cover_right"]  # ESTIMATE (see [pad_covers])
+pad_cover_nodes = ["pad_cover_left", "pad_cover_right"]  # see [pad_covers]
+# The internal fender (the parts diagram's "Internal Fender", in the scan 4-35 mm above the tyre's
+# crown at full extension) rides on the carriage: "fender" and the axle stubs ("axle") move with the
+# axle. "cable": the cable bundle to the fender's front end; one morph target ("travel_100mm")
+# moves it up to 0.100 m up the rods where it lies in the tyre's path; weight = axle travel / 0.100 m.
+carriage_nodes = ["fender", "axle"]
+morph_nodes = { cable = { target = "travel_100mm", travel_m = 0.100 } }
 # Current linkage per owner photos (the scan shows an older system, not drawn). "shock": the
 # coil-over only; origin on the top eye, local +Y from the bottom eye to the top eye, bottom eye at
 # local (0, -0.200, 0). "shock_mount": the carriage's clevis and bottom shaft, origin on the bottom

@@ -128,6 +128,10 @@ The later [SOC50 trace](soc50-investigation.md#the-sample-falls-between-two-simi
 The comparison still fails its unchanged limit.
 The earlier cause of the transient timing difference remains open.
 
+Update, 2026-10-23 (W2): the SOC20 and SOC50 scenarios now ride the city world, and SOC100 rides the flat floor on
+purpose. The SOC50 comparison limit is 1.6 V (2 x 0.771 V measured at quantum 3000 on the city), and the comparison
+passes at all three quanta with it. See [project status](../project-status.md#city-world-w2-2026-10-23).
+
 ## Identity and reproduction
 
 The stock image is the explicit local GW1825007 build.

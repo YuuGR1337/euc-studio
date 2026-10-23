@@ -93,6 +93,14 @@ pub struct Densities {
     pub plazas: f64,
     /// Street furniture and trees, as a fraction of the slots that could hold them.
     pub props: f64,
+    /// Scale of the terrain relief: 1 the city's gentle hills, 0 a level city, up to 2.
+    #[serde(skip_serializing_if = "is_one")]
+    pub hills: f64,
+}
+
+#[allow(clippy::trivially_copy_pass_by_ref, clippy::float_cmp)]
+fn is_one(v: &f64) -> bool {
+    *v == 1.0
 }
 
 impl Default for Densities {
@@ -108,6 +116,7 @@ impl Default for Densities {
             driveways: 1.5,
             plazas: 0.15,
             props: 0.8,
+            hills: 1.0,
         }
     }
 }
@@ -125,11 +134,66 @@ impl Densities {
             ("driveways", self.driveways, 5.0),
             ("plazas", self.plazas, 2.0),
             ("props", self.props, 1.0),
+            ("hills", self.hills, 2.0),
         ];
         for (name, value, max) in fields {
             if !value.is_finite() || !(0.0..=max).contains(&value) {
                 return Err(format!("world density {name} must be within 0..={max}, got {value}"));
             }
+        }
+        Ok(())
+    }
+}
+
+/// A whole-world grade along one direction, for a slope test in the city: the ground rises (or
+/// falls) by `slope_pct` per 100 m along `direction`, from `start_m` past `origin`, building up
+/// over `ramp_m` (a parabola, no kink; the same profile as a scenario's `[terrain]` slope).
+/// Behind the start the terrain is unchanged. Streets, parcels and features follow it.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Incline {
+    /// Where distances along the grade are measured from, world metres.
+    pub origin: V2,
+    /// Unit direction of the grade (uphill for a positive slope), world axes.
+    pub direction: V2,
+    /// Grade, percent (negative: downhill along `direction`).
+    pub slope_pct: f64,
+    /// Distance from `origin` where the grade starts, metres.
+    pub start_m: f64,
+    /// Distance over which it builds up, metres.
+    pub ramp_m: f64,
+}
+
+impl Incline {
+    /// Height the grade adds at `p`, metres. IEEE arithmetic only.
+    pub fn height(&self, p: V2) -> f64 {
+        let along = det::dot(det::sub(p, self.origin), self.direction) - self.start_m;
+        if along <= 0.0 {
+            return 0.0;
+        }
+        let grade = self.slope_pct / 100.0;
+        if along < self.ramp_m {
+            grade * along * along / (2.0 * self.ramp_m)
+        } else {
+            grade * (along - self.ramp_m / 2.0)
+        }
+    }
+
+    fn validate(&self) -> Result<(), String> {
+        let finite = [self.origin[0], self.origin[1], self.direction[0], self.direction[1], self.slope_pct]
+            .iter()
+            .chain([self.start_m, self.ramp_m].iter())
+            .all(|v| v.is_finite());
+        let unit = det::len(self.direction);
+        if !finite
+            || (unit - 1.0).abs() > 1e-9
+            || self.slope_pct.abs() > 40.0
+            || !(0.0..=10_000.0).contains(&self.start_m)
+            || !(0.0..=1_000.0).contains(&self.ramp_m)
+        {
+            return Err("world incline: finite, a unit direction, slope_pct within ±40, start_m within 0..=10000, \
+                        ramp_m within 0..=1000"
+                .into());
         }
         Ok(())
     }
@@ -148,12 +212,15 @@ pub struct WorldSpec {
     /// Feature densities.
     #[serde(default)]
     pub densities: Densities,
+    /// A whole-world grade, for a slope test; none in an ordinary city.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub incline: Option<Incline>,
 }
 
 impl WorldSpec {
     /// A city with default densities.
     pub fn city(seed: u64) -> Self {
-        Self { seed, revision: GENERATOR_REVISION, biome: Biome::City, densities: Densities::default() }
+        Self { seed, revision: GENERATOR_REVISION, biome: Biome::City, densities: Densities::default(), incline: None }
     }
 
     /// Checks the revision and the densities.
@@ -164,7 +231,8 @@ impl WorldSpec {
                 self.revision
             ));
         }
-        self.densities.validate()
+        self.densities.validate()?;
+        self.incline.as_ref().map_or(Ok(()), Incline::validate)
     }
 }
 
@@ -197,7 +265,7 @@ impl World {
         if let Some(tile) = self.tiles.lock().unwrap_or_else(PoisonError::into_inner).get(&key) {
             return Arc::clone(tile);
         }
-        let tile = Arc::new(parcels::tile(self.spec.seed, &self.spec.densities, key));
+        let tile = Arc::new(parcels::tile(&self.spec, key));
         let mut tiles = self.tiles.lock().unwrap_or_else(PoisonError::into_inner);
         if tiles.len() >= CACHE_CHUNKS / 16 {
             tiles.clear();
@@ -308,7 +376,7 @@ impl World {
 
     /// Bare terrain relief (no streets, curbs or features), metres: for distant scenery.
     pub fn terrain_at(&self, x: f64, y: f64) -> f64 {
-        fields::terrain(self.spec.seed, [x, y])
+        fields::terrain(&fields::Relief::of(&self.spec), [x, y])
     }
 
     /// Position of road node `(i, j)` (an intersection, bend or dead end), metres.

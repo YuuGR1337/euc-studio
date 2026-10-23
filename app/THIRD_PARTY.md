@@ -68,8 +68,20 @@ Checked on 2026-10-16:
 | directories (6.x)         | MIT OR Apache-2.0                     |
 | serde, serde_json (1.x)   | MIT OR Apache-2.0                     |
 
+## Vendored source
+
+| Source                                                          | Where                                                                        | License                    |
+| --------------------------------------------------------------- | ---------------------------------------------------------------------------- | -------------------------- |
+| [EUC Thrills](https://github.com/VibezZzCoder/EUC-thrills) code | `src/vendor/euc-thrills`, `src/workspaces/ride/riderFigure/rig.ts` (adapted) | MIT, (c) 2026 VibezZzCoder |
+
+What is copied, and the changes made, are in `src/vendor/euc-thrills/README.md` and the
+repository's `NOTICE`. No asset of the game (its CC BY 4.0 geometry, colours or painted sheets)
+is used.
+
 ## Assets
 
 - Icons: Lucide (ISC) for the general set; the Ride, Compare, Flash and app glyphs are original.
 - The 3D wheel is built from primitives in code; lighting uses in-scene light formers. No model,
-  texture or HDR file from a third party ships with the app.
+  texture or HDR file from a third party ships with the app. The rider figure wears EUC Studio's
+  own street kit (`src/workspaces/ride/riderFigure/streetKit.ts`), built in code with EUC
+  Thrills' loft kit and rider construction (MIT, above).

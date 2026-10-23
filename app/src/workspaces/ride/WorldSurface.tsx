@@ -28,11 +28,14 @@ export function WorldSurface({
   world,
   quality,
   onError,
+  follow,
 }: {
   world: WorldView;
   quality: Quality;
   /** The stream's last request error, or null once chunks arrive again. */
   onError?: (message: string | null) => void;
+  /** The wheel the rings follow, three.js coordinates (Compare's run A); the live run's by default. */
+  follow?: (out: THREE.Vector3) => THREE.Vector3 | null;
 }) {
   const group = useRef<THREE.Group>(null);
   const reported = useRef<string | null>(null);
@@ -52,10 +55,12 @@ export function WorldSurface({
     };
   }, [world, quality, invalidate, onError]);
   useFrame((_, dt) => {
-    const wheel =
-      engine.kind !== "demo" && visualWheelPosition(wheelAt)
-        ? ([wheelAt.x, -wheelAt.z] as [number, number])
+    const found = follow
+      ? follow(wheelAt)
+      : engine.kind !== "demo"
+        ? visualWheelPosition(wheelAt)
         : null;
+    const wheel = found ? ([found.x, -found.z] as [number, number]) : null;
     // Before the first pose the run starts at the frame's origin.
     stream.current?.update(dt, wheel ?? [0, 0]);
     const error = stream.current?.error ?? null;

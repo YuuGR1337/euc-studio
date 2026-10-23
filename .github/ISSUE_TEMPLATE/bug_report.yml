@@ -1,0 +1,79 @@
+name: Bug report
+description: Something in the simulator, the studio, the CLI, the firmware or the docs does not work as described.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for the report. If the problem could hurt a rider (a wrong cut-off, a flasher that writes when it
+        should not, a protection that does not trigger), do not file it here: report it privately through
+        [Report a vulnerability](https://github.com/tarikbc/euc-studio/security/advisories/new), as
+        [SAFETY.md](https://github.com/tarikbc/euc-studio/blob/main/SAFETY.md#reporting-a-safety-problem) explains.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Studio (desktop app)
+        - Free Ride
+        - Engine or CLI (euc)
+        - Physics, rider or world
+        - Scenarios or compare
+        - Our firmware (compat, clean, SIL)
+        - Python bindings
+        - Flasher (simulated)
+        - Docs
+        - Other or not sure
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you saw. Paste error text as text, not as a screenshot.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: How to reproduce
+      description: The command, scenario file or steps in the studio. A scenario that shows the problem helps most.
+      placeholder: |
+        cargo run --release -p euc-cli -- sim run --scenario scenarios/ride-20kmh-stop.toml --firmware clean
+    validations:
+      required: true
+  - type: input
+    id: commit
+    attributes:
+      label: Commit
+      description: The output of `git rev-parse --short HEAD`.
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: macOS 26 (arm64), Ubuntu 24.04, Windows 11
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Output or logs
+      description: The CLI output, or the relevant lines of a log. Remove anything that shows where you live or ride.
+      render: shell
+  - type: checkboxes
+    id: rules
+    attributes:
+      label: Checks
+      options:
+        - label: This report contains no vendor firmware, decompiled code or analysis databases.
+          required: true
+        - label: This is not a problem that could hurt a rider (those go to the private report form).
+          required: true

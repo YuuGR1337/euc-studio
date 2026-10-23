@@ -416,6 +416,90 @@ fn hills_stay_gentle() {
 }
 
 /// Generator regressions: a fixed seed's chunks around the spawn hash to a recorded value.
+/// A level city for tests that need one: no hills, no road defects.
+fn level(seed: u64) -> WorldSpec {
+    let densities = Densities {
+        hills: 0.0,
+        potholes: 0.0,
+        manholes: 0.0,
+        cracks: 0.0,
+        rough_patches: 0.0,
+        wet_patches: 0.0,
+        ..Densities::default()
+    };
+    WorldSpec { densities, ..WorldSpec::city(seed) }
+}
+
+#[test]
+fn hills_zero_levels_the_terrain_and_keeps_the_streets() {
+    let flat = World::new(level(42)).unwrap();
+    let hilly = world(42);
+    for x in (-300..=300).step_by(25) {
+        for y in (-300..=300).step_by(25) {
+            assert_eq!(flat.terrain_at(f64::from(x), f64::from(y)), 0.0, "({x}, {y})");
+        }
+    }
+    // The road network does not depend on the relief: the same streets, the same curb lines.
+    for (i, j) in [(0, 0), (3, -2), (-4, 5)] {
+        for axis in [Axis::Row, Axis::Column] {
+            let id = EdgeId { axis, i, j };
+            assert_eq!(flat.edge(id).map(|e| e.points), hilly.edge(id).map(|e| e.points), "{id:?}");
+        }
+    }
+    // Along the spawn arterial the lane is level to millimetres (its crown is 7 cm above the gutter).
+    let start = flat.height_at(0.0, 0.0);
+    for x in (0..=450).step_by(5) {
+        let h = flat.height_at(f64::from(x), 0.0);
+        assert!((h - start).abs() < 0.005, "x {x}: {h} against {start}");
+    }
+}
+
+#[test]
+fn an_incline_grades_the_whole_world_along_its_direction() {
+    let incline =
+        euc_world::Incline { origin: [0.0, 0.0], direction: [1.0, 0.0], slope_pct: 20.0, start_m: 40.0, ramp_m: 10.0 };
+    let graded = World::new(WorldSpec { incline: Some(incline), ..level(42) }).unwrap();
+    let flat = World::new(level(42)).unwrap();
+    for (x, y) in [(-50.0, 0.0), (0.0, 20.0), (39.9, -60.0)] {
+        assert_eq!(graded.height_at(x, y), flat.height_at(x, y), "behind the start ({x}, {y})");
+    }
+    // Past the ramp the lane climbs 20 cm per metre, the same at any offset across the grade.
+    for y in [0.0, -64.0, 128.0] {
+        let rise = graded.terrain_at(110.0, y) - graded.terrain_at(100.0, y);
+        assert!((rise - 2.0).abs() < 1e-9, "y {y}: {rise}");
+    }
+    let lane = graded.height_at(150.0, 0.0) - graded.height_at(100.0, 0.0);
+    assert!((lane - 10.0).abs() < 0.01, "{lane}");
+    // A curb follows the grade: its top stays on the sidewalk's edge.
+    let solids = graded.solids_in(Rect::new([140.0, -10.0], [160.0, 10.0]));
+    let curb = solids.iter().find(|s| s.kind == SolidKind::Curb).expect("a curb along the arterial");
+    let c = curb.centre;
+    assert!((curb.top() - graded.height_at(c[0], c[1])).abs() < 0.3, "{curb:?}");
+    // Buildings stand in the slope: no footprint corner sees the box's bottom above the ground.
+    let mut buildings = 0;
+    for s in graded.solids_in(Rect::new([60.0, -150.0], [300.0, 150.0])) {
+        if s.kind != SolidKind::Building {
+            continue;
+        }
+        buildings += 1;
+        let bottom = s.centre[2] - s.half[2];
+        for (a, b) in [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)] {
+            let x = s.centre[0] + s.axes[0][0] * s.half[0] * a + s.axes[1][0] * s.half[1] * b;
+            let y = s.centre[1] + s.axes[0][1] * s.half[0] * a + s.axes[1][1] * s.half[1] * b;
+            let ground = graded.height_at(x, y);
+            assert!(bottom <= ground + 0.02, "building {} floats {:.3} m at ({x:.1}, {y:.1})", s.id, bottom - ground);
+        }
+    }
+    assert!(buildings > 10, "{buildings}");
+    for bad in [
+        euc_world::Incline { slope_pct: 45.0, ..incline },
+        euc_world::Incline { direction: [1.0, 1.0], ..incline },
+        euc_world::Incline { start_m: -1.0, ..incline },
+    ] {
+        assert!(World::new(WorldSpec { incline: Some(bad), ..level(42) }).is_err(), "{bad:?}");
+    }
+}
+
 /// The arithmetic is IEEE-754 only, so this value holds on every platform.
 #[test]
 fn golden_digest() {

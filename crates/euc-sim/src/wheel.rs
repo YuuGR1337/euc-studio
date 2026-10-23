@@ -192,7 +192,55 @@ pub fn collision_shapes(text: &str) -> Result<Option<Shapes>, String> {
             return Err(format!("[collision] {name}: neither a box (centre, half) nor a capsule (from, to, radius)"));
         }
     }
+    if let Some(covers) = table.get("pad_covers") {
+        shapes.pads = pad_faces(covers)?;
+    }
     Ok(Some(shapes))
+}
+
+/// How much further out the right pad cover sits than the left one, metres: each cover sits on its
+/// own side's packs, and the right packs' outer face is 1.0 mm further out (`geometry.toml`
+/// `[pad_covers]`, which gives the left cover).
+const RIGHT_COVER_OFFSET_M: f64 = 0.001;
+
+/// The faces of the side pad covers where a leg can rest (`[pad_covers] contact_faces`), as boxes
+/// from the packs' outer face (`inner_y_m`) out to each face, left and mirrored right.
+fn pad_faces(covers: &toml::Value) -> Result<Vec<Solid>, String> {
+    let number = |value: Option<&toml::Value>, what: &str| -> Result<f64, String> {
+        value
+            .and_then(|v| v.as_float().or_else(|| v.as_integer().map(|i| i as f64)))
+            .ok_or(format!("[pad_covers] {what} must be a number"))
+    };
+    let range = |value: Option<&toml::Value>, what: &str| -> Result<[f64; 2], String> {
+        let items = value.and_then(toml::Value::as_array).ok_or(format!("[pad_covers] {what} must be [low, high]"))?;
+        let numbers: Vec<f64> =
+            items.iter().filter_map(|v| v.as_float().or_else(|| v.as_integer().map(|i| i as f64))).collect();
+        match <[f64; 2]>::try_from(numbers) {
+            Ok([low, high]) if low < high => Ok([low, high]),
+            _ => Err(format!("[pad_covers] {what} must be [low, high]")),
+        }
+    };
+    let Some(faces) = covers.get("contact_faces") else { return Ok(Vec::new()) };
+    let faces = faces.as_array().ok_or("[pad_covers] contact_faces must be a list")?;
+    let inner = number(covers.get("inner_y_m"), "inner_y_m")?;
+    let mut pads = Vec::new();
+    for face in faces {
+        let name = face.get("name").and_then(toml::Value::as_str).ok_or("[pad_covers] a contact face needs a name")?;
+        let ([x0, x1], [z0, z1]) =
+            (range(face.get("x_m"), &format!("{name}.x_m"))?, range(face.get("z_m"), &format!("{name}.z_m"))?);
+        let outer = number(face.get("y_m"), &format!("{name}.y_m"))?;
+        if outer <= inner {
+            return Err(format!("[pad_covers] {name}.y_m must stand out from inner_y_m"));
+        }
+        for (side, sign, offset) in [("left", 1.0, 0.0), ("right", -1.0, RIGHT_COVER_OFFSET_M)] {
+            pads.push(Solid::Box {
+                name: format!("pad_{name}_{side}"),
+                centre: [f64::midpoint(x0, x1), sign * (f64::midpoint(inner, outer) + offset), f64::midpoint(z0, z1)],
+                half: [(x1 - x0) / 2.0, (outer - inner) / 2.0, (z1 - z0) / 2.0],
+            });
+        }
+    }
+    Ok(pads)
 }
 
 /// Splits `plant.toml` into the electrical plant and the `[body]` mechanics.
@@ -233,6 +281,22 @@ mod tests {
         assert_eq!(shapes.solids.len(), 2);
         assert!(collision_shapes("[collision]\nblob = { size = 1 }").unwrap_err().contains("blob"));
         assert_eq!(collision_shapes("schema = 1").unwrap(), None);
+        // Pad faces become boxes from the packs out to each face, mirrored and 1 mm further out
+        // on the right.
+        let pads = collision_shapes(
+            "[collision]\ntire_torus = { major_m = 0.17, minor_m = 0.05 }\n[pad_covers]\ninner_y_m = 0.10\n\
+             contact_faces = [{ name = \"arm\", x_m = [-0.1, 0.1], z_m = [0.2, 0.3], y_m = 0.12 }]",
+        )
+        .unwrap()
+        .unwrap()
+        .pads;
+        assert_eq!(pads.len(), 2);
+        let Solid::Box { name, centre, half } = &pads[1] else { panic!("{pads:?}") };
+        assert_eq!(name, "pad_arm_right");
+        assert!(
+            (centre[1] + 0.111).abs() < 1e-12 && (half[1] - 0.01).abs() < 1e-12 && (centre[2] - 0.25).abs() < 1e-12
+        );
+        assert!(collision_shapes("[collision]\n[pad_covers]\ninner_y_m = 0.1\ncontact_faces = [{ name = \"a\", x_m = [0, 1], z_m = [0, 1], y_m = 0.05 }]").is_err());
     }
 
     #[test]

@@ -12,7 +12,7 @@ Use an installed Python 3.11 or later.
 ```sh
 python3.11 -m venv python/.venv
 python/.venv/bin/python -m pip install maturin==1.15.0 pytest
-python/.venv/bin/python tools/fetch-mujoco/fetch.py --github
+python/.venv/bin/python tools/fetch-mujoco/fetch.py
 cd firmware
 cmake --workflow --preset target-clean
 cd ..
@@ -132,6 +132,8 @@ It returns typed samples, events, BLE frames, and output changes.
 Header and context values use dictionaries so callers can inspect saved metadata.
 Unknown header fields remain available.
 Free-ride context contains the saved height map, including its original grid values.
+A run on the city world carries its world specification (`world`), and the lateral rider names its joints
+(`rider_joints`).
 The shared Rust context validator rejects invalid or unsupported context.
 
 `truncated` explains recovery from an incomplete file, when applicable.

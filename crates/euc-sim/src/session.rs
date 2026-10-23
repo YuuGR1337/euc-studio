@@ -157,6 +157,8 @@ impl Session {
         let lean_max = self.live().physics().setup().rider.control.lean_max_deg.to_radians();
         let intent = manual.map_or(self.scenario_intent, |m| Intent::Lean(m.lean * lean_max));
         let rider = self.live_mut().physics_mut().rider();
+        // By hand the manual limits apply (turning at a stop, the speed-scheduled turn cap).
+        rider.set_manual(manual.is_some());
         rider.set_intent(intent);
         // Given back, the rider keeps the heading reached (scenarios ride straight on from there).
         rider.set_turn_rate(manual.map_or(0.0, |m| m.steer * MANUAL_TURN_RAD_S));
@@ -174,6 +176,13 @@ impl Session {
     /// Manual control, if it is on.
     pub const fn manual(&self) -> Option<Manual> {
         self.manual
+    }
+
+    /// Asks the articulated rider to crouch, radians of knee flexion (0 straight, at most 1.2).
+    /// The knees bend toward it at the physics' crouch rate, with the centre of mass kept over
+    /// the feet. The rigid rider, and a rider who has left the pedals, cannot crouch.
+    pub fn set_crouch(&mut self, knee_rad: f64) -> Result<(), String> {
+        self.live_mut().physics_mut().set_crouch(knee_rad).map_err(|error| error.to_string())
     }
 
     /// What the rider wants.
@@ -328,6 +337,15 @@ impl Session {
         std::mem::take(&mut self.events)
     }
 
+    /// Drops the machine's diagnostic log entries this session has already turned into events, so
+    /// that a run without an end (Free Ride) keeps a bounded log. A run that reads a full
+    /// [`Report`](crate::Report) at its end does not call this.
+    pub fn forget_seen_diagnostics(&mut self) {
+        let seen = self.seen_events.min(self.machine.sys.diag.events.len());
+        self.machine.sys.diag.events.drain(..seen);
+        self.seen_events = 0;
+    }
+
     fn push(&mut self, kind: EventKind, text: String) {
         self.events.push(Event { t_s: self.time_s(), kind, text });
     }
@@ -430,6 +448,22 @@ mod tests {
     }
 
     #[test]
+    fn forgetting_seen_diagnostics_keeps_only_unread_ones() {
+        let mut s = session();
+        s.machine_mut().sys.diag.events.push((0, "BLOCKER test: first".into()));
+        s.step();
+        assert!(s.take_events().iter().any(|e| e.text == "BLOCKER test: first"));
+        s.forget_seen_diagnostics();
+        assert!(s.machine().sys.diag.events.is_empty(), "{:?}", s.machine().sys.diag.events);
+        let at = s.machine().cycles;
+        s.machine_mut().sys.diag.events.push((at, "BLOCKER test: second".into()));
+        s.step();
+        let events = s.take_events();
+        assert!(events.iter().any(|e| e.text == "BLOCKER test: second"), "{events:?}");
+        assert!(!events.iter().any(|e| e.text == "BLOCKER test: first"), "a trimmed entry is not read again");
+    }
+
+    #[test]
     fn manual_control_overrides_the_scenario_and_gives_it_back() {
         let mut s = session();
         s.set_intent(Intent::Speed(2.0));
@@ -455,6 +489,7 @@ mod tests {
         // Full forward (clamped from 3), then a scenario step that must not win.
         s.set_manual(Some(Manual { lean: 3.0, steer: -0.5 }));
         assert_eq!(s.manual(), Some(Manual { lean: 1.0, steer: -0.5 }));
+        assert!(s.live_mut().physics_mut().rider().manual(), "by hand the manual limits apply");
         assert_eq!(s.intent(), Intent::Lean(lean_max));
         // The 20 ms command delay also applies to turns. One 10 ms sample cannot apply it yet.
         s.step();
@@ -480,8 +515,9 @@ mod tests {
         s.set_manual(Some(Manual { lean: -0.5, steer: 0.0 }));
         assert_eq!(s.intent(), Intent::Lean(-0.5 * lean_max));
 
-        // Given back: the scenario's latest wish, at once.
+        // Given back: the scenario's latest wish, at once, with the scripted limits.
         s.set_manual(None);
+        assert!(!s.live_mut().physics_mut().rider().manual());
         assert_eq!(s.intent(), Intent::Speed(5.0));
         for _ in 0..4 {
             s.step();
@@ -490,5 +526,12 @@ mod tests {
         assert_eq!(s.live_mut().physics_mut().rider().line(), turned, "keeps the heading reached");
         let notes: Vec<String> = s.take_events().into_iter().map(|e| e.text).collect();
         assert_eq!(notes, ["manual control", "control back to the scenario"]);
+        // The articulated rider crouches on request, within its range.
+        assert!(s.set_crouch(2.0).is_err() && s.set_crouch(f64::NAN).is_err());
+        s.set_crouch(0.6).unwrap();
+        for _ in 0..40 {
+            s.step();
+        }
+        assert!((s.live().physics().crouch_rad() - 0.6).abs() < 1e-9, "{}", s.live().physics().crouch_rad());
     }
 }

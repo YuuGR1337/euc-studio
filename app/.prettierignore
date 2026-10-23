@@ -10,3 +10,4 @@ src/design/tokens.css
 docs/screenshots
 src/engine/telemetry.gen.ts
 src/engine/fixtures
+src/vendor

@@ -1,5 +1,10 @@
 # Human model and free ride: design and implementation plan
 
+> **Historical plan (2026-10-16).** Kept for its decisions and evidence. Free Ride has since become a play mode in
+> the generated city, without arming, sliders, a rider choice or the map editor, and the opt-in lateral rider adds
+> lateral leg joints. The current behavior is in the [Free Ride README](../../app/src/workspaces/freeRide/README.md),
+> [Free Ride design](../design/free-ride.md), [body physics](body.md) and [project status](../project-status.md).
+
 Status: implementation audit, 2026-10-16, completion worktree.
 Update 2026-10-22: `articulated_sagittal_v1` is now the default rider for scenarios and the Ride workspace.
 Independent foot contact (the first H4 step) is the opt-in model `articulated_contact_v1`; `articulated_sagittal_v1` keeps welded feet. Free Ride starts on `articulated_sagittal_v1` too. The rigid baseline stays selectable.
@@ -9,7 +14,7 @@ The first physical `articulated_sagittal_v1` slice is implemented in `euc-physic
 Actual cached stock FreeRide acceptance now passes for both models after the articulated task-torque mapping correction.
 The articulated model remains experimental. Mechanical braking, mild grades, a small bump, and momentum-preserving release now pass focused tests. Native generated-terrain steering passes for both rider models over 14 driven seconds. These bounded checks do not establish measured rider behavior.
 Sections describing later increments remain requirements, not completion claims.
-See [the articulated implementation handoff](../superpowers/plans/2026-10-16-articulated-rider.md) for exact interfaces and regression evidence.
+See [the articulated implementation handoff](../history/2026-10-16-articulated-rider.md) for exact interfaces and regression evidence.
 
 ## 1. Scope and decisions
 
@@ -48,7 +53,7 @@ Evidence describes the current working tree, not only the earlier planning basel
 | Steering and roll | `lib.rs`, `step` | Existing external shell aids and signed aid work remain explicit | No physical lateral rider balance or aid-free steering |
 | Release | `lib.rs`, `leave`; `mjcf.rs`, pedal welds | Both articulated feet release with the complete rider tree; joint motors stop | Welded pedal support before release; no foot slip or gait |
 | Delay | `params.rs`, `RiderControl`; `rider.rs`, `TickDelay` | Separate request/feedback delays, zero by default, bounded to 0.30 s | No measured reaction calibration; crouch request currently bypasses these queues |
-| Free ride | `engine/free_ride.rs`, `FreeRideHost` | Direct Session stepping, native input guards, finite map, stand boot, pause, and actual rider model selection; native terrain steering, rearm, and edge checks pass | Longer native runs and integrated desktop interaction remain open |
+| Free ride | `engine/free_ride.rs`, `FreeRideHost` | Play mode (2026-10-22): a 1.5 s stand boot, input live at once, a crash never pauses, respawn at the last clear spot or the start, wheel buttons and power off/on, no run limit with bounded native memory; stock acceptance passes | Integrated desktop interaction remains open |
 | Recording | `crates/euc-sim/src/recording.rs`, `RecordingContext` | Optional typed context carries the actual model and authoritative map; rigid/articulated round trips pass | Historical board outputs and audio remain absent |
 | Detailed human diagnostics | `lib.rs`, `RiderState`, `rider_joints` | Actual joint angles/rates/torques, upper-body lean, aid work | Joint signals are not yet appended to EUCT channels |
 
@@ -234,6 +239,28 @@ Expose position and heading through read-only physics state methods.
 
 ### Boot, play, pause, and reset
 
+**Play mode (2026-10-22) replaces the arming rules in this section and in section 5.** The owner
+asked to test and play without clicks, so:
+
+- The stand lets go 1.5 s after the build (`BOOT_S`). Stock, ours-compat and ours-clean start their
+  balance loop between 1.20 and 1.25 s; the first ten seconds after a 1.5 s release match a 4 s
+  release on both rider models.
+- The controls are live at once: there is no Arm action and no neutral gate. An input older than
+  250 ms of wall time counts as neutral controls; the run does not pause or disarm. The source may
+  change at any time. A reconnected view clears the input and the ride goes on.
+- A crash never pauses. On a step-off or a fall the firmware, motor and world go on, the timeline
+  gets a note, and the status says "Off the pedals. Press R to respawn".
+- R respawns a new run at the last clear spot the wheel passed with the rider on its pedals;
+  Shift+R at the world's spawn. Each respawn boots the firmware again, stepped unthrottled
+  (`Host::booting`); about 0.7 s of wall time from the call to riding. A machine snapshot was not
+  needed for this target and does not exist.
+- Power off is not a halt: the stock power hold (0.81 s at 0.5 m/s or less) drops the latch, the
+  rail goes, the motor is free, the rider falls and the run goes on; a press boots again.
+- Free ride has no run limit. The recording capture still stops itself at its own limits.
+- A pause still freezes simulation time and clears the input; resume needs no neutral input.
+
+The text below is the original plan.
+
 Create a new run paused at t = 0 on its stand.
 Start recording before its initial snapshot through the parent's recording lifecycle.
 Play advances the existing firmware boot path with neutral rider input.
@@ -364,6 +391,12 @@ The physical lean command remains rate limited when simulation steps resume.
 A pause therefore can show a nonzero last commanded lean.
 
 ### Native history bounds
+
+Done in play mode (2026-10-22): `FreeRideHost` takes the BLE bytes with `Machine::take_ble_tx()`
+(`BoardWatch::take_ble_tx`), and `Session::forget_seen_diagnostics` drops the diagnostic entries
+the session has read, each time the runner drains events. The scenario and CLI paths keep their
+full traces. The plan below asked for sequence numbers; they are not needed because the trim
+happens right after the session reads every entry.
 
 `FreeRideHost` avoids the scenario driver's growing sample and observation vectors.
 Also drain BLE bytes through the existing `Machine::take_ble_tx()` API.

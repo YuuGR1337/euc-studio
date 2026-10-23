@@ -64,12 +64,22 @@ pub trait Host {
     fn wants_pause(&self) -> bool {
         false
     }
+    /// The host is still booting on its stand, with nothing yet for a person to see or do: the
+    /// runner steps it as fast as it can instead of at the wall-clock rate.
+    fn booting(&self) -> bool {
+        false
+    }
     /// What the board shows and sounds (display, LEDs, buzzer), if the host models it.
     fn outputs(&self) -> Option<Outputs> {
         None
     }
     /// Buzzer changes since the last call, at their exact simulated time.
     fn drain_tones(&mut self, _out: &mut Vec<Tone>) {}
+    /// What the ride sounds like at this sample (motor, tyre, wind), from `snapshot` and the
+    /// host's own state; None for a host whose rides make no sound but the buzzer.
+    fn ride_sound(&self, _snapshot: &Snapshot) -> Option<super::native_audio::Ride> {
+        None
+    }
     /// Takes manual control of the rider (keyboard, gamepad), or gives it back (`None`). A host
     /// without a rider ignores it.
     fn set_manual(&mut self, _manual: Option<Manual>) {}
@@ -186,6 +196,18 @@ impl BoardWatch {
         let tx = &machine.board().ble_tx;
         let new = &tx[self.ble_read.min(tx.len())..];
         self.ble_read = tx.len();
+        self.read_ble(new, machine, out);
+    }
+
+    /// As [`Self::drain_ble_tx`], but takes the bytes out of the board, so that a run without an
+    /// end (Free Ride) does not keep them all. A host uses one of the two, never both.
+    pub(super) fn take_ble_tx(&mut self, machine: &mut Machine, out: &mut Vec<(f64, u8)>) {
+        let new = machine.take_ble_tx();
+        self.ble_read = 0;
+        self.read_ble(&new, machine, out);
+    }
+
+    fn read_ble(&mut self, new: &[(u64, u8)], machine: &Machine, out: &mut Vec<(f64, u8)>) {
         let bytes: Vec<u8> = new.iter().map(|&(_, b)| b).collect();
         out.extend(new.iter().map(|&(cycle, b)| (cycle as f64 / self.hclk, b)));
         self.assembler.push(&bytes);

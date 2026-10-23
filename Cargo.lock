@@ -689,6 +689,7 @@ dependencies = [
  "crc32fast",
  "miniz_oxide",
  "serde",
+ "serde_json",
 ]
 
 [[package]]

@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import io
+import os
 import re
 import tarfile
 import tempfile
 import unittest
 import zipfile
 from pathlib import Path, PurePosixPath
+from unittest import mock
 
 import fetch
 
@@ -71,6 +73,16 @@ class PinTests(unittest.TestCase):
         self.assertIn('mujoco-rs = { version = "=5.0.0"', cargo)
         config = (fetch.REPO / ".cargo" / "config.toml").read_text()
         self.assertIsNotNone(re.search(rf"mujoco-{re.escape(fetch.VERSION)}/lib", config))
+
+
+class MainTests(unittest.TestCase):
+    def test_github_outside_actions_fails_before_downloading(self) -> None:
+        env = {k: v for k, v in os.environ.items() if k != "GITHUB_ENV"}
+        with mock.patch.dict(os.environ, env, clear=True), mock.patch.object(fetch, "fetch") as download:
+            with self.assertRaises(SystemExit) as exit_:
+                fetch.main(["--github"])
+        self.assertEqual(exit_.exception.code, 2)
+        download.assert_not_called()
 
 
 if __name__ == "__main__":

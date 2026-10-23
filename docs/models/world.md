@@ -101,6 +101,12 @@ Guarantees (test `the_spawn_is_level_clear_and_on_a_straight_road`, 12 seeds): a
 `Densities` sets every rate: potholes 1.5, manholes 0.6, cracks 12, rough patches 0.8 and wet patches 1.0 per 1000 m² of their zone; 35 % of local edges with a bump; 70 % of intersection ends with a crosswalk; 1.5 driveways per 100 m of street side; plaza weight 0.15 among parcels; props 0.8 of their slots.
 Realised pothole density lands at 50–110 % of nominal (sites near the gutter and the spawn are refused) and doubles when the parameter doubles (test `densities_follow_their_parameters`).
 
+`hills` (W2) scales the terrain relief: 1 by default, 0 a level city, up to 2. At 1 the products are exact, so a default world is bit-identical to one without the field (golden digest unchanged); a spec that leaves it out reads 1. The street network, features and parcels do not depend on it, only the heights (test `hills_zero_levels_the_terrain_and_keeps_the_streets`).
+
+### Incline
+
+`WorldSpec::incline` (W2, optional) grades the whole world along one direction for a slope test: from `start_m` past `origin` along the unit `direction`, the terrain rises by `slope_pct` per 100 m, built up over `ramp_m` with a parabola (the profile of a scenario's `[terrain]` slope). Behind the start the terrain is unchanged. Streets, curbs, parcels, plazas and features follow it: on a 20 % grade buildings stand into the slope, never above it, and curbs keep their tops on the sidewalk edge (test `an_incline_grades_the_whole_world_along_its_direction`). A scenario gives the direction by its start heading; at whole quarter turns the unit vector is exact, so the generator sees the same bits on every platform.
+
 ## Physics (built in W1b)
 
 `crates/euc-physics/src/world.rs`. `Setup::world` takes a `WorldGround` (a shared `World` and a `WorldStart`); it excludes `height_map` and a non-flat `[terrain]`.
@@ -120,6 +126,19 @@ The physics frame is the world moved so that the start lies at the origin, headi
 - Every tick, `solids_in` around the shell; the solids within 6 m (nearest first, then by identity) fill the pool. A solid keeps its slot while it stays in reach; new ones take free slots.
 - Moving a box is `mocap_pos` and `mocap_quat`. Changing its size also needs `geom_size`, `geom_rbound` and `geom_aabb` written: with stale bounds MuJoCo misses contacts (spike B).
 - Window and boxes use `friction="0 0 0" condim="3" conaffinity="3"`, so wheel, shell and rider all touch them.
+
+### Rider's window
+
+A rider who has left the wheel (stepped off, let go after a cut or thrown) can end up farther from the wheel than the window reaches; without ground there it would fall through the world.
+- A second `hfield` of 129 × 129 samples at the same cells (a 4 m square) sits in its own mocap body, parked 1000 m below.
+- Every tick, once a rider off the wheel has its origin more than 4 m from the window's centre (per axis), the rider's window lies under it, centred on whole cells, and follows it when it drifts more than 0.5 m. It lets go when the rider is back within 3.5 m, or on the wheel.
+- It shows the ground only from the window's edge outwards: its samples inside the window sit at its floor, below the window's ground, so no contact is doubled. Its heights are the window's samples (same lattice, same quantum), so the two meet without a step.
+- No box pool follows the rider; the faces' step behind each box (above) still gives it curbs and steps.
+- Test (`world.rs`): with each rider model, a rider who stepped off stays above the ground for 3 s after the wheel goes 9 m away, and the rider's window takes over.
+
+### Ground ray
+
+`Physics::ground_ray_m(xy)` gives the ground height at a physics-frame point as the tire meets it: one `mj_ray` from 50 m above against the ground geoms only. Every ground geom (the floor or strip, curb boxes, a height map, the world's window, box pool and rider's window) is in geom group 3 (`GROUND_GROUP`), which MuJoCo uses only to filter rays and drawing, never contacts; so the ray never hits the tire, the shell or a rider. It returns `None` where there is no ground (in a world, beyond the windows: the window reaches at least 5 m ahead of the wheel, the box pool 6 m). About 0.9 µs per ray in a release build, so a rider can look ahead with a few samples every step. Test (`tests/world.rs`): under the wheel and the rider, with each rider model, the ray finds the road within 3 mm; on a strip it finds a 15 cm curb's top past its face.
 
 ### Ground friction
 
@@ -174,10 +193,18 @@ The studio's engine crates build at `opt-level = 3` in development too, so the s
 - **Worker.** `worldWorker.ts` decodes payloads and builds the ground mesh (positions, normals, a material texture) and one box mesh per chunk off the UI thread, as transferable buffers.
 - **Rings.** `WorldStream` keeps level 0 within 30 m of the wheel and level 1 within 104 m (high quality), or 18 m and 56 m (low quality), refreshes the wanted set every 0.25 s, asks for the nearest chunks first (4 per level-0 request, 24 per level-1 request), and drops what falls out of range. Props are one `InstancedMesh` per part and kind (lamp posts, trees, benches, bins, hydrants, bollards).
 - **Frame.** The world group sits in the physics frame like the live bodies. Chunk meshes carry chunk-local vertices, so f32 stays precise far from the spawn without a floating origin.
-- **View.** On a world the fog runs from 18 m to 110 m and the camera sees 300 m. `WorldView` samples the loaded level-0 and level-1 heights for the floor light, the contact shadow and the grade readout.
+- **View.** On a world the camera sees 300 m. `WorldView` samples the loaded level-0 and level-1 heights for the floor light, the camera and the grade readout.
+- **Outdoor look (FR4, `app/src/workspaces/ride/outdoor/`).** A world is outdoors; scenarios without a world and the 32 m test pad keep the studio sweep. After EUC Thrills by VibezZzCoder (MIT), re-implemented in our code (`docs/design/free-ride.md`):
+  - *Sky.* An equirectangular sky painted once per world in a worker (1024 × 512): a horizon-to-zenith ramp shaped by y^0.62, warm scatter low toward the sun, value-noise clouds on a flat deck seeded from the world seed (a recording shows the same clouds), and the sun's core and glow. It is not tone mapped (sRGB), and it turns with the world group, so the sun is fixed in the world.
+  - *Fog.* Linear, in the horizon colour `#BCD4EC`. three.js mixes fog after tone mapping and colour conversion, so a fully fogged pixel is exactly the sky's horizon. The fog ends before the outer ring does (30 to 90 m on high, 12 to 44 m on low), so the ground's edge is never seen.
+  - *Sun and fill.* One sun at azimuth 225° (south-west) and 42° up, colour `#FFF0DE`, intensity 3.1, shared by the painted sky and the shadows; a hemisphere light (`#C2CCD6` over `#B2AB97`, 0.6); the sky's PMREM environment (a 256 × 128 painting with ground bounce below the horizon) at 0.2. Tuned under the Neutral tone mapping at exposure 1.5, which stays: sunlit asphalt renders about (122, 121, 124), its shadow about (29, 47, 69), close to the reference.
+  - *Shadows (high tier).* A 2048² map over ±25 m that follows the wheel, 9 m ahead along the view, its centre snapped to whole shadow texels in the sun's frame so edges do not crawl. Buildings, solids, props and the bodies cast; the ground receives.
+  - *Contact pools.* The ground's shader darkens softly under the wheel (radius 0.6 m) and under the rider's body (1.05 m, stretched 1.6 times along the shadow), from the poses each frame. They replace `ContactShadows` on a world.
+  - *Palette.* Muted mid-values for daylight (asphalt `#72767C`, concrete `#B2AEA4`, grass `#547446`, paint `#E2E0D8`, never pure white) and facade colours chosen per building by hash.
+  - Budget, measured in headless WebKit at 960 × 540 with real chunks: 60 frames per second, about 190 draw calls, 605 000 to 630 000 triangles, 53 to 57 textures.
 - **Errors.** When the engine refuses chunks, the view keeps what it drew, asks again, and shows a "World view incomplete" pill whose tooltip gives the reason. The physics does not depend on the view.
 - **Where it shows.** Free Ride on a world, a live `[world]` scenario (the run sends its `WorldFrame` with the bodies), and the playback of a recording with a world (the studio regenerates it from the recorded seed).
-- **Not built:** ring 2 and skirts, a facade shader, wet gloss, a minimap.
+- **Not built:** ring 2 and skirts, a facade shader, wet gloss, a minimap; ground detail and road marking ribbons (FR5), building looks and a skyline (FR7), vegetation and better props (FR8).
 
 ## Free Ride
 
@@ -201,13 +228,30 @@ revision = 2               # must match the generator (euc_world::GENERATOR_REVI
 biome = "city"             # optional; the only biome
 start = { x_m = 70.0, y_m = 3.05, heading_deg = 0.0 }   # optional; the world's spawn without it
 route = [[127.59, -54.24], [133.01, -54.60]]            # optional waypoints, world metres
+slope_pct = -2.0           # optional: an incline along the start heading (± 40 %)
+slope_start_m = 25.0       # where it starts, metres ahead of the start
+slope_ramp_m = 10.0        # over which it builds up (default 10)
 
 [world.densities]          # optional; defaults as above
 potholes = 3.0
 plazas = 0.3
+hills = 0.0                # a level city
 ```
 
 A scenario has either a non-flat `[terrain]` (the 1-D strip) or `[world]`, never both. A route has at most 256 finite points. After release the rider heads for the next waypoint and moves on within 1 m of it; after the last one it holds its heading. [scenarios/writing-scenarios.md](../scenarios/writing-scenarios.md) has the field table.
+
+## Shipped scenarios in the city (W2)
+
+Every scenario in `scenarios/` has a `[world]` table (seed 42, revision 2); the parser's default is unchanged, so a file without one, and the scenario text inside recordings made before, still rides the plane. Each scenario's note says why its spot fits its test.
+The plain flat floor is allowed only on purpose, as `[world] flat = "<reason>"` (no other `[world]` key with it): `full-effort-70kmh-stop-soc100` rides it, because the city exposes the rigid rider's marginal roll stability in its hard brake ([scenarios.md](scenarios.md#city-world-w2-2026-10-23)).
+
+| Scenarios | Spot |
+| --- | --- |
+| ride, coasting, hard braking, hall loss (2), low battery, steps off (2), full effort (20 % and 50 %), overlean (3) | From the spawn east along the arterial (row 0) on a straight line that stays within 2 m of the centreline, in the carriageway's level middle, for up to 450 m. Ideal road: `hills = 0`, no potholes, manholes, cracks, rough or wet patches. Lane and crosswalk paint stays. |
+| balance-60s, ble-service-cut-standing | The middle of the level paver platform of the plaza at (48.1, −108.0), 15.9 × 6.4 m, at least 3 m from every edge; ideal ground. |
+| pothole-20kmh | A city pothole 2.0 cm deep and 0.49 m across at (−31.13, −70.91), 50 m south of the start on a level, clean, straight approach. |
+| pothole-5cm-20kmh | A city pothole 4.9 cm deep and 0.60 m across at (−28.33, 214.60), 50 m north of the start on a level, clean, straight approach. |
+| downhill-cruise-2pct, hill-climb-low-battery | The spawn arterial with an incline: −2 % from 25 m, +20 % from 40 m (10 m ramps); ideal road. |
 
 ## W1b acceptance
 
@@ -215,15 +259,17 @@ A scenario has either a non-flat `[terrain]` (the 1-D strip) or `[world]`, never
 
 | Scenario | What it rides | Result |
 | --- | --- | --- |
-| `world-curb-up-90deg` | a 13.5 cm curb up, straight on | falls at 11.32 s at all three quanta: the tire stops at a curb of 60 % of its radius |
-| `world-curb-up-30deg` | the same curb at 30° | falls at 11.86 s |
-| `world-curb-down-90deg` | a curb down, straight on | passes: pitch −2°, 87 A, suspension 76 mm |
-| `world-pothole-15kmh` | a 7.2 cm deep, 1.18 m wide generated pothole at 15 km/h | passes: pitch −1.7°, 36 A, suspension 54 mm |
-| `world-stairs-down-5kmh` | 5 steps of 16.7 cm down a plaza's stairs at walking speed | passes: suspension 94 mm, 151–168 A |
-| `world-ramp-up-7kmh` | a plaza ramp up, steered by a route | passes: pitch at most 2° |
+| `world-curb-up-90deg` | a 13.5 cm curb up, straight on | falls at 11.29 s at all three quanta: the tire stops at a curb of 60 % of its radius |
+| `world-curb-up-30deg` | the same curb at 30° | falls at 11.82 s |
+| `world-curb-down-90deg` | a curb down, straight on | passes: pitch −2.1°, 92–95 A, suspension 76 mm |
+| `world-pothole-15kmh` | a 7.2 cm deep, 1.18 m wide generated pothole at 15 km/h | passes: pitch −1.8°, 36 A, suspension 56 mm |
+| `world-stairs-down-5kmh` | 5 steps of 16.7 cm down a plaza's stairs at walking speed | passes: suspension 90–94 mm, 125–172 A |
+| `world-ramp-up-7kmh` | a plaza ramp up, steered by a route | passes: pitch at most 2.1° |
 
-Quanta 4000 and 2000 give identical results; 3000 differs slightly.
-The two curb-up runs fail their `upright` check: the wheel stops dead at the curb and the rider falls. A curb of 60 % of the tire's radius taken at 9 km/h without unweighting is expected to stop the wheel, so Claude reads this as the ground working, not a ground fault. PRELIMINARY: no measured ride over a curb backs these runs, and their `record` checks only report.
+Quanta 4000 and 2000 give identical results; 3000 differs slightly. The numbers are those after the moving-mass fix (a1951a4: the rider senses air drag in a world run too); before it the curb-up runs fell 0.04 s later.
+The two curb-up runs fail their `upright` check: the wheel stops dead at the curb and the rider falls. The ground works as built (the curb box stops the tire), but a real wheel climbs such a curb: see the open item below. PRELIMINARY: no measured ride over a curb backs these runs, and their `record` checks only report.
+
+**Open item (curbs).** The owner rides straight into curbs of about 15 cm without lifting the wheel; a higher curb needs a jump. So the result above is wrong: the sim throws the rider at a 13.5 cm curb at every quantum. The cause is in the tire and the rider, not the ground: the bundled physics update (tire envelopment and grip, and the rider's knees absorbing the hit) is to fix it. In that update's rerun the acceptance changes to: a 15 cm curb taken straight on at moderate speed is climbed; clearly higher curbs still need a jump. The curb scenarios stay as they are until then.
 
 ## Cross-platform determinism
 
@@ -285,5 +331,5 @@ W1b added, elsewhere:
 - Only the city biome exists.
 - One surface per tick: the tire's friction follows the surface under the shell, not under each contact point.
 - Rider limbs and the shell keep their own friction on every surface.
-- The studio's compare view still draws the 1-D strip only; a `[world]` scenario compares correctly but shows a flat floor there.
+- A 13.5 cm curb taken straight on throws the rider; the owner climbs about 15 cm curbs without lifting (see the open item under W1b acceptance).
 - Not built from the plan: an `euc world preview` wrapper (the `euc-world-preview` binary does the job), ring 2 and skirts, a facade shader, wet gloss, and a Free Ride minimap.

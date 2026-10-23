@@ -504,7 +504,7 @@ impl HeightMap {
         self.validate()?;
         let (low, _) = self.height_range();
         Ok(format!(
-            "    <geom name=\"floor\" type=\"hfield\" hfield=\"{HFIELD_NAME}\" pos=\"0 0 {low}\" friction=\"0.5 0 0\" condim=\"3\" conaffinity=\"3\"/>"
+            "    <geom name=\"floor\" type=\"hfield\" hfield=\"{HFIELD_NAME}\" pos=\"0 0 {low}\" friction=\"0.5 0 0\" condim=\"3\" conaffinity=\"3\" group=\"3\"/>"
         ))
     }
 

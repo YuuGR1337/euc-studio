@@ -22,6 +22,8 @@ official images from the vendor's update server for this check and never stores 
 ```sh
 git config core.hooksPath tools/hooks          # once per clone: run the guard before each commit
 python3 tools/vendor-guard/check.py --all       # whole tree (tracked and untracked files)
+python3 tools/vendor-guard/check.py --staged    # what the pre-commit hook runs
+python3 tools/vendor-guard/check.py --all --stock-dir DIR --require-deep   # fail if the deep check cannot run
 python3 -m unittest discover -s tools/vendor-guard -p 'test_*.py'
 ```
 

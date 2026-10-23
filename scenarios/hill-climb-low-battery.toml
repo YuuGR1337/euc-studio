@@ -16,15 +16,27 @@ release_s = 2.5
 speed_kmh = [[0, 0], [6, 0], [12, 25]]
 settings = "tarik-2026-10-15"
 
+# City world (docs/models/world.md): seed 42, from the spawn on the arterial (row 0) heading east;
+# the whole city rises 20 % along the ride from 40 m (built up over 10 m): a [world] incline
+# in place of the old [terrain] strip. Otherwise an ideal road (hills = 0, no road defects).
+[world]
+seed = 42
+revision = 2
+slope_pct = 20.0
+slope_start_m = 40.0
+
+[world.densities]
+hills = 0.0
+potholes = 0.0
+manholes = 0.0
+cracks = 0.0
+rough_patches = 0.0
+wet_patches = 0.0
+
 # The rider keeps climbing at 25 km/h whatever the tiltback, so the run shows the firmware's
 # tiltback growing; the default rider eases off and then stalls on the slope (scenarios.md).
 [rider.control]
 tiltback_feel_deg = 90.0
-
-[terrain]
-slope_pct = 20.0
-slope_start_m = 40.0
-length_m = 300.0
 
 [[timeline]]
 at_s = 0.0

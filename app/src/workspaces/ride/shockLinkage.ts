@@ -118,6 +118,9 @@ export function poseLinkage(
   };
 }
 
+/** The axle travel the cable's morph target displaces its low part by (the GLB's "travel_100mm"). */
+export const CABLE_MORPH_TRAVEL = 0.1;
+
 const Z = new THREE.Vector3(0, 0, 1);
 const spin = new THREE.Quaternion();
 
@@ -127,7 +130,9 @@ const spin = new THREE.Quaternion();
  * "shock_mount" (the carriage's rear arm) has its origin on the bottom eye, "rocker" on its frame
  * pivot, "link" on the rocker pin and "link_bottom" (the lower pin and its plates) on the link's
  * lower pin (a model without it has the link on the bottom eye's shaft). Their rest positions are
- * the linkage at full extension.
+ * the linkage at full extension. Optional: "fender" (the internal fender over the tyre) and "axle"
+ * (the axle stubs) ride with the carriage; "cable" (the cable bundle over the tyre) has a morph
+ * target that moves its low part with the carriage for CABLE_MORPH_TRAVEL of travel.
  */
 export interface ShockRig {
   root: THREE.Object3D;
@@ -136,6 +141,10 @@ export interface ShockRig {
   rocker: THREE.Object3D;
   link: THREE.Object3D;
   linkBottom: THREE.Object3D | undefined;
+  /** Parts that ride on the carriage with the axle (the fender, the axle stubs) and their rests. */
+  carriage: { node: THREE.Object3D; rest: THREE.Vector3 }[];
+  /** The cable bundle's meshes with a travel morph target. */
+  cable: THREE.Mesh[];
   rest: LinkageRest;
   mountRest: THREE.Vector3;
   shockRest: THREE.Quaternion;
@@ -152,6 +161,14 @@ export function shockRig(root: THREE.Object3D): ShockRig | null {
   );
   if (!shock || !mount || !rocker || !link) return null;
   const linkBottom = root.getObjectByName("link_bottom");
+  const carriage = ["fender", "axle"].flatMap((name) => {
+    const node = root.getObjectByName(name);
+    return node ? [{ node, rest: node.position.clone() }] : [];
+  });
+  const cable: THREE.Mesh[] = [];
+  root.getObjectByName("cable")?.traverse((o) => {
+    if (o instanceof THREE.Mesh && o.morphTargetInfluences?.length) cable.push(o);
+  });
   const at = (o: THREE.Object3D): P2 => [o.position.x, o.position.y];
   const rest = {
     pivot: at(rocker),
@@ -167,6 +184,8 @@ export function shockRig(root: THREE.Object3D): ShockRig | null {
     rocker,
     link,
     linkBottom,
+    carriage,
+    cable,
     rest,
     mountRest: mount.position.clone(),
     shockRest: shock.quaternion.clone(),
@@ -194,6 +213,11 @@ export function poseShock(
   const [dx, dy] = [pose.bottomEye[0] - rest.bottomEye[0], pose.bottomEye[1] - rest.bottomEye[1]];
   mount.position.set(rig.mountRest.x + dx, rig.mountRest.y + dy, rig.mountRest.z);
   rig.linkBottom?.position.set(pose.linkBottom[0], pose.linkBottom[1], rig.linkBottom.position.z);
+  for (const { node, rest: at } of rig.carriage) node.position.set(at.x + dx, at.y + dy, at.z);
+  for (const m of rig.cable) {
+    const influences = m.morphTargetInfluences;
+    if (influences) influences[0] = Math.max(travelM, 0) / CABLE_MORPH_TRAVEL;
+  }
   rocker.quaternion.copy(spin.setFromAxisAngle(Z, pose.rocker)).multiply(rig.rockerRest);
   link.position.set(pose.rockerPin[0], pose.rockerPin[1], link.position.z);
   link.quaternion.copy(spin.setFromAxisAngle(Z, pose.link)).multiply(rig.linkRest);

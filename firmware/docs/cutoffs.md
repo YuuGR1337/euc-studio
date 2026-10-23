@@ -33,7 +33,7 @@ pothole at 20 km/h (`pothole-5cm-20kmh`) the shell passes -40 deg for 0.06-0.09 
 firmware rides through only because its clipped gyro (+-500 deg/s) makes it believe the dip is shallower; the
 clean firmware reads the true dip, so with the stock 22 ms it cut and the wheel fell. Clean therefore gives an
 error angle the pitch detector's 105 ms (`ERROR_CUTOFF_22MS`): a fall still cuts, 83 ms later, and a roll
-cut-off (`tipped`) keeps the stock 22 ms. See "Open questions" for the evidence.
+cut-off (`tipped`) keeps the stock 22 ms. See "Decisions and open questions" for the evidence.
 
 ## Speed and power limits (balance, no cut)
 
