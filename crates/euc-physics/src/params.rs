@@ -467,8 +467,9 @@ pub struct RiderControl {
     pub turn_lean_max_deg: f64,
     /// Fastest change of the lean into a turn, degrees per second.
     pub turn_lean_rate_deg_s: f64,
-    /// Walking speed scale, m/s. Manual turn requests fade linearly to zero below it.
-    /// The heading twist spring fades with squared speed over it; yaw damping does not fade.
+    /// Walking speed scale, m/s. Turn requests fade linearly to zero below it, except under
+    /// manual control (`manual_turn_rate_max_rad_s`). The heading twist spring fades with squared
+    /// speed over it; yaw damping does not fade.
     pub twist_fade_mps: f64,
     /// Twist aid stiffness per radian of heading error, N·m (an external yaw torque on the shell;
     /// the legs have no twist joint).
@@ -483,6 +484,19 @@ pub struct RiderControl {
     /// Experimental delay of rider observations, simulated seconds, 0 through 0.30.
     /// This does not delay the firmware IMU, release guards, or collision solver.
     pub feedback_delay_s: f64,
+    /// Manual control only (Free Ride, Ride's manual mode; `RiderController::set_manual`):
+    /// largest manual turn rate, rad/s, the cap at a stop. With speed the cap falls to what the
+    /// lean into the turn allows (`manual_turn_lean_max_deg`). Manual turns do not fade at
+    /// walking pace: at a stop the twist aid turns the wheel.
+    pub manual_turn_rate_max_rad_s: f64,
+    /// Manual control only: largest lean into a turn, degrees of roll (`turn_lean_max_deg` for
+    /// scripted riding). It also caps the manual turn rate at speed: `tan(lean) = v·rate / g`.
+    pub manual_turn_lean_max_deg: f64,
+    /// Manual control only: fastest change of the lean into a turn, degrees per second.
+    pub manual_turn_lean_rate_deg_s: f64,
+    /// Manual control only: fastest change of the forward lean, degrees per second
+    /// (`lean_rate_deg_s` for scripted riding).
+    pub manual_lean_rate_deg_s: f64,
 }
 
 impl Default for RiderControl {
@@ -510,6 +524,10 @@ impl Default for RiderControl {
             steer_max_nm: 60.0,
             command_delay_s: 0.0,
             feedback_delay_s: 0.0,
+            manual_turn_rate_max_rad_s: 2.5,
+            manual_turn_lean_max_deg: 35.0,
+            manual_turn_lean_rate_deg_s: 60.0,
+            manual_lean_rate_deg_s: 30.0,
         }
     }
 }
@@ -537,14 +555,21 @@ impl RiderControl {
             ("steer_kp", self.steer_kp),
             ("steer_kd", self.steer_kd),
             ("steer_max_nm", self.steer_max_nm),
+            ("manual_turn_rate_max_rad_s", self.manual_turn_rate_max_rad_s),
+            ("manual_turn_lean_rate_deg_s", self.manual_turn_lean_rate_deg_s),
+            ("manual_lean_rate_deg_s", self.manual_lean_rate_deg_s),
         ];
         for (name, value) in nonnegative {
             if !value.is_finite() || value < 0.0 {
                 return Err(ParamError(format!("rider.control.{name} must be finite and nonnegative")));
             }
         }
-        if !self.turn_lean_max_deg.is_finite() || !(0.0..90.0).contains(&self.turn_lean_max_deg) {
-            return Err(ParamError("rider.control.turn_lean_max_deg must be finite and in [0, 90)".into()));
+        for (name, value) in
+            [("turn_lean_max_deg", self.turn_lean_max_deg), ("manual_turn_lean_max_deg", self.manual_turn_lean_max_deg)]
+        {
+            if !value.is_finite() || !(0.0..90.0).contains(&value) {
+                return Err(ParamError(format!("rider.control.{name} must be finite and in [0, 90)")));
+            }
         }
         if !self.twist_fade_mps.is_finite() || self.twist_fade_mps <= 0.0 {
             return Err(ParamError("rider.control.twist_fade_mps must be finite and positive".into()));

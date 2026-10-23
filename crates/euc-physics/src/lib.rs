@@ -73,6 +73,16 @@ const FOOT_LIFT_MAX_RAD: f64 = 0.6;
 /// How fast a leg lifts or lowers its foot, radians of hip flexion per second: a step, not a kick.
 const FOOT_LIFT_RATE_RAD_S: f64 = 3.0;
 
+/// How fast the knees bend into a crouch or straighten out of one, radians per second: the full
+/// 1.2 rad in 0.4 s. A full crouch asked for at once pitched the shell up to 10°.
+const CROUCH_RATE_RAD_S: f64 = 3.0;
+
+/// The hips' share of a crouch's knee flexion. The upper body keeps the lean the controller
+/// holds; at 0.58 the hips go back about as far as the knees go forward, so the centre of mass
+/// stays within 1° of the ankles at any depth (at 1/2 a full crouch put it 7.8° ahead, and the
+/// wheel rode off with the stick at rest). Fitted to the model's estimated segment masses.
+const CROUCH_HIP_SHARE: f64 = 0.58;
+
 /// How the rider left the pedals.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Leaving {
@@ -364,6 +374,9 @@ pub struct Physics {
     rider: RiderController,
     total_mass: f64,
     body_ids: Vec<(usize, BodyRole, &'static str)>,
+    /// Requested crouch, radians of knee flexion.
+    crouch_target_rad: f64,
+    /// The crouch the legs are moving to now: the request at [`CROUCH_RATE_RAD_S`].
     crouch_rad: f64,
     /// Requested lift of each articulated foot, radians of hip flexion (left, right).
     foot_lift_target_rad: [f64; 2],
@@ -477,6 +490,7 @@ impl Physics {
             rider,
             total_mass,
             body_ids,
+            crouch_target_rad: 0.0,
             crouch_rad: 0.0,
             foot_lift_target_rad: [0.0; 2],
             foot_lift_rad: [0.0; 2],
@@ -889,6 +903,8 @@ impl Physics {
             for (lift, target) in self.foot_lift_rad.iter_mut().zip(self.foot_lift_target_rad) {
                 *lift += (target - *lift).clamp(-step, step);
             }
+            let crouch_step = CROUCH_RATE_RAD_S * TIMESTEP_S;
+            self.crouch_rad += (self.crouch_target_rad - self.crouch_rad).clamp(-crouch_step, crouch_step);
             let lifted = self.foot_lift_rad.map(|lift| lift > 0.0);
             for (index, joint) in legs.joints.into_iter().enumerate() {
                 let leg = index / 3;
@@ -1062,7 +1078,9 @@ impl Physics {
     }
 
     /// Bounded sagittal crouch request, radians of knee flexion. No pose or velocity writes.
-    /// Zero is the initial straight stance. This estimate is not a human strength model.
+    /// Zero is the initial straight stance; the knees bend toward the request at
+    /// [`CROUCH_RATE_RAD_S`] and the hips by [`CROUCH_HIP_SHARE`] of it, keeping the centre of
+    /// mass over the feet. This estimate is not a human strength model.
     pub fn set_crouch(&mut self, knee_rad: f64) -> Result<(), ParamError> {
         if self.ids.articulated.is_none()
             || self.rider_off()
@@ -1071,8 +1089,13 @@ impl Physics {
         {
             return Err(ParamError("crouch requires an attached articulated rider and 0..1.2 radians".into()));
         }
-        self.crouch_rad = knee_rad;
+        self.crouch_target_rad = knee_rad;
         Ok(())
+    }
+
+    /// The crouch the legs hold now, radians of knee flexion (0 for the rigid rider).
+    pub const fn crouch_rad(&self) -> f64 {
+        self.crouch_rad
     }
 
     /// Lifts one articulated foot off its pedal by bending that leg: `lift_rad` more hip flexion,
@@ -1103,6 +1126,7 @@ impl Physics {
     fn posture_target(&self, index: usize) -> f64 {
         let lift = self.foot_lift_rad[index / 3];
         match index % 3 {
+            0 => -self.crouch_rad * CROUCH_HIP_SHARE - lift,
             1 => self.crouch_rad + 2.0 * lift,
             _ => -self.crouch_rad / 2.0 - lift,
         }

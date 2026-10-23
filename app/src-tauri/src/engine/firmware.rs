@@ -37,17 +37,24 @@ pub(super) fn build_free_host(
         (None, Some(choice)) => {
             progress("Preparing the world around the spawn");
             let world = super::world::shared(choice.spec())?;
-            let spawn = world.spawn();
-            let start = euc_physics::WorldStart {
-                xy_m: [spawn.position[0], spawn.position[1]],
-                heading_rad: spawn.heading[1].atan2(spawn.heading[0]),
-            };
+            // A quick reset starts where the wheel was; a new ride at the world's spawn.
+            let start = spec.start.map_or_else(
+                || {
+                    let spawn = world.spawn();
+                    euc_physics::WorldStart {
+                        xy_m: [spawn.position[0], spawn.position[1]],
+                        heading_rad: spawn.heading[1].atan2(spawn.heading[0]),
+                    }
+                },
+                |pose| euc_physics::WorldStart { xy_m: pose.xy_m, heading_rad: pose.heading_rad },
+            );
             let ground = euc_physics::WorldGround::with_world(world, start)?;
             controls.begin_world(epoch, ground.clone(), rider);
             (None, Some(ground))
         }
         (None, None) => return Err("Choose either the test pad or a world".into()),
     };
+    controls.set_spec(epoch, spec.clone());
     let source = ProfileSource::Builtin;
     let files = WheelFiles::load(&source, &spec.wheel).map_err(|error| error.to_string())?;
     let wheel = &files.profile;

@@ -62,6 +62,8 @@ pub fn run() {
             engine::engine_button,
             engine::engine_button_state,
             engine::free_ride::free_ride_start,
+            engine::free_ride::free_ride_restart,
+            engine::free_ride::free_ride_step_off,
             engine::free_ride::free_ride_status,
             engine::free_ride::free_ride_map,
             engine::free_ride::free_ride_arm,

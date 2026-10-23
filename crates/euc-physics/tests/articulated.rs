@@ -71,6 +71,60 @@ fn crouch_moves_physical_knees_and_lowers_the_pelvis_without_pose_writes() {
     assert!(joints.iter().all(|j| j.torque_nm.abs() <= 200.0));
     assert!(physics.poses().iter().all(|p| p.pos.iter().chain(p.quat.iter()).all(|v| v.is_finite())));
 }
+/// Free Ride's crouch: a full crouch asked for at once, while riding and at a stop, with the
+/// manual lean at rest. The knees bend at the crouch rate and the hips keep the centre of mass
+/// over the feet, so the shell barely pitches and the wheel does not ride off; standing up again
+/// restores the height.
+#[test]
+fn a_full_crouch_lowers_the_centre_of_mass_over_the_feet_and_the_wheel_stays_put() {
+    // On the stand: the centre of mass stays over the ankles at any depth.
+    for crouch in [0.6, 1.2] {
+        let mut physics = Physics::new(setup(RiderModel::ArticulatedSagittalV1)).unwrap();
+        physics.set_crouch(crouch).unwrap();
+        balanced_for(&mut physics, 6000);
+        let lean = centre_of_mass_lean(&physics).to_degrees();
+        println!(
+            "on the stand, crouch {crouch} rad: centre of mass lean {lean:.2}°, height {:.3} m",
+            physics.rider_com_m()[2]
+        );
+        assert!(lean.abs() < 1.5, "crouch {crouch}: the centre of mass leans {lean}° from the ankles");
+    }
+    for speed in [4.0, 0.0] {
+        let mut physics = Physics::new(setup(RiderModel::ArticulatedSagittalV1)).unwrap();
+        balanced_for(&mut physics, 1000);
+        physics.set_held(false);
+        physics.rider().set_manual(true);
+        physics.rider().set_intent(Intent::Speed(speed));
+        balanced_for(&mut physics, 16_000);
+        // From here on the stick is at rest: the lean the rider holds, not a speed.
+        let held = physics.rider().lean_command();
+        physics.rider().set_intent(Intent::Lean(held));
+        let (height, before) = (physics.rider_com_m()[2], physics.state().speed_mps);
+        physics.set_crouch(1.2).unwrap();
+        let mut pitch = 0.0_f64;
+        for _ in 0..4000 {
+            balanced_step(&mut physics);
+            pitch = pitch.max(physics.state().pitch_rad.abs());
+        }
+        let (crouched, during) = (physics.rider_com_m()[2], physics.state().speed_mps);
+        physics.set_crouch(0.0).unwrap();
+        for _ in 0..4000 {
+            balanced_step(&mut physics);
+            pitch = pitch.max(physics.state().pitch_rad.abs());
+        }
+        let (standing, after) = (physics.rider_com_m()[2], physics.state().speed_mps);
+        println!(
+            "crouch at {speed} m/s: centre of mass {height:.3} -> {crouched:.3} -> {standing:.3} m; \
+             speed {before:.2} / {during:.2} / {after:.2} m/s; largest pitch {:.2}°",
+            pitch.to_degrees()
+        );
+        assert!(crouched < height - 0.1, "a full crouch lowers the centre of mass: {height} -> {crouched}");
+        assert!((standing - height).abs() < 0.01, "standing up restores it: {height} -> {standing}");
+        assert!(pitch < 3_f64.to_radians(), "the shell barely pitches: {}°", pitch.to_degrees());
+        assert!((during - before).abs() < 0.5 && (after - before).abs() < 0.5, "{before} / {during} / {after} m/s");
+    }
+}
+
 #[test]
 fn release_carries_both_feet_to_ground_and_disables_every_joint_motor() {
     let mut physics = Physics::new(setup(RiderModel::ArticulatedSagittalV1)).unwrap();

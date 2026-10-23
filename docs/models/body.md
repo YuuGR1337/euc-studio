@@ -230,6 +230,26 @@ DEFAULT 1000 N·m/rad, 60 N·m·s/rad, 180 N·m), so they give under a bump and 
   foot at a time; the other leg then carries the whole lean task. Its sole sticks to its pedal
   meanwhile (under 1 mm of slip in a quarter-second lift), but setting the foot down again unloads
   the other foot: it hops for up to about 1 s and lands 2-5 cm back on its deck.
+- **Crouch** (both articulated models; Free Ride's crouch input). `Physics::set_crouch(knee_rad)`,
+  0 to 1.2 rad of knee flexion. The knees bend toward it at 3 rad/s (a full crouch in 0.4 s) and
+  the hips by 0.58 of it, while the upper body keeps the lean the controller holds. At 0.58 the
+  centre of mass stays within 1° of the ankles at any depth; with the hips at half the knee angle
+  a full crouch put it 7.8° ahead, and the wheel rode off with the stick at rest. A full crouch
+  lowers the centre of mass by 0.15 m. Asked for at once while riding, it pitches the shell by
+  1.6° at most (10° without the 3 rad/s ramp). The segment masses behind the 0.58 are estimates.
+- **Riding by hand** (Free Ride and Ride's manual mode; `RiderController::set_manual`). The manual
+  limits of `[rider.control]` apply instead of the scripted ones. The turn cap is
+  `manual_turn_rate_max_rad_s` (2.5 rad/s) at a stop and falls with speed to the rate whose lean into
+  the turn is `manual_turn_lean_max_deg` (35°, 0.7 g: 1.4 rad/s at 5 m/s, 0.76 rad/s at 9 m/s). The
+  lean into the turn changes at up to 60°/s, and the forward lean at 30°/s. Turn requests do not
+  fade at walking pace: a stopped rider turns on the spot, through the twist aid (an external yaw
+  torque on the shell, at most 60 N·m) that already held the heading below walking pace. The legs
+  have no twist joint, and the welded rider turns with the wheel. The line never runs more than
+  0.5 rad ahead of the wheel, so a wheel held back (a wall, the twist aid's cap) winds up no turn
+  that would go on after the input stops. On the stock firmware (2026-10-22)
+  a full turn input at a stop turned the wheel 3.75 rad in 1.5 s, and at 3.8-4.1 m/s it settled at
+  6.8-7.0 m/s² of lateral acceleration with 34° of lean. Scripted riding keeps its limits (1.0 rad/s,
+  20°, 30°/s, 12°/s, no turning at a stop), so no scenario changes.
 - **Foot state.** `Physics::feet()` reports each foot: contact, the pedal's normal load and friction,
   and how far the sole has moved on its deck since the model was built (slip) and above it (lift).
 - **Leaving.** A step-off, a let-go and (contact feet) a lost footing release the pedal welds or
@@ -245,9 +265,22 @@ DEFAULT 1000 N·m/rad, 60 N·m·s/rad, 180 N·m), so they give under a bump and 
   counts as off:
   "rider off: both feet off the pedals (the wheel stays up)".
 
-What neither rider can do yet: balance sideways or twist without the external aids, step, use the
-hips to recover when the soles' centre of pressure reaches heel or toe, or brace the legs against
-the shell. The rigid rider also cannot bend its knees and hips.
+What neither rider can do yet: balance sideways or twist without the external aids, step, hop, use
+the hips to recover when the soles' centre of pressure reaches heel or toe, or brace the legs
+against the shell. The rigid rider also cannot bend its knees and hips.
+
+**A hop with welded feet (feasibility, 2026-10-22; not built).** A hop would be the rider's own
+motion: crouch, straighten the legs fast, then tuck so that the feet lift the wheel. Welded feet
+can pull the wheel up; a real rider does it with the calves against the side pads, which the model
+does not have. A private test rode the Extreme's body on the plain PD balance, without firmware. At
+the crouch rate (3 rad/s) the legs never threw the body up, and the wheel stayed down at every joint
+cap. Straightening as fast as the joint caps allow, the tire rose 1.2 cm at today's 180 N·m per hip
+and knee. It rose 2.4 cm at 300 N·m and 6.2 cm at 400 N·m, and in both the scripted tuck then
+landed the rider off the wheel. A usable hop therefore needs four things. The first is a hop
+controller: a full-torque extension, a timed tuck and a landing that the lean controller absorbs.
+The second is a stronger, still estimated, jump torque. The third is a check of what the stock
+firmware does with a wheel in the air. The fourth is a choice between the welds' pull and a
+calf-pad contact. This is a study phase of its own, not a control setting.
 
 ## Aids (M2)
 
@@ -318,6 +351,7 @@ Rider and aids (scenario `[rider]`, `[rider.control]`, `[assist]`; these are the
 | `control.lean_max_deg`, `lean_rate_deg_s` | 15°, 12°/s | |
 | `control.tiltback_feel_deg`, `tiltback_ease_kmh_per_deg`, `tiltback_ease_brake` | 2°, 1.5 km/h per degree, 1 m/s² | DEFAULT: how a rider reacts to tiltback |
 | `control.steer_kp`, `steer_kd`, `steer_max_nm` | 2000 N·m/rad, 200 N·m·s/rad, 60 N·m | DEFAULT: how a rider keeps the line |
+| `control.manual_turn_rate_max_rad_s`, `manual_turn_lean_max_deg`, `manual_turn_lean_rate_deg_s`, `manual_lean_rate_deg_s` | 2.5 rad/s, 35°, 60°/s, 30°/s | DEFAULT, riding by hand only (Free Ride, Ride's manual mode): the turn cap at a stop, falling with speed to `g·tan(35°)/v`; scripted riding keeps 1.0 rad/s, 20°, 30°/s and 12°/s |
 | `let_go.enabled`, `after_cut_deg`, `fall_deg`, `reaction_s` | true, 20°, 45°, 0.1 s | DEFAULT: when a rider leaves a wheel that goes down |
 | `assist.roll_stiffness`, `roll_damping` | 5000 N·m/rad, 500 N·m·s/rad | on the shell; for `articulated_contact_v1` also on the upper body |
 

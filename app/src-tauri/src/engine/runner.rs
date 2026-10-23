@@ -183,7 +183,7 @@ enum Cmd {
     Rtf(f64),
     Restart(Option<String>),
     Firmware(String),
-    FreeRide(FreeRideSpec, u64),
+    FreeRide(Box<FreeRideSpec>, u64),
     ManualArm(u64, InputSource),
     ManualPause(u64),
     Button(buttons::Request),
@@ -388,7 +388,7 @@ impl Runner {
     }
 
     pub(super) fn start_free_ride(&self, spec: FreeRideSpec, ticket: u64) -> Result<(), String> {
-        self.tx.send(Cmd::FreeRide(spec, ticket)).map_err(|_| "The simulation thread stopped".into())
+        self.tx.send(Cmd::FreeRide(Box::new(spec), ticket)).map_err(|_| "The simulation thread stopped".into())
     }
 
     pub(super) fn manual_arm(&self, epoch: u64, source: InputSource) -> Result<(), String> {
@@ -1002,7 +1002,7 @@ impl Sim {
                 self.build();
             }
             Cmd::FreeRide(spec, ticket) => {
-                self.free_spec = Some(spec);
+                self.free_spec = Some(*spec);
                 self.free_job = Some(ticket);
                 self.playing = true;
                 self.rtf = self.rtf.clamp(0.25, 1.0);
@@ -1620,6 +1620,7 @@ mod button_state_tests {
             rider_model: "rigid_ankle_v1".into(),
             map: Some(euc_physics::GeneratedMapSpec::flat(0)),
             world: None,
+            start: None,
         });
         press(&sim, buttons::Button::Power, true);
         sim.sync_button_states();

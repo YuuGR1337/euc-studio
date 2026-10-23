@@ -20,6 +20,11 @@ const INTEGRAL_BAND_MPS: f64 = 1.0;
 /// which a tiltback is felt when the firmware's own tiltback is not known.
 const RIDING_PITCH_S: f64 = 3.0;
 
+/// By hand, how far the line may run ahead of the wheel's heading, radians. A wheel held back (by a
+/// wall, or the twist aid's cap) then neither winds up a turn it would finish after the input
+/// stops, nor one past ±π that would turn it the other way.
+const MANUAL_HEADING_SLACK_RAD: f64 = 0.5;
+
 /// Wraps a finite angle to [-π, π], retaining small angles without rounding changes.
 /// Nonfinite values pass through; public heading setters reject them before wrapping.
 pub fn wrap_angle(rad: f64) -> f64 {
@@ -171,6 +176,8 @@ pub struct RiderController {
     applied_turn_rate: f64,
     /// The lean into the turn the rider holds now, radians of roll, right side down positive.
     turn_lean: f64,
+    /// A person rides by hand (Free Ride, Ride's manual mode): the manual limits apply.
+    manual: bool,
 }
 
 /// How the rider steers in one step.
@@ -205,15 +212,45 @@ impl RiderController {
             turn_rate: 0.0,
             applied_turn_rate: 0.0,
             turn_lean: 0.0,
+            manual: false,
         }
     }
 
     /// Turns the line the rider keeps (the heading target) at `rad_s` (left positive) from the
     /// next command on; back to 0, the rider keeps the heading reached. Nonfinite rates are ignored.
-    /// The request fades to zero below walking pace and cannot spin a stationary wheel.
+    /// Scripted riding: the request is capped at `turn_rate_max_rad_s` and fades to zero below
+    /// walking pace, so it cannot spin a stationary wheel. Manual riding: capped by
+    /// [`manual_turn_cap`](Self::manual_turn_cap), without the fade.
     pub const fn set_turn_rate(&mut self, rad_s: f64) {
         if rad_s.is_finite() {
             self.turn_rate = rad_s;
+        }
+    }
+
+    /// A person rides by hand (`true`: Free Ride, Ride's manual mode) or a script rides (`false`,
+    /// the default). By hand the manual limits of [`RiderControl`] apply: a turn cap that falls
+    /// with speed instead of `turn_rate_max_rad_s`, no turn fade at walking pace (at a stop the
+    /// twist aid turns the wheel and the rider with it), a deeper and quicker lean into turns and
+    /// a quicker forward lean. Scripted riding never uses them.
+    pub const fn set_manual(&mut self, manual: bool) {
+        self.manual = manual;
+    }
+
+    /// Whether a person rides by hand ([`set_manual`](Self::set_manual)).
+    pub const fn manual(&self) -> bool {
+        self.manual
+    }
+
+    /// The largest manual turn rate at `speed` (m/s), rad/s: `manual_turn_rate_max_rad_s` at a
+    /// stop, falling at speed to the rate whose lean into the turn is `manual_turn_lean_max_deg`
+    /// (`v·rate = g·tan(lean)`).
+    pub fn manual_turn_cap(&self, speed: f64, gravity: f64) -> f64 {
+        let c = self.control;
+        let lateral = gravity * c.manual_turn_lean_max_deg.to_radians().tan();
+        if speed.abs() * c.manual_turn_rate_max_rad_s <= lateral {
+            c.manual_turn_rate_max_rad_s
+        } else {
+            lateral / speed.abs()
         }
     }
 
@@ -363,12 +400,21 @@ impl RiderController {
         }
         let turn_rate = if s.held {
             0.0
+        } else if self.manual {
+            let cap = self.manual_turn_cap(s.speed, s.gravity);
+            self.turn_rate.clamp(-cap, cap)
         } else {
             self.turn_rate.clamp(-c.turn_rate_max_rad_s, c.turn_rate_max_rad_s)
                 * (s.speed.abs() / c.twist_fade_mps).min(1.0)
         };
         if turn_rate != 0.0 {
             self.heading_target = wrap_angle(self.heading_target + turn_rate * s.dt);
+        }
+        if self.manual && !s.held {
+            let ahead = wrap_angle(self.heading_target - s.heading);
+            if ahead.abs() > MANUAL_HEADING_SLACK_RAD {
+                self.heading_target = wrap_angle(s.heading + ahead.signum() * MANUAL_HEADING_SLACK_RAD);
+            }
         }
         let request = Command { intent: self.intent, heading: self.heading_target, turn_rate };
         let initial = Command {
@@ -416,7 +462,8 @@ impl RiderController {
         };
         self.desired_lean = target;
         let target = target.clamp(-max_lean, max_lean);
-        let step = c.lean_rate_deg_s.to_radians() * s.dt;
+        let rate = if self.manual { c.manual_lean_rate_deg_s } else { c.lean_rate_deg_s };
+        let step = rate.to_radians() * s.dt;
         self.lean_command += (target - self.lean_command).clamp(-step, step);
         let torque = c.lean_kp * (self.lean_command - s.lean) - c.lean_kd * s.lean_rate;
         torque.clamp(-c.ankle_max_nm, c.ankle_max_nm)
@@ -433,12 +480,18 @@ impl RiderController {
         let dt = s.dt;
         let s = if c.feedback_delay_s > 0.0 { self.feedback.as_ref().unwrap_or(s) } else { s };
         let error = wrap_angle(s.heading - self.applied_heading_target);
-        let wanted =
-            (self.applied_turn_rate - c.heading_kp * error).clamp(-c.turn_rate_max_rad_s, c.turn_rate_max_rad_s);
+        // By hand the turn cap falls with speed, so the lean into the turn below never asks for
+        // more than `manual_turn_lean_max_deg`; scripted riding keeps its fixed cap.
+        let (cap, lean_max, lean_rate) = if self.manual {
+            (self.manual_turn_cap(s.speed, s.gravity), c.manual_turn_lean_max_deg, c.manual_turn_lean_rate_deg_s)
+        } else {
+            (c.turn_rate_max_rad_s, c.turn_lean_max_deg, c.turn_lean_rate_deg_s)
+        };
+        let wanted = (self.applied_turn_rate - c.heading_kp * error).clamp(-cap, cap);
         // Left (positive) turns need the left side down (negative roll); backwards, the other way.
-        let max = c.turn_lean_max_deg.to_radians();
+        let max = lean_max.to_radians();
         let target = (-(s.speed * wanted / s.gravity).atan()).clamp(-max, max);
-        let step = c.turn_lean_rate_deg_s.to_radians() * dt;
+        let step = lean_rate.to_radians() * dt;
         self.turn_lean += (target - self.turn_lean).clamp(-step, step);
         let twist = 1.0 / (1.0 + (s.speed / c.twist_fade_mps).powi(2));
         // Fade the heading spring, not yaw-rate damping. Removing damping at road speed lets
@@ -597,14 +650,74 @@ mod tests {
     }
 
     #[test]
-    fn manual_turn_at_rest_does_not_spin_the_wheel_or_wind_up_the_heading() {
+    fn by_hand_the_rider_turns_at_a_stop_and_the_turn_cap_follows_the_lean_it_needs() {
+        let c = RiderControl::default();
+        // Scripted: the request fades at walking pace, so a stopped rider keeps the line.
+        let mut scripted = RiderController::new(c);
+        scripted.set_turn_rate(1.0);
+        for _ in 0..1000 {
+            scripted.ankle_torque(&sense(0.0));
+        }
+        assert_eq!(scripted.line(), 0.0, "scripted riding cannot spin a stopped wheel");
+        // By hand: the line turns at the requested rate at a stop, ahead of a wheel that follows.
+        let mut manual = RiderController::new(c);
+        manual.set_manual(true);
+        assert!(manual.manual() && !scripted.manual());
+        manual.set_turn_rate(1.0);
+        for tick in 0..1000 {
+            let following = Sense { heading: f64::from(tick) * 0.001, ..sense(0.0) };
+            manual.ankle_torque(&following);
+        }
+        assert!((manual.line() - 1.0).abs() < 1e-9, "{}", manual.line());
+        // A wheel held back does not wind the line up: it stays within the slack ahead of it.
+        let mut held = RiderController::new(c);
+        held.set_manual(true);
+        held.set_turn_rate(2.5);
+        for _ in 0..3000 {
+            held.ankle_torque(&sense(0.0));
+        }
+        assert!((held.line() - MANUAL_HEADING_SLACK_RAD).abs() < 1e-9, "{}", held.line());
+        // The cap: the full rate at a stop, the rate whose lean into the turn is the manual limit
+        // at speed (either direction).
+        let lateral = 9.81 * c.manual_turn_lean_max_deg.to_radians().tan();
+        assert_eq!(manual.manual_turn_cap(0.0, 9.81), c.manual_turn_rate_max_rad_s);
+        assert!((manual.manual_turn_cap(-9.0, 9.81) - lateral / 9.0).abs() < 1e-12);
+        manual.set_turn_rate(10.0);
+        let before = manual.line();
+        for _ in 0..1000 {
+            // The wheel follows the line, as a carving wheel does.
+            let following = Sense { heading: manual.line(), ..sense(9.0) };
+            manual.ankle_torque(&following);
+            manual.steer(&following);
+        }
+        let turned = wrap_angle(manual.line() - before);
+        assert!((turned - lateral / 9.0).abs() < 1e-9, "{turned}");
+        // At the cap the rider leans into the turn at the manual limit, not the scripted one.
+        assert!(
+            (manual.turn_lean() + c.manual_turn_lean_max_deg.to_radians()).abs() < 1e-9,
+            "{}",
+            manual.turn_lean().to_degrees()
+        );
+        assert!(c.manual_turn_lean_max_deg > c.turn_lean_max_deg);
+        // By hand the forward lean slews at the manual rate.
+        let mut quick = RiderController::new(c);
+        quick.set_manual(true);
+        quick.set_intent(Intent::Lean(0.2));
+        quick.ankle_torque(&sense(0.0));
+        assert!((quick.lean_command() - c.manual_lean_rate_deg_s.to_radians() * 0.001).abs() < 1e-12);
+        assert!(c.manual_lean_rate_deg_s > c.lean_rate_deg_s);
+    }
+
+    #[test]
+    fn scripted_turn_at_rest_does_not_spin_the_wheel_or_wind_up_the_heading() {
+        // Scripted riding only; by hand the rider turns at a stop (the test above).
         let mut rider = RiderController::new(RiderControl::default());
         rider.set_turn_rate(0.5);
         let stopped = sense(0.0);
         for _ in 0..1000 {
             rider.ankle_torque(&stopped);
             let steer = rider.steer(&stopped);
-            assert_eq!(steer.yaw_nm, 0.0, "manual turning needs forward or backward motion");
+            assert_eq!(steer.yaw_nm, 0.0, "scripted turning needs forward or backward motion");
             assert_eq!(steer.roll, 0.0);
         }
         assert_eq!(rider.line(), 0.0, "a stopped rider must not store a future turn");

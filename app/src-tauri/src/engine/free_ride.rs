@@ -16,7 +16,41 @@ const INPUT_TIMEOUT: Duration = Duration::from_millis(250);
 const NEUTRAL_TIME: Duration = Duration::from_millis(250);
 const INPUT_TIMEOUT_REASON: &str = "Input timed out. Controls are disarmed";
 const MAX_LEAN_RAD: f64 = 10.0 * std::f64::consts::PI / 180.0;
-const MAX_TURN_RAD_S: f64 = 30.0 * std::f64::consts::PI / 180.0;
+/// A full crouch input, radians of knee flexion (`Physics::set_crouch` takes 0 to 1.2).
+const CROUCH_MAX_RAD: f64 = 1.2;
+/// Simulated seconds the firmware boots on the stand before manual controls can arm. This is a
+/// simulator boot wait, not a measured user reaction time.
+const BOOT_S: f64 = 4.0;
+
+/// The largest manual turn rate a packet may ask for, rad/s: the rider's cap at a stop. The
+/// physics caps it further with speed (`RiderController::manual_turn_cap`).
+fn max_turn_rad_s(rider: &euc_physics::Rider) -> f64 {
+    rider.control.manual_turn_rate_max_rad_s
+}
+
+/// A quick reset stands the wheel on its stand again only this far from every solid, metres:
+/// stand, wheel and rider fit, and nothing is pressed into a box.
+const RESTART_CLEAR_M: f64 = 1.5;
+/// ...and only on ground this level: within 0.5 m of the spot it varies by less, metres (no curb,
+/// step or steep slope under the stand).
+const RESTART_LEVEL_M: f64 = 0.03;
+/// Samples between two checks of the wheel's spot.
+const RESTART_CHECK_SAMPLES: u32 = 12;
+
+/// Whether a quick reset may stand the wheel at `xy` (world metres): no solid within
+/// [`RESTART_CLEAR_M`] and level ground under it. A spot that is not clear restarts at the last
+/// clear one the wheel passed, or the run's own start.
+fn clear_spot(world: &euc_world::World, xy: [f64; 2]) -> bool {
+    let reach = RESTART_CLEAR_M;
+    let around = euc_world::Rect::new([xy[0] - reach, xy[1] - reach], [xy[0] + reach, xy[1] + reach]);
+    if !world.solids_in(around).is_empty() {
+        return false;
+    }
+    let heights = [[0.0, 0.0], [0.5, 0.0], [-0.5, 0.0], [0.0, 0.5], [0.0, -0.5]]
+        .map(|d: [f64; 2]| world.height_at(xy[0] + d[0], xy[1] + d[1]));
+    let (low, high) = heights.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(l, h), &z| (l.min(z), h.max(z)));
+    high - low < RESTART_LEVEL_M
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -37,6 +71,20 @@ pub struct FreeRideSpec {
     /// The streaming world (docs/models/world.md), Free Ride's default ground.
     #[serde(default)]
     pub world: Option<WorldChoice>,
+    /// Where on the world the run starts, instead of the world's spawn (a quick reset restarts
+    /// where the wheel was). Worlds only.
+    #[serde(default)]
+    pub start: Option<WorldPose>,
+}
+
+/// A place and heading on a world, world coordinates.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorldPose {
+    /// Ground point under the wheel, metres.
+    pub xy_m: [f64; 2],
+    /// Heading, radians, left positive from world +x.
+    pub heading_rad: f64,
 }
 
 /// The world a free ride rides: its seed and densities (city biome, this build's generator).
@@ -63,6 +111,14 @@ impl FreeRideSpec {
         if self.settings.len() > 80 || self.settings.is_empty() {
             return Err("Select a settings preset".into());
         }
+        if let Some(start) = &self.start {
+            if self.world.is_none() {
+                return Err("A start place needs a world".into());
+            }
+            if !start.xy_m.iter().chain([&start.heading_rad]).all(|v| v.is_finite()) {
+                return Err("The start place must be finite".into());
+            }
+        }
         match (&self.map, &self.world) {
             (Some(map), None) => map.validate(),
             (None, Some(world)) => world.spec().validate(),
@@ -88,8 +144,14 @@ pub struct ManualInput {
     pub seq: u32,
     pub source: InputSource,
     pub desired_lean_rad: f64,
+    /// Manual turn rate, rad/s, left positive, up to the rider's cap at a stop; the physics caps
+    /// it further with speed (`FreeRideStatus::turn_cap_rad_s`).
     pub heading_rate_rad_s: f64,
     pub armed: bool,
+    /// Crouch, 0 (standing) to 1 (full: 1.2 rad of knee flexion); 0 when absent. The
+    /// articulated rider bends toward it at the physics' crouch rate; the rigid rider ignores it.
+    #[serde(default)]
+    pub crouch: f64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -110,6 +172,15 @@ pub struct FreeRideStatus {
     pub rider_model: &'static str,
     /// The ground of this run: "map" (the 32 m test pad), "world" or "none".
     pub ground: &'static str,
+    /// The largest manual turn rate at the current speed, rad/s: what a full turn input gets.
+    pub turn_cap_rad_s: Option<f64>,
+    /// The crouch the legs hold, 0 to 1 of a full crouch; `None` when the rider cannot crouch
+    /// (the rigid rider, or a rider off the pedals).
+    pub crouch: Option<f64>,
+    /// The rider stands on the pedals (false once stepped off, let go or lost footing).
+    pub on_pedals: bool,
+    /// Simulated seconds until the firmware has booted on the stand and controls can arm.
+    pub boot_remaining_s: Option<f64>,
 }
 
 impl Default for FreeRideStatus {
@@ -130,13 +201,34 @@ impl Default for FreeRideStatus {
             roll_aid_work_j: None,
             rider_model: euc_physics::RIDER_MODEL,
             ground: "none",
+            turn_cap_rad_s: None,
+            crouch: None,
+            on_pedals: false,
+            boot_remaining_s: None,
         }
     }
+}
+
+/// What the free ride host reports after each sample, besides the rider's state.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub(super) struct HostReport {
+    pub turn_cap_rad_s: f64,
+    pub crouch: Option<f64>,
+    pub on_pedals: bool,
+    pub boot_remaining_s: Option<f64>,
+    /// Where the wheel is on its world (world runs only), for a quick reset.
+    pub world_pose: Option<WorldPose>,
 }
 
 #[derive(Default)]
 struct Inner {
     status: FreeRideStatus,
+    /// The spec this run was built from, for a quick reset.
+    spec: Option<FreeRideSpec>,
+    /// Where a quick reset restarts on a world: the last clear spot the wheel passed (world runs).
+    world_pose: Option<WorldPose>,
+    /// The armed rider is to step off on the next sample.
+    step_off: bool,
     map: Option<Arc<HeightMap>>,
     world: Option<euc_physics::WorldGround>,
     latest: Option<ManualInput>,
@@ -298,14 +390,17 @@ impl FreeRideState {
     }
 
     pub(super) fn input(&self, input: ManualInput) -> Result<(), String> {
+        if !input.crouch.is_finite() || !(0.0..=1.0).contains(&input.crouch) {
+            return Err("Manual crouch is outside 0 to 1".into());
+        }
+        let mut inner = self.lock();
         if !input.desired_lean_rad.is_finite()
             || input.desired_lean_rad.abs() > MAX_LEAN_RAD
             || !input.heading_rate_rad_s.is_finite()
-            || input.heading_rate_rad_s.abs() > MAX_TURN_RAD_S
+            || input.heading_rate_rad_s.abs() > max_turn_rad_s(&inner.rider)
         {
             return Err("Manual lean or turn rate is outside its limits".into());
         }
-        let mut inner = self.lock();
         if inner.status.mode != "free_ride" || inner.status.epoch != input.run_epoch {
             return Err("Manual input belongs to an old run".into());
         }
@@ -327,7 +422,8 @@ impl FreeRideState {
         if input.armed && !inner.status.armed {
             return Err("Arm neutral controls before sending motion".into());
         }
-        let neutral = input.desired_lean_rad.abs() < 1e-8 && input.heading_rate_rad_s.abs() < 1e-8;
+        let neutral =
+            input.desired_lean_rad.abs() < 1e-8 && input.heading_rate_rad_s.abs() < 1e-8 && input.crouch < 1e-8;
         if inner.status.source != Some(input.source) {
             inner.neutral_since = None;
         }
@@ -396,7 +492,7 @@ impl FreeRideState {
             .filter(|input| input.armed)
     }
 
-    pub(super) fn update_rider(&self, epoch: u64, rider: euc_physics::RiderState) {
+    pub(super) fn update_rider(&self, epoch: u64, rider: euc_physics::RiderState, report: HostReport) {
         let mut inner = self.lock();
         if inner.status.epoch != epoch {
             return;
@@ -409,6 +505,53 @@ impl FreeRideState {
         inner.status.path_length_m = number(rider.path_length_m);
         inner.status.yaw_aid_work_j = number(rider.yaw_aid_work_j);
         inner.status.roll_aid_work_j = number(rider.roll_aid_work_j);
+        inner.status.turn_cap_rad_s = number(report.turn_cap_rad_s);
+        inner.status.crouch = report.crouch.and_then(number);
+        inner.status.on_pedals = report.on_pedals;
+        inner.status.boot_remaining_s = report.boot_remaining_s.and_then(number);
+        if report.world_pose.is_some() {
+            inner.world_pose = report.world_pose;
+        }
+    }
+
+    /// The armed rider of run `epoch` steps off the pedals on the next sample.
+    pub(super) fn step_off(&self, epoch: u64) -> Result<(), String> {
+        let mut inner = self.lock();
+        if inner.status.epoch != epoch || inner.status.mode != "free_ride" {
+            return Err("Step off belongs to an old run".into());
+        }
+        if !inner.status.armed {
+            return Err("Arm the controls before stepping off".into());
+        }
+        inner.step_off = true;
+        Ok(())
+    }
+
+    fn take_step_off(&self, epoch: u64) -> bool {
+        let mut inner = self.lock();
+        inner.status.epoch == epoch && std::mem::take(&mut inner.step_off)
+    }
+
+    /// Remembers the spec a run was built from, for a quick reset.
+    pub(super) fn set_spec(&self, epoch: u64, spec: FreeRideSpec) {
+        let mut inner = self.lock();
+        if inner.status.epoch == epoch {
+            inner.spec = Some(spec);
+        }
+    }
+
+    /// The spec for a quick reset of run `epoch`: the same wheel, settings, rider and ground,
+    /// starting where the wheel is now on a world (the 32 m test pad starts again at its origin).
+    pub(super) fn restart_spec(&self, epoch: u64) -> Result<FreeRideSpec, String> {
+        let inner = self.lock();
+        if inner.status.epoch != epoch || inner.status.mode != "free_ride" {
+            return Err("Reset belongs to an old run".into());
+        }
+        let mut spec = inner.spec.clone().ok_or("This run cannot be reset yet")?;
+        if spec.world.is_some() {
+            spec.start = inner.world_pose.or(spec.start);
+        }
+        Ok(spec)
     }
 }
 
@@ -443,13 +586,38 @@ pub fn free_ride_start(
     manual: State<'_, FreeRideState>,
     spec: FreeRideSpec,
 ) -> Result<(), String> {
+    start_run(&state, &manual, spec)
+}
+
+/// Quick reset: a new run (a new epoch) of the same free ride, at the spot and heading where the
+/// wheel of run `epoch` is now on a world (the 32 m test pad starts again at its origin). The
+/// firmware boots again on the stand (`FreeRideStatus::boot_remaining_s` counts it down); nothing
+/// is moved while a firmware runs.
+#[tauri::command]
+pub fn free_ride_restart(
+    state: State<'_, super::EngineState>,
+    manual: State<'_, FreeRideState>,
+    epoch: u64,
+) -> Result<(), String> {
+    let spec = manual.restart_spec(epoch)?;
+    start_run(&state, &manual, spec)
+}
+
+/// The armed rider steps off the pedals (Free Ride's X), with the physics' step-off as in the
+/// step-off scenarios. The run then ends; a reset starts another.
+#[tauri::command]
+pub fn free_ride_step_off(state: State<'_, FreeRideState>, epoch: u64) -> Result<(), String> {
+    state.step_off(epoch)
+}
+
+fn start_run(state: &State<'_, super::EngineState>, manual: &FreeRideState, spec: FreeRideSpec) -> Result<(), String> {
     spec.validate()?;
     // Validate the generated surface before replacing any active run.
     if let Some(map) = &spec.map {
         map.generate(0)?;
     }
     let ticket = manual.reserve_start()?;
-    let result = super::with_runner(&state, |runner| runner.start_free_ride(spec, ticket)).and_then(|result| result);
+    let result = super::with_runner(state, |runner| runner.start_free_ride(spec, ticket)).and_then(|result| result);
     if result.is_err() {
         manual.finish_start(ticket);
     }
@@ -485,12 +653,18 @@ pub(super) struct FreeRideHost {
     /// The finite map's edges pause the run; a world has none.
     map: Option<Arc<HeightMap>>,
     boot_ready: bool,
-    desired_heading: f64,
-    last_motion: Option<(f64, f64)>,
+    /// The last manual lean, turn rate and crouch noted on the timeline.
+    last_motion: Option<(f64, f64, f64)>,
+    /// Samples so far, to space the restart-spot checks.
+    samples: u32,
+    /// The last spot on a world where a reset may stand the wheel again ([`clear_spot`]).
+    last_clear: Option<WorldPose>,
 }
 
 impl FreeRideHost {
-    pub(super) fn new(session: Session, state: FreeRideState, epoch: u64, map: Option<Arc<HeightMap>>) -> Self {
+    pub(super) fn new(mut session: Session, state: FreeRideState, epoch: u64, map: Option<Arc<HeightMap>>) -> Self {
+        // A person rides: the manual limits apply (turning at a stop, the speed-scheduled turn cap).
+        Self::physics_of(&mut session).rider().set_manual(true);
         Self {
             watch: BoardWatch::new(session.machine()),
             session,
@@ -498,8 +672,9 @@ impl FreeRideHost {
             epoch,
             map,
             boot_ready: false,
-            desired_heading: 0.0,
             last_motion: None,
+            samples: 0,
+            last_clear: None,
         }
     }
 
@@ -507,37 +682,70 @@ impl FreeRideHost {
         self.session.machine().plant().live_part().expect("Free ride has a live plant").physics()
     }
 
+    fn physics_of(session: &mut Session) -> &mut euc_physics::Physics {
+        session.machine_mut().plant_mut().live_part_mut().expect("Free ride has a live plant").physics_mut()
+    }
+
+    /// Neutral controls: no lean, no turn, standing up.
     fn clear_input(&mut self) {
-        let physics =
-            self.session.machine_mut().plant_mut().live_part_mut().expect("Free ride has a live plant").physics_mut();
+        let physics = Self::physics_of(&mut self.session);
         physics.clear_rider_input();
-        self.desired_heading = physics.heading_rad();
+        if physics.crouch_rad() > 0.0 {
+            // Only a rider still on the pedals can stand up; otherwise there is nothing to undo.
+            let _ = physics.set_crouch(0.0);
+        }
         self.last_motion = None;
+    }
+
+    /// What the status reports besides the rider's state.
+    fn report(&mut self) -> HostReport {
+        let boot_remaining_s = (!self.boot_ready).then(|| (BOOT_S - self.time_s()).max(0.0));
+        let physics = Self::physics_of(&mut self.session);
+        let (speed, gravity) = (physics.state().speed_mps, physics.gravity());
+        let turn_cap_rad_s = physics.rider().manual_turn_cap(speed, gravity);
+        let on_pedals = !physics.rider_off();
+        let articulated = !physics.rider_joints().is_empty();
+        let crouch = (articulated && on_pedals).then(|| physics.crouch_rad() / CROUCH_MAX_RAD);
+        // Where the wheel stands now on its world, and (every few samples) whether a reset may
+        // stand it there again.
+        self.samples = self.samples.wrapping_add(1);
+        let check = self.samples.is_multiple_of(RESTART_CHECK_SAMPLES);
+        if let Some(ground) = physics.setup().world.as_ref().filter(|_| check) {
+            let position = physics.position_m();
+            let here = WorldPose {
+                xy_m: ground.to_world([position[0], position[1]]),
+                heading_rad: euc_physics::wrap_angle(ground.start().heading_rad + physics.heading_rad()),
+            };
+            if clear_spot(ground.world(), here.xy_m) {
+                self.last_clear = Some(here);
+            }
+        }
+        HostReport { turn_cap_rad_s, crouch, on_pedals, boot_remaining_s, world_pose: self.last_clear }
     }
 
     fn sample(&mut self) {
         if self.completed() || self.halted().is_some() {
             return;
         }
-        let period = self.session.sample_period_s();
         if let Some(input) = self.state.current(self.epoch) {
+            if self.state.take_step_off(self.epoch) {
+                self.session.step_off();
+            }
             self.session.set_held(false);
             self.session.set_intent(Intent::Lean(input.desired_lean_rad));
-            self.desired_heading += input.heading_rate_rad_s * period;
-            let physics = self
-                .session
-                .machine_mut()
-                .plant_mut()
-                .live_part_mut()
-                .expect("Free ride has a live plant")
-                .physics_mut();
-            let _ = physics.set_heading_target(self.desired_heading);
-            let motion = (input.desired_lean_rad, input.heading_rate_rad_s);
+            // The rider turns its own line at the requested rate, within its manual turn cap.
+            Self::physics_of(&mut self.session).rider().set_turn_rate(input.heading_rate_rad_s);
+            if !self.physics().rider_joints().is_empty() && !self.physics().rider_off() {
+                // The articulated rider bends at its crouch rate; the rigid one cannot crouch.
+                let _ = self.session.set_crouch(input.crouch * CROUCH_MAX_RAD);
+            }
+            let motion = (input.desired_lean_rad, input.heading_rate_rad_s, input.crouch);
             if self.last_motion != Some(motion) {
                 self.session.note(format!(
-                    "Manual lean {:.2} deg, turn {:.2} deg/s",
+                    "Manual lean {:.2} deg, turn {:.2} deg/s, crouch {:.0} %",
                     motion.0.to_degrees(),
-                    motion.1.to_degrees()
+                    motion.1.to_degrees(),
+                    motion.2 * 100.0
                 ));
                 self.last_motion = Some(motion);
             }
@@ -547,13 +755,13 @@ impl FreeRideHost {
         self.session.step();
         self.watch.after_step(self.session.machine());
         let rider = self.physics().rider_state();
-        self.state.update_rider(self.epoch, rider);
+        let report = self.report();
+        self.state.update_rider(self.epoch, rider, report);
         if let Some(why) = self.halted() {
             self.state.failed(self.epoch, &why);
             return;
         }
-        // This is a simulator boot wait, not a measured user reaction time.
-        if !self.boot_ready && self.time_s() >= 4.0 {
+        if !self.boot_ready && self.time_s() >= BOOT_S {
             self.boot_ready = true;
             self.session.note("Free ride ready on the stand; manual controls require arming");
             self.state.ready(self.epoch);
@@ -569,8 +777,13 @@ impl FreeRideHost {
                 self.state.failed(self.epoch, "Map edge. Reset before the finite ground ends");
                 self.clear_input();
             } else if !rider.attached {
-                self.session.note("Rider detached; manual controls are disarmed");
-                self.state.failed(self.epoch, "Rider detached. Reset to start another free ride");
+                if matches!(self.physics().left_pedals(), Some((_, euc_physics::Leaving::SteppedOff))) {
+                    self.session.note("Rider stepped off; manual controls are disarmed");
+                    self.state.failed(self.epoch, "Stepped off. Reset to start another free ride");
+                } else {
+                    self.session.note("Rider detached; manual controls are disarmed");
+                    self.state.failed(self.epoch, "Rider detached. Reset to start another free ride");
+                }
                 self.clear_input();
             }
         }
@@ -672,6 +885,7 @@ mod tests {
             rider_model: model.into(),
             map: Some(GeneratedMapSpec::gentle_slope(17)),
             world: None,
+            start: None,
         }
     }
 
@@ -690,7 +904,13 @@ mod tests {
             desired_lean_rad: 0.0,
             heading_rate_rad_s: 0.0,
             armed: false,
+            crouch: 0.0,
         }
+    }
+
+    /// The manual turn cap at a stop of the default rider: the largest rate a packet may carry.
+    fn max_turn() -> f64 {
+        max_turn_rad_s(&euc_physics::Rider::default())
     }
 
     fn neutral_interval(state: &FreeRideState) {
@@ -811,8 +1031,12 @@ mod tests {
             assert!(state.input(ManualInput { desired_lean_rad: value, armed: true, ..packet(2) }).is_err());
             assert_eq!(mailbox(&state), before);
         }
-        for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, MAX_TURN_RAD_S + 1e-8, -MAX_TURN_RAD_S - 1e-8] {
+        for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, max_turn() + 1e-8, -max_turn() - 1e-8] {
             assert!(state.input(ManualInput { heading_rate_rad_s: value, armed: true, ..packet(2) }).is_err());
+            assert_eq!(mailbox(&state), before);
+        }
+        for value in [f64::NAN, f64::INFINITY, -1e-8, 1.0 + 1e-8] {
+            assert!(state.input(ManualInput { crouch: value, armed: true, ..packet(2) }).is_err());
             assert_eq!(mailbox(&state), before);
         }
     }
@@ -824,15 +1048,98 @@ mod tests {
             state
                 .input(ManualInput {
                     desired_lean_rad: sign * MAX_LEAN_RAD,
-                    heading_rate_rad_s: sign * MAX_TURN_RAD_S,
+                    heading_rate_rad_s: sign * max_turn(),
                     armed: true,
+                    crouch: 1.0,
                     ..packet(seq)
                 })
                 .unwrap();
             let input = state.current(EPOCH).unwrap();
             assert_eq!(input.desired_lean_rad, sign * MAX_LEAN_RAD);
-            assert_eq!(input.heading_rate_rad_s, sign * MAX_TURN_RAD_S);
+            assert_eq!(input.heading_rate_rad_s, sign * max_turn());
+            assert_eq!(input.crouch, 1.0);
         }
+        // The cap at a stop is the rider's: well above the old fixed 30°/s.
+        assert!(max_turn() > 30_f64.to_radians());
+    }
+
+    #[test]
+    fn stepping_off_needs_armed_controls_of_the_current_run_and_happens_once() {
+        let unarmed = state();
+        assert!(unarmed.step_off(EPOCH).is_err(), "not armed");
+        let state = armed_state();
+        assert!(state.step_off(EPOCH + 1).is_err(), "an old run");
+        assert!(!state.take_step_off(EPOCH));
+        state.step_off(EPOCH).unwrap();
+        assert!(!state.take_step_off(EPOCH + 1), "another run's host does not take it");
+        assert!(state.take_step_off(EPOCH));
+        assert!(!state.take_step_off(EPOCH), "once");
+    }
+
+    #[test]
+    fn a_reset_stands_the_wheel_only_on_a_clear_level_spot() {
+        let world = euc_world::World::new(WorldChoice { seed: 3, densities: Default::default() }.spec()).unwrap();
+        let spawn = world.spawn().position;
+        assert!(clear_spot(&world, [spawn[0], spawn[1]]), "the spawn is clear");
+        let near = world.solids_in(euc_world::Rect::new([-60.0, -60.0], [60.0, 60.0]));
+        let solid = near.first().expect("a city has solids near the spawn");
+        assert!(!clear_spot(&world, [solid.centre[0], solid.centre[1]]), "not inside a solid: {solid:?}");
+        let beside = [solid.centre[0] + solid.half[0].max(solid.half[1]) + 0.5, solid.centre[1]];
+        assert!(!clear_spot(&world, beside), "nor right beside one");
+    }
+
+    #[test]
+    fn a_crouch_is_motion_and_blocks_the_neutral_gate() {
+        let state = state();
+        state.input(ManualInput { crouch: 0.5, ..packet(1) }).unwrap();
+        assert!(state.lock().neutral_since.is_none(), "a crouch is not neutral");
+        state.input(packet(2)).unwrap();
+        assert!(state.lock().neutral_since.is_some());
+    }
+
+    #[test]
+    fn a_quick_reset_restarts_the_same_ride_where_the_wheel_is() {
+        let files = euc_sim::WheelFiles::load(&euc_profile::ProfileSource::Builtin, "begode-extreme").unwrap();
+        let rider = Physics::new(Setup::new(files.body.clone())).unwrap().rider_state();
+        // The test pad restarts at its origin: the same spec.
+        let state = state();
+        assert!(state.restart_spec(EPOCH).is_err(), "nothing to restart before the build remembers its spec");
+        state.set_spec(EPOCH, spec("articulated_sagittal_v1"));
+        let pad = state.restart_spec(EPOCH).unwrap();
+        assert!(pad.map.is_some() && pad.start.is_none());
+        assert!(state.restart_spec(EPOCH + 1).is_err(), "a reset belongs to its run");
+        // A world run restarts where the host last reported the wheel; before that, at the spawn.
+        let choice = WorldChoice { seed: 3, densities: Default::default() };
+        let world = FreeRideSpec { map: None, world: Some(choice), ..spec("articulated_sagittal_v1") };
+        let ground = euc_physics::WorldGround::new(
+            choice.spec(),
+            euc_physics::WorldStart { xy_m: [0.0, 0.0], heading_rad: 0.0 },
+        )
+        .unwrap();
+        state.begin_world(EPOCH + 1, ground, Rider::default());
+        state.set_spec(EPOCH + 1, world.clone());
+        assert_eq!(state.restart_spec(EPOCH + 1).unwrap().start, None);
+        let pose = WorldPose { xy_m: [12.5, -3.0], heading_rad: 0.4 };
+        let report = HostReport {
+            turn_cap_rad_s: 2.5,
+            crouch: Some(0.5),
+            on_pedals: true,
+            boot_remaining_s: Some(1.0),
+            world_pose: Some(pose),
+        };
+        state.update_rider(EPOCH + 1, rider, report);
+        let restart = state.restart_spec(EPOCH + 1).unwrap();
+        assert_eq!(restart.start, Some(pose));
+        restart.validate().unwrap();
+        let status = state.lock().status.clone();
+        assert_eq!(
+            (status.turn_cap_rad_s, status.crouch, status.on_pedals, status.boot_remaining_s),
+            (Some(2.5), Some(0.5), true, Some(1.0))
+        );
+        // A start place needs a world, and must be finite.
+        assert!(FreeRideSpec { start: Some(pose), ..spec("articulated_sagittal_v1") }.validate().is_err());
+        let nan = WorldPose { heading_rad: f64::NAN, ..pose };
+        assert!(FreeRideSpec { start: Some(nan), ..world }.validate().is_err());
     }
 
     #[test]
@@ -1270,6 +1577,7 @@ mod stock_rider_acceptance {
             desired_lean_rad: lean,
             heading_rate_rad_s: 0.0,
             armed,
+            crouch: 0.0,
         }
     }
 
@@ -1311,6 +1619,7 @@ mod stock_rider_acceptance {
                 rider_model: model.into(),
                 map,
                 world,
+                start: None,
             };
             let built = super::super::firmware::build_free_host(&spec, "stock", EPOCH, state.clone(), &mut |_| {})
                 .expect("real native FreeRideHost factory");
@@ -1579,6 +1888,167 @@ mod stock_rider_acceptance {
         assert!(angle_delta(heading(&end), heading(&start) + 0.48).abs() < 0.1);
     }
 
+    /// One sample ridden by hand, without the rig's 10° roll guard (a full turn leans 35°): the
+    /// firmware must neither halt, fault nor cut out.
+    fn hand_sample(rig: &mut Rig, lean: f64, turn: f64, crouch: f64) -> Snapshot {
+        rig.seq += 1;
+        let input = ManualInput { heading_rate_rad_s: turn, crouch, source: rig.source, ..packet(rig.seq, lean, true) };
+        rig.state.input(input).unwrap();
+        rig.host.step(STEP_S);
+        assert!(rig.host.halted().is_none(), "native halt: {:?}", rig.host.halted());
+        let mut events = Vec::new();
+        rig.host.drain_events(&mut events);
+        assert!(!events.iter().any(|e| matches!(e.kind, EventKind::Fault | EventKind::Cutoff)), "{events:?}");
+        rig.host.drain_ble_tx(&mut Vec::new());
+        rig.host.drain_tones(&mut Vec::new());
+        let status = rig.state.lock().status.clone();
+        assert!(status.ready && status.armed, "manual run lost readiness: {status:?}");
+        rig.snapshot()
+    }
+
+    /// The manual lean that rides at `target` m/s (a rider's speed sense), within the packet limit.
+    fn lean_for(rig: &Rig, target: f64) -> f64 {
+        let speed = f64::from(rig.snapshot().signals.speed_kmh) / 3.6;
+        ((target - speed) * 0.1).clamp(-MAX_LEAN_RAD, MAX_LEAN_RAD)
+    }
+
+    /// FR2b on the stock firmware: a pivot at a stop, a full turn at 3 m/s at the manual turn cap,
+    /// and (articulated) a full crouch while riding.
+    fn by_hand(model: &str) {
+        let mut rig = Rig::new(model);
+        rig.boot_and_arm();
+        let full = max_turn_rad_s(&euc_physics::Rider::default());
+        assert!((rig.state.lock().status.turn_cap_rad_s.unwrap() - full).abs() < 1e-9, "the full cap at a stop");
+        // A pivot at a stop: 1.5 s of full left turn input.
+        let (mut drift, mut pivot, mut last) = (0.0_f32, 0.0, heading(&rig.snapshot()));
+        for _ in 0..180 {
+            let snapshot = hand_sample(&mut rig, 0.0, full, 0.0);
+            drift = drift.max(snapshot.signals.speed_kmh.abs());
+            pivot += angle_delta(heading(&snapshot), last);
+            last = heading(&snapshot);
+        }
+        println!(
+            "{model} by hand: pivot {pivot:.3} rad in 1.5 s (asked {:.2}), speed up to {drift:.2} km/h",
+            1.5 * full
+        );
+        assert!(pivot > 2.0, "{model} turns on the spot: {pivot} rad");
+        assert!(drift < 2.0, "{model} stays put while pivoting: {drift} km/h");
+        // Up to 3 m/s straight, then a full left turn for 2 s.
+        for _ in 0..480 {
+            let lean = lean_for(&rig, 3.0);
+            hand_sample(&mut rig, lean, 0.0, 0.0);
+        }
+        let (mut yaw, mut speed, mut roll, n) = (0.0, 0.0, 0.0, 240);
+        let mut last = heading(&rig.snapshot());
+        for sample in 0..n + 120 {
+            let lean = lean_for(&rig, 3.0);
+            let snapshot = hand_sample(&mut rig, lean, full, 0.0);
+            let now = heading(&snapshot);
+            if sample >= 120 {
+                // The last 2 s, after the lean into the turn has built up.
+                yaw += angle_delta(now, last) / STEP_S / f64::from(n);
+                speed += f64::from(snapshot.signals.speed_kmh) / 3.6 / f64::from(n);
+                roll += f64::from(snapshot.signals.roll_deg) / f64::from(n);
+            }
+            last = now;
+        }
+        let status = rig.state.lock().status.clone();
+        let lateral = 9.81 * euc_physics::Rider::default().control.manual_turn_lean_max_deg.to_radians().tan();
+        println!(
+            "{model} by hand: full turn at {speed:.2} m/s: yaw {yaw:.3} rad/s, lateral {:.2} m/s² (manual limit {lateral:.2}), roll {roll:.1}°, status cap {:?}",
+            yaw * speed,
+            status.turn_cap_rad_s
+        );
+        assert!(speed > 2.0, "{model} keeps riding through the turn: {speed} m/s");
+        assert!((yaw * speed - lateral).abs() < 0.2 * lateral, "{model} turns at the lateral limit: {}", yaw * speed);
+        assert!(roll.abs() > 25.0, "{model} leans into the turn: {roll}°");
+        // (Articulated) a full crouch while riding on, still turning at half the cap so that the
+        // run stays on the 32 m pad.
+        if rig.articulated {
+            let mut pitch = 0.0_f32;
+            for _ in 0..120 {
+                let lean = lean_for(&rig, 3.0);
+                pitch = pitch.max(hand_sample(&mut rig, lean, full / 2.0, 1.0).signals.pitch_deg.abs());
+            }
+            let crouch = rig.state.lock().status.crouch.unwrap();
+            println!("{model} by hand: crouch {crouch:.2} while riding, largest pitch {pitch:.2}°");
+            assert!((crouch - 1.0).abs() < 1e-6, "the legs reach a full crouch in a second: {crouch}");
+            assert!(pitch < 10.0);
+        } else {
+            assert_eq!(rig.state.lock().status.crouch, None, "the rigid rider cannot crouch");
+        }
+        assert!(rig.state.lock().status.on_pedals);
+        // X: the armed rider steps off, and the run ends with its own reason.
+        rig.state.step_off(EPOCH).unwrap();
+        for _ in 0..12 {
+            rig.host.step(STEP_S);
+        }
+        let status = rig.state.lock().status.clone();
+        assert!(!status.on_pedals && !status.armed && status.reason.starts_with("Stepped off"), "{status:?}");
+    }
+
+    /// FR2b quick reset on a world: a new run starts where the wheel stood, at its heading, with
+    /// the firmware booting again on the stand.
+    fn quick_reset(model: &str) {
+        let mut rig = Rig::on_world(model, 42);
+        rig.boot_and_arm();
+        for _ in 0..120 {
+            hand_sample(&mut rig, 0.0, max_turn_rad_s(&euc_physics::Rider::default()), 0.0);
+        }
+        for _ in 0..60 {
+            hand_sample(&mut rig, 0.0, 0.0, 0.0);
+        }
+        let ground = rig.state.lock().world.clone().unwrap();
+        let snapshot = rig.snapshot();
+        let here = ground.to_world([f64::from(snapshot.bodies[0].pos[0]), f64::from(snapshot.bodies[0].pos[1])]);
+        let facing = ground.start().heading_rad + heading(&snapshot);
+        let spec = rig.state.restart_spec(EPOCH).unwrap();
+        let start = spec.start.expect("a world run restarts at its pose");
+        println!("{model} quick reset: from {here:?} facing {facing:.3} to {start:?}");
+        assert!((start.xy_m[0] - here[0]).hypot(start.xy_m[1] - here[1]) < 0.05, "{start:?} vs {here:?}");
+        assert!(angle_delta(start.heading_rad, facing).abs() < 0.02);
+        assert!(angle_delta(start.heading_rad, ground.start().heading_rad).abs() > 1.0, "the pivot turned it");
+        let state = rig.state.clone();
+        let built = super::super::firmware::build_free_host(&spec, "stock", EPOCH + 1, state.clone(), &mut |_| {})
+            .expect("the restarted run builds");
+        let mut host = built.host;
+        let restarted = state.lock().world.clone().unwrap();
+        assert_eq!(restarted.start().xy_m, start.xy_m);
+        assert_eq!(restarted.start().heading_rad, start.heading_rad);
+        assert!(!state.lock().status.ready, "the firmware boots again");
+        let mut countdown = Vec::new();
+        while !state.lock().status.ready {
+            host.step(0.5);
+            countdown.push(state.lock().status.boot_remaining_s);
+            assert!(host.halted().is_none() && countdown.len() < 20, "{countdown:?}");
+        }
+        println!("{model} quick reset: boot countdown {countdown:?}");
+        assert!(countdown.windows(2).all(|w| w[1].unwrap_or(0.0) <= w[0].unwrap_or(0.0)), "{countdown:?}");
+        assert_eq!(state.lock().status.epoch, EPOCH + 1);
+        // On the stand the wheel stays where it was put (it settles by millimetres).
+        let again = state.restart_spec(EPOCH + 1).unwrap().start.unwrap();
+        assert!((again.xy_m[0] - start.xy_m[0]).hypot(again.xy_m[1] - start.xy_m[1]) < 0.02, "{again:?} vs {start:?}");
+        assert!(angle_delta(again.heading_rad, start.heading_rad).abs() < 0.01, "{again:?} vs {start:?}");
+    }
+
+    #[test]
+    #[ignore = "needs cached pinned stock firmware; FR2b manual controls on the native FreeRideHost"]
+    fn stock_articulated_pivots_carves_and_crouches_by_hand() {
+        by_hand("articulated_sagittal_v1");
+    }
+
+    #[test]
+    #[ignore = "needs cached pinned stock firmware; FR2b manual controls on the native FreeRideHost"]
+    fn stock_rigid_pivots_and_carves_by_hand() {
+        by_hand("rigid_ankle_v1");
+    }
+
+    #[test]
+    #[ignore = "needs cached pinned stock firmware; FR2b quick reset on the streaming world"]
+    fn stock_articulated_quick_reset_restarts_where_the_wheel_is() {
+        quick_reset("articulated_sagittal_v1");
+    }
+
     fn pause_and_rearm(model: &str) {
         let mut rig = Rig::new(model);
         rig.boot_and_arm();
@@ -1796,6 +2266,7 @@ mod stock_rider_acceptance {
             rider_model: model.into(),
             map: Some(GeneratedMapSpec::flat(17)),
             world: None,
+            start: None,
         };
         let map = Arc::new(spec.map.as_ref().unwrap().generate(EPOCH as u32).unwrap());
         let rider = spec.rider().unwrap();

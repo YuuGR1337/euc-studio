@@ -101,6 +101,7 @@ header. `euc sim run --rider-model ...` overrides the scenario's model for one r
 | `control.tiltback_ease_kmh_per_deg` | 1.5 | Speed given up per degree beyond that (`0`: ignores tiltback). |
 | `control.tiltback_ease_brake` | 1.0 | Strongest braking while easing off, m/s². |
 | `control.steer_kp`, `control.steer_kd`, `control.steer_max_nm` | 2000, 200, 60 | How the rider keeps the line (world +x). |
+| `control.manual_turn_rate_max_rad_s`, `control.manual_turn_lean_max_deg`, `control.manual_turn_lean_rate_deg_s`, `control.manual_lean_rate_deg_s` | 2.5, 35, 60, 30 | Riding by hand only (Free Ride, Ride's manual mode): the turn cap at a stop, the lean into turns and how fast the leans change. A scenario's own riding never uses them. |
 
 For example, a rider who ignores tiltback and leans harder:
 

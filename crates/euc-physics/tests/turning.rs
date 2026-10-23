@@ -41,8 +41,85 @@ fn ride(physics: &mut Physics, seconds: f64) {
     }
 }
 
+/// By hand (Free Ride, Ride's manual mode) a stopped rider twists the wheel round on the spot:
+/// the line turns at the requested rate and the twist aid, within its 60 N·m cap, follows it.
 #[test]
-fn manual_turn_input_does_not_spin_a_stationary_wheel() {
+fn by_hand_the_rider_pivots_the_wheel_at_a_stop() {
+    for model in [RiderModel::RigidAnkleV1, RiderModel::ArticulatedSagittalV1] {
+        let mut physics = Physics::new(setup(model)).unwrap();
+        ride(&mut physics, 0.5);
+        physics.set_held(false);
+        ride(&mut physics, 0.5);
+        let heading = physics.heading_rad();
+        physics.rider().set_manual(true);
+        physics.rider().set_turn_rate(1.5);
+        let (mut fastest, mut last) = (0.0_f64, heading);
+        for _ in 0..(2.0 / TIMESTEP_S) as usize {
+            let torque = balance(&physics);
+            physics.step(torque);
+            let now = physics.heading_rad();
+            fastest = fastest.max((wrap_angle(now - last) / TIMESTEP_S).abs());
+            last = now;
+        }
+        let turned = wrap_angle(physics.heading_rad() - heading);
+        physics.rider().set_turn_rate(0.0);
+        ride(&mut physics, 2.0);
+        let settled = wrap_angle(physics.heading_rad() - heading);
+        let state = physics.state();
+        println!(
+            "{model:?} pivot: {turned:.3} rad in 2 s (asked 3.0), fastest {fastest:.2} rad/s, settled at {settled:.3} rad, speed {:.3} m/s, roll {:.2}°",
+            state.speed_mps,
+            state.roll_rad.to_degrees()
+        );
+        assert!(!state.fallen && !physics.rider_off(), "{model:?}: {state:?}");
+        assert!(turned > 2.5, "{model:?} turns on the spot: {turned} rad");
+        assert!((settled - physics.rider().line()).abs() < 0.05, "{model:?} keeps the heading reached: {settled}");
+        assert!(state.speed_mps.abs() < 0.1, "{model:?} stays put: {} m/s", state.speed_mps);
+    }
+}
+
+/// By hand at 5 m/s, a full turn request is capped by the lean it needs: the rider leans the
+/// wheel to the manual limit (35°, about 0.7 g) and carves a circle the tire holds.
+#[test]
+fn by_hand_a_full_turn_at_speed_leans_to_the_manual_limit() {
+    for model in [RiderModel::RigidAnkleV1, RiderModel::ArticulatedSagittalV1] {
+        let mut physics = Physics::new(setup(model)).unwrap();
+        ride(&mut physics, 0.5);
+        physics.set_held(false);
+        physics.rider().set_manual(true);
+        physics.rider().set_intent(Intent::Speed(5.0));
+        ride(&mut physics, 8.0);
+        let speed = physics.state().speed_mps;
+        let gravity = physics.gravity();
+        let cap = physics.rider().manual_turn_cap(speed, gravity);
+        physics.rider().set_turn_rate(10.0);
+        ride(&mut physics, 2.0);
+        let (mut yaw, mut roll, mut v, n) = (0.0, 0.0, 0.0, (2.0 / TIMESTEP_S) as usize);
+        for _ in 0..n {
+            let torque = balance(&physics);
+            let before = physics.heading_rad();
+            physics.step(torque);
+            let state = physics.state();
+            yaw += wrap_angle(physics.heading_rad() - before) / TIMESTEP_S / n as f64;
+            roll += state.roll_rad / n as f64;
+            v += state.speed_mps / n as f64;
+        }
+        let state = physics.state();
+        println!(
+            "{model:?} full turn: speed {v:.2} m/s, yaw {yaw:.3} rad/s (cap {cap:.3} at {speed:.2}), roll {:.1}°, radius {:.2} m",
+            roll.to_degrees(),
+            v / yaw
+        );
+        assert!(!state.fallen && !physics.rider_off(), "{model:?}: {state:?}");
+        // At the cap the turn's lateral acceleration v·rate is the manual lean's g·tan(35°).
+        let lateral = gravity * physics.setup().rider.control.manual_turn_lean_max_deg.to_radians().tan();
+        assert!((yaw * v - lateral).abs() < 0.1 * lateral, "{model:?}: {} m/s² of {lateral}", yaw * v);
+        assert!((30.0..36.0).contains(&-roll.to_degrees()), "{model:?} leans into the turn: {}°", roll.to_degrees());
+    }
+}
+
+#[test]
+fn scripted_turn_input_does_not_spin_a_stationary_wheel() {
     for model in [RiderModel::RigidAnkleV1, RiderModel::ArticulatedSagittalV1] {
         let mut physics = Physics::new(setup(model)).unwrap();
         ride(&mut physics, 0.5);
