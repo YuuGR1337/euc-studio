@@ -509,8 +509,12 @@ pub struct Rider {
     pub gyration_m: f64,
     /// Standing height, metres (for drawing).
     pub height_m: f64,
-    /// Drag area of rider and wheel, m².
+    /// Drag area of rider and wheel, m² (upright).
     pub cda_m2: f64,
+    /// Drag area at a full crouch, m², by hand only (Free Ride's crouch): the drag area falls from
+    /// `cda_m2` to this with the knees' bend. ESTIMATE: 30 % under upright; a forward standing
+    /// posture lowers a cyclist's drag area by 23-26 % and a full aero position by about 38 %.
+    pub tuck_cda_m2: f64,
     /// How the rider controls the lean.
     pub control: RiderControl,
     /// When the rider lets go of the pedals of a wheel that goes down.
@@ -550,6 +554,7 @@ impl Default for Rider {
             gyration_m: 0.35,
             height_m: 1.78,
             cda_m2: 0.6,
+            tuck_cda_m2: 0.42,
             control: RiderControl::default(),
             let_go: LetGo::default(),
         }
@@ -815,6 +820,7 @@ impl Setup {
         let not_negative = [
             ("body.tire.crr", w.tire.crr),
             ("rider.cda_m2", r.cda_m2),
+            ("rider.tuck_cda_m2", r.tuck_cda_m2),
             ("rider.ankle_above_pedals_m", r.ankle_above_pedals_m),
             ("rider.let_go.reaction_s", r.let_go.reaction_s),
             ("assist.roll_stiffness", self.assist.roll_stiffness),

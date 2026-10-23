@@ -547,7 +547,8 @@ Rider and aids (scenario `[rider]`, `[rider.control]`, `[assist]`; these are the
 | `articulation.hip_adduction_max_nm`, `hip_rotation_max_nm`, `knee_rotation_max_nm`, `ankle_roll_max_nm` | 150, 50, 25, 35 N·m | ESTIMATE: per joint, from published strength of adults (`articulated_lateral_v1`; see the lateral rider) |
 | `articulation.pad_friction`, `pad_contact_time_s`, `pad_preload_n` | 0.3, 0.03 s, 20 N | DEFAULT: a leg on a side pad, and how hard it rests there (`articulated_lateral_v1` on a wheel with measured pads) |
 | `articulation.turn_crouch`, `turn_spread`, `turn_press_n_per_rad` | 0.5, 1.3, 100 N | ESTIMATE from the owner's report: per radian of a turn's lean, the knees' deeper bend (rad), the inside knee's spread from its pad (rad) and the outside leg's harder rest on its pad (`articulated_lateral_v1`) |
-| `cda_m2` | 0.6 m² | air drag |
+| `cda_m2` | 0.6 m² | air drag, upright |
+| `tuck_cda_m2` | 0.42 m² | ESTIMATE: air drag at a full crouch, by hand only (Free Ride): the drag area falls linearly with the knees' bend from `cda_m2`. 30 % under upright: a forward standing posture lowers a cyclist's drag area by 23-26 % (11 riders, 2019) and a full aero position by about 38 % |
 | `control.lean_kp`, `lean_kd` | 6000 N·m/rad, 900 N·m·s/rad | about 1.3 Hz, damping 0.6 about the ankles |
 | `control.ankle_max_nm` | 400 N·m | both legs |
 | `control.speed_kp`, `speed_ki` | 0.6 /s, 0.03 /s² | |

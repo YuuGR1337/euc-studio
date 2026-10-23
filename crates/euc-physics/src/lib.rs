@@ -791,7 +791,7 @@ impl Physics {
     /// What resists motion, as the rider senses it: rolling resistance and air drag.
     fn drag(&self) -> rider::Drag {
         let setup = &self.setup;
-        let drag_area = 0.5 * setup.air_density * setup.rider.cda_m2;
+        let drag_area = 0.5 * setup.air_density * self.drag_area_m2();
         rider::Drag { rolling: setup.wheel.tire.crr * setup.gravity, aero: drag_area / self.total_mass }
     }
 
@@ -1167,7 +1167,7 @@ impl Physics {
         };
         self.lean = lean;
         let setup = &self.setup;
-        let drag_area = 0.5 * setup.air_density * setup.rider.cda_m2;
+        let drag_area = 0.5 * setup.air_density * self.drag_area_m2();
         let aero = drag_area * att.speed * att.speed.abs();
         let drag = self.drag();
         let sense = rider::Sense {
@@ -1523,6 +1523,18 @@ impl Physics {
         self.crouch_rad
     }
 
+    /// The drag area of rider and wheel now, m²: `cda_m2` upright; by hand
+    /// ([`RiderController::set_manual`]) it falls with the crouch to `tuck_cda_m2` at a full crouch.
+    /// Scripted riding keeps `cda_m2`.
+    pub fn drag_area_m2(&self) -> f64 {
+        let rider = &self.setup.rider;
+        if !self.rider.manual() {
+            return rider.cda_m2;
+        }
+        let share = (self.crouch_rad / CROUCH_MAX_RAD).clamp(0.0, 1.0);
+        rider.cda_m2 + (rider.tuck_cda_m2 - rider.cda_m2) * share
+    }
+
     /// Lifts one articulated foot off its pedal by bending that leg: `lift_rad` more hip flexion,
     /// twice that at the knee and the ankle keeping the sole level (0.3 rad lifts it about 4 cm at
     /// the default leg length); 0 puts it back down. One foot at a time, with contact feet and an
@@ -1791,6 +1803,27 @@ fn cross(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
 #[cfg(test)]
 mod articulated_tests {
     use super::*;
+
+    #[test]
+    fn the_drag_area_follows_the_crouch_by_hand_only() {
+        let mut upright = setup();
+        upright.rider.cda_m2 = 0.6;
+        let mut physics = Physics::new(upright).unwrap();
+        assert_eq!(physics.drag_area_m2(), 0.6);
+        physics.set_crouch(1.2).unwrap();
+        for _ in 0..1000 {
+            physics.step(0.0);
+        }
+        assert!((physics.crouch_rad() - 1.2).abs() < 1e-12, "{}", physics.crouch_rad());
+        assert_eq!(physics.drag_area_m2(), 0.6, "scripted riding keeps the upright drag area");
+        physics.rider().set_manual(true);
+        assert!((physics.drag_area_m2() - 0.42).abs() < 1e-12, "a full tuck by hand");
+        physics.set_crouch(0.6).unwrap();
+        for _ in 0..1000 {
+            physics.step(0.0);
+        }
+        assert!((physics.drag_area_m2() - 0.51).abs() < 1e-12, "half way: {}", physics.drag_area_m2());
+    }
 
     fn setup() -> Setup {
         let plant: toml::Value = toml::from_str(include_str!("../../../profiles/begode-extreme/plant.toml")).unwrap();

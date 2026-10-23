@@ -92,6 +92,7 @@ header. `euc sim run --rider-model ...` overrides the scenario's model for one r
 | `com_above_pedals_m` | 1.0 | Height of the rider's centre of mass above the pedals. |
 | `gyration_m` | 0.35 | Radius of gyration of the rigid body (the articulated upper body's inertia). |
 | `cda_m2` | 0.6 | Drag area of rider and wheel. |
+| `tuck_cda_m2` | 0.42 | Drag area at a full crouch, riding by hand only (Free Ride's crouch). A scenario's own riding keeps `cda_m2`. |
 | `articulation.joint_kp`, `articulation.joint_kd`, `articulation.joint_max_nm` | 1000, 60, 180 | Hip and knee posture: stiffness (N·m/rad), damping (N·m·s/rad), strongest torque per joint (N·m). |
 | `articulation.sole_friction`, `articulation.sole_contact_time_s` | 1.0, 0.005 | Sole-on-pedal friction and contact softness (s), for `articulated_contact_v1`. |
 | `articulation.soft_knee_rad` | 0.52 | Knee bend of the riding stance (rad), for `articulated_lateral_v1`. |
