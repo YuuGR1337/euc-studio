@@ -24,6 +24,7 @@ total-mass fix (the rider senses the true air drag in the city):
 |---|---|---|
 | `{stock,compat,clean}_drive_speed_step_and_tiltback` | Half throttle 0 to 20 km/h, 6 s with no ask, half brake to a stop; then full throttle 20 s on the blank preset (tiltback at 20 km/h); quanta 4000, 3000, 2000 | All 9 runs: 20 km/h in 3.53 s, 20.0-24.8 km/h with no ask, stop in 3.3 s, then a rock within ±0.55 km/h; in the tiltback the rider eases off, top 35.4-35.7 km/h, nobody falls |
 | `stock_drive_half_throttle_normal_ride_at_three_charges` | Half throttle to 40 km/h, 10 s with no ask, half brake, at 100, 50 and 20 % | 40 km/h in 6.7 s, 40.1-44.2 km/h with no ask, stop in 5.8 s, then a rock within ±0.6 km/h; no fall |
+| `stock_drive_release_at_20_kmh_settles_at_the_speed_let_go` | Half, then full throttle from rest to 20 km/h, then 4 s with no ask (a let-go); bounds: peak under 6 km/h (half) and 10 km/h (full) over the let-go, settled within 1 km/h of it | Half: let go at 20.0 km/h, peak 4.7 km/h over it, 20.0 km/h after 4 s; full: let go at 20.1 km/h, peak 8.1 km/h over it, 20.9 km/h after 4 s; no fall |
 
 The compat and clean images come from `firmware/build` (`EUC_FIRMWARE_DIR`). They must be built
 from the same tree as the probe map. Top speed is not tested: the motor plant saturates near
@@ -32,9 +33,14 @@ from the same tree as the probe map. Top speed is not tested: the motor plant sa
 The rigid crash and idle tests passed with the numbers in brackets. The respawn wall times come from
 a release build with four tests in parallel on the development Mac.
 
+The release row's run-on is the wheel catching the rider: as the lean comes back, the firmware
+drives the wheel forward under the body. The owner's ride log (2026-10-17) has the speed rising
+0.6-7.9 km/h (median 3.0) from the let-go to the peak after pushes of about 2.2 m/s².
+
 ## Scope and identity
 
-These checks use the completion checkout on 2026-10-16.
+The play mode and drive mode updates above record their own runs. The sections from here to the
+end record the checks of 2026-10-16, on that day's completion checkout.
 They use the actual native `build_free_host` factory, stock firmware, electrical plant, and MuJoCo bodies.
 The CPU backend is `Own`. No hardware, UI, audio device, or recording capture runs.
 
@@ -58,8 +64,10 @@ The RTC source SHA256 at execution is:
 4f9ab90172f678563c74405583e8696124776534161d877a92bcff1c8325be75
 ```
 
-This update changes only test modules in `app/src-tauri/src/engine/free_ride.rs` and this document.
-The production prefix in `free_ride.rs` stays byte-for-byte unchanged.
+The 2026-10-16 update changed only test modules in `app/src-tauri/src/engine/free_ride.rs` and
+this document, and the production prefix in `free_ride.rs` stayed byte-for-byte unchanged. Later
+updates changed production code: FR2b and play mode (2026-10-22), drive mode and the FR6 sound
+(2026-10-23).
 
 ## Test inputs and observations
 
@@ -167,14 +175,39 @@ The finite surface ends at +16 m. Neither run reaches that surface boundary.
 
 ## Reproduction
 
-The new tests use the prefix `engine::free_ride::stock_rider_acceptance::`:
+All the tests use the prefix `engine::free_ride::stock_rider_acceptance::`. Each one is ignored
+by default.
 
-- `stock_rigid_sustained_steering_on_generated_terrain`
-- `stock_articulated_sustained_steering_on_generated_terrain`
-- `stock_rigid_pause_and_resume` (was `stock_rigid_pause_and_neutral_rearm`)
-- `stock_articulated_pause_and_resume` (was `stock_articulated_pause_and_neutral_rearm`)
-- `stock_rigid_finite_map_edge_admission`
-- `stock_articulated_finite_map_edge_admission`
+- 2026-10-16 (results above):
+  - `stock_rigid_sustained_steering_on_generated_terrain`
+  - `stock_articulated_sustained_steering_on_generated_terrain`
+  - `stock_rigid_pause_and_resume` (was `stock_rigid_pause_and_neutral_rearm`)
+  - `stock_articulated_pause_and_resume` (was `stock_articulated_pause_and_neutral_rearm`)
+  - `stock_rigid_finite_map_edge_admission`
+  - `stock_articulated_finite_map_edge_admission`
+  - the short `stock_rigid_stand_arm_lean_and_neutral` and
+    `stock_articulated_stand_arm_lean_and_neutral`, and `stock_exact_com_joint_and_motor_trace`
+- The streaming world (results in `world.md`): `stock_rigid_rides_the_streaming_world` and
+  `stock_articulated_rides_the_streaming_world`
+- FR2b, riding by hand (results in `body.md`, "Riding by hand"):
+  - `stock_articulated_pivots_carves_and_crouches_by_hand`
+  - `stock_rigid_pivots_and_carves_by_hand`
+  - `stock_articulated_quick_reset_restarts_where_the_wheel_is`
+- Play mode (results in the play mode table):
+  - `stock_articulated_idle_after_boot_balances_without_a_pause`
+  - `stock_rigid_idle_after_boot_balances_without_a_pause`
+  - `stock_articulated_crash_never_pauses`
+  - `stock_rigid_crash_never_pauses`
+  - `stock_articulated_respawns_upright_at_the_last_clear_spot_and_at_the_start`
+  - `stock_articulated_power_off_then_on`
+  - `stock_articulated_buttons_while_riding`
+  - `stock_free_ride_keeps_no_ble_backlog`
+- Drive mode (results in the drive table):
+  - `stock_drive_speed_step_and_tiltback`
+  - `compat_drive_speed_step_and_tiltback` and `clean_drive_speed_step_and_tiltback` (they need
+    the built compat and clean images)
+  - `stock_drive_half_throttle_normal_ride_at_three_charges`
+  - `stock_drive_release_at_20_kmh_settles_at_the_speed_let_go`
 
 Run these commands from the repository root with the pinned firmware already cached.
 Use the local Python path for the current native dependency build.
@@ -188,6 +221,10 @@ export DYLD_LIBRARY_PATH="$MUJOCO_DYNAMIC_LINK_DIR"
 cargo test --manifest-path app/src-tauri/Cargo.toml --lib \
   engine::free_ride::stock_rider_acceptance -- --ignored --nocapture --test-threads=1
 
+# Without the built compat and clean images, the stock tests only:
+cargo test --manifest-path app/src-tauri/Cargo.toml --lib \
+  engine::free_ride::stock_rider_acceptance::stock_ -- --ignored --nocapture --test-threads=1
+
 cargo test --manifest-path app/src-tauri/Cargo.toml --lib \
   engine::free_ride::tests -- --test-threads=1
 
@@ -195,7 +232,7 @@ cargo clippy --manifest-path app/src-tauri/Cargo.toml --lib --tests -- -D warnin
 rustfmt --check --edition 2024 app/src-tauri/src/engine/free_ride.rs
 ```
 
-The combined acceptance command includes six new cases, two existing short cases, and one existing exact COM/joint/motor trace.
+On 2026-10-16 the combined acceptance command ran six new cases, two existing short cases, and one existing exact COM/joint/motor trace.
 The combined run passed all nine tests with zero failures in 68.48 wall seconds.
 Focused executions also passed all six new cases and both short cases.
 The stop comparison permits 0.1 mm of rounding error in streamed float32 positions.
