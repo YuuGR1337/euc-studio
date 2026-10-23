@@ -3,12 +3,14 @@ import { limitsOf, type HeightMap } from "../../engine/freeRide.ts";
 import type { WorldFrame } from "../../engine/world.ts";
 import type { EngineClient } from "../../engine/types.ts";
 import { keyLabel, type FreeRideAction } from "../../lib/rideControls.ts";
+import { useUi } from "../../state/ui.ts";
 import { Button } from "../../ui/Button.tsx";
 import { ChevronRight, RotateCcw } from "../../ui/icons.tsx";
 import { Kbd } from "../../ui/Kbd.tsx";
 import { Panel } from "../../ui/Panel.tsx";
 import { Pill } from "../../ui/Pill.tsx";
 import { SegmentedControl } from "../../ui/SegmentedControl.tsx";
+import { Slider } from "../../ui/Slider.tsx";
 import { KeyBindings } from "./KeyBindings.tsx";
 import { FreeRideController, LIGHT_MODES, PEDAL_MODES, offPedals } from "./controller.ts";
 
@@ -48,6 +50,10 @@ function FreeRideSession({ engine, active, onGround, onExit }: FreeRidePanelProp
   const controller = useMemo(() => new FreeRideController(engine), [engine]);
   const state = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
   const [keysOpen, setKeysOpen] = useState(false);
+  const volume = useUi((s) => s.soundVolume);
+  const setVolume = useUi((s) => s.setSoundVolume);
+  const muted = useUi((s) => s.soundMuted);
+  const setMuted = useUi((s) => s.setSoundMuted);
   useEffect(() => {
     if (active && engine.kind === "live") return controller.connect();
   }, [active, controller, engine]);
@@ -220,6 +226,27 @@ function FreeRideSession({ engine, active, onGround, onExit }: FreeRidePanelProp
           <p className="text-12 text-fg-2">
             Light and pedal mode go to the firmware as the phone app sends them; it may refuse them
             while riding fast.
+          </p>
+        </Section>
+        <Section title="Sound">
+          <div className="flex items-end gap-8">
+            <Slider
+              className="flex-1"
+              label="Volume"
+              unit="%"
+              value={Math.round(volume * 100)}
+              onValueChange={(value) => setVolume(value / 100)}
+              disabledReason={muted ? "Muted." : undefined}
+            />
+            <Button size="sm" aria-pressed={muted} onClick={() => setMuted(!muted)}>
+              {muted ? "Unmute" : "Mute"}
+            </Button>
+          </div>
+          <p className="text-12 text-fg-2">
+            Every sound comes from the simulation: the motor from its electrical frequency and
+            current, the tyre from the wheel speed and the ground under it, the wind from the speed,
+            and the buzzer as the firmware drives it. Hidden, the window keeps only the buzzer. The
+            Display card&apos;s bell switches the wheel&apos;s sound off altogether.
           </p>
         </Section>
         <Section title="World">

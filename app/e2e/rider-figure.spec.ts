@@ -198,6 +198,25 @@ test("draws the rider only as the figure on the physics bodies, never as their s
   await expect.poll(() => drawn(page)).toEqual({ figure: 26, shapes: 0 });
 });
 
+test("sends the sound mix: the stored volume, and no ride sound while the window is hidden", async ({
+  page,
+}) => {
+  await page.addInitScript(() => localStorage.setItem("euc-studio.soundVolume", "0.5"));
+  await open(page);
+  const mix = () => page.evaluate(() => window.liveWire.soundMix);
+  await expect.poll(mix).toEqual({ volume: 0.25, bed: true });
+  await page.evaluate(() => {
+    Object.defineProperty(document, "hidden", { configurable: true, get: () => true });
+    document.dispatchEvent(new Event("visibilitychange"));
+  });
+  await expect.poll(mix).toEqual({ volume: 0.25, bed: false });
+  await page.evaluate(() => {
+    Object.defineProperty(document, "hidden", { configurable: true, get: () => false });
+    document.dispatchEvent(new Event("visibilitychange"));
+  });
+  await expect.poll(mix).toEqual({ volume: 0.25, bed: true });
+});
+
 test("captures every frame, Side and Chase", async ({ page }) => {
   test.setTimeout(240_000);
   await open(page);

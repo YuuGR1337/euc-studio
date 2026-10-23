@@ -20,6 +20,7 @@ import { useManualRiding } from "./manual.ts";
 import { LOW_FPS, type Quality } from "./quality.ts";
 import { Scene } from "./Scene.tsx";
 import { WheelOutputs } from "./WheelOutputs.tsx";
+import { useSoundMix } from "./useSoundMix.ts";
 import { slopeAt } from "./terrain.ts";
 import { type GroundView, sampleGround } from "./ground.ts";
 import { shellHeading, wheelPosition } from "./poses.ts";
@@ -255,6 +256,7 @@ export function Viewport({
 }) {
   const camera = useUi((s) => s.camera);
   const setCamera = useUi((s) => s.setCamera);
+  useSoundMix();
   const [scene, setScene] = useState<{ quality: Quality; renderer: string } | null>(null);
   const [drawn, setDrawn] = useState(false);
   const [worldError, setWorldError] = useState<string | null>(null);

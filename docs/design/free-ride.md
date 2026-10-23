@@ -304,6 +304,15 @@ warning discipline (`src/ui/hudModel.ts`, `src/ui/game.css`).
 | Ducking | The ride bed ducks 0.22 on each beep (30 ms attack, 300 ms release). | Re-implement (Free Ride) | Duck on the real buzzer signal. |
 | Recordings | Wind, offroad tyre and siren loops (CC0); crash voices (permission-only or machine-generated). | Skip | Synthesis covers wind and tyre; nothing else is needed. |
 
+**Built (2026-10-23): FR6 S1.** The ride bed plays natively beside the buzzer, on simulated time
+(`app/src-tauri/src/engine/ride_sound.rs`, fed each sample by the Free Ride host): the motor
+(electrical frequency from the plant's pole pairs, level from the phase current, low), the tyre
+(speed and the euc-world material under the wheel, joint ticks, wet hiss, the tread's 15 knob
+repeats from `profiles/begode-extreme/geometry.toml`), the wind (speed), ducked by 0.22 under
+each beep. Volume and Mute sit in the panel; a hidden window keeps only the buzzer. Nothing runs
+on the frame loop. S2, the impacts (kerb thump, pedal scrape, crash thud), waits for a contact
+digest from the physics owner.
+
 ### Settings and quality tiers
 
 | Item | What they do | Decision | Why, and how for us |
@@ -366,7 +375,9 @@ them.
 5. Crouch now; a hop study after crouch works.
 6. People and traffic wait for FR10.
 7. A generic fictional rider kit for now.
-8. A motor sound from the real electrical frequency and PWM, off by default (FR6).
+8. A motor sound from the real electrical frequency and PWM, off by default (FR6). Changed on
+   2026-10-23: on, low: the sound is a real wheel signal (its pitch from the electrical frequency,
+   its level from the phase current), and Volume and Mute cover the rest.
 9. Free Ride keys: R restart here, Space crouch (hop later), X step off, Esc pause. Ride's manual
    mode keeps its keys; FR2 only adds the gamepad's triggers and D-pad there.
 10. km/h by default with a mph setting; a fixed afternoon sun now, a time of day later.

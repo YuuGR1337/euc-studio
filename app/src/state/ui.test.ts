@@ -37,6 +37,29 @@ describe("startup sound preference", () => {
   });
 });
 
+describe("sound volume and mute", () => {
+  it.each([
+    [null, 0.8],
+    ["0.35", 0.35],
+    ["1.5", 0.8],
+    ['"loud"', 0.8],
+  ])("loads stored volume %s as %s, and keeps a set one in 0..1", async (stored, expected) => {
+    vi.stubGlobal("localStorage", {
+      getItem: (key: string) => (key === "euc-studio.soundVolume" ? stored : null),
+      setItem: vi.fn(),
+    });
+    const { useUi } = await import("./ui.ts");
+    expect(useUi.getState().soundVolume).toBe(expected);
+    expect(useUi.getState().soundMuted).toBe(false);
+    useUi.getState().setSoundVolume(1.4);
+    expect(useUi.getState().soundVolume).toBe(1);
+    expect(localStorage.setItem).toHaveBeenCalledWith("euc-studio.soundVolume", "1");
+    useUi.getState().setSoundMuted(true);
+    expect(localStorage.setItem).toHaveBeenCalledWith("euc-studio.soundMuted", "true");
+    expect(useUi.getState().soundMuted).toBe(true);
+  });
+});
+
 describe("camera per context", () => {
   const storage = (stored: Record<string, string>) => {
     const items = new Map(Object.entries(stored));

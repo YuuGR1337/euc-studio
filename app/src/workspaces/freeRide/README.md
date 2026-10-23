@@ -54,7 +54,7 @@ The controller listens in the capture phase; the global command listener uses th
 | ------------------- | -------------------------- | ---------------------------------------------- |
 | W / ↑, S / ↓        | Left stick, RT / LT, D-pad | Ride forward, brake (a throttle, or the lean)  |
 | A / ←, D / →        | Left stick, D-pad          | Turn                                           |
-| Space (hold)        | LB (hold)                  | Crouch                                         |
+| Space (hold)        | LB (hold)                  | Crouch; at speed also a tuck (less drag)       |
 | X                   | B                          | Step off                                       |
 | R, Shift+R          | X, Back                    | Respawn here, at the start                     |
 | P (hold)            |                            | Power button: tap, or hold to switch off or on |
@@ -82,6 +82,23 @@ shortcuts (C, `.`, `[`, `]`, `?`) cannot be bound. Gamepad buttons are fixed.
   `horn`, `pedal_mode`) through `engine.sendCommand`, as the Phone panel does. The firmware does
   not report the light or pedal mode back, so the panel shows what it sent last. A refused command
   shows in the prompt.
+
+## Sound
+
+Free Ride sounds like the ride (FR6): the native audio service that plays the firmware's buzzer
+also plays the ride bed, on simulated time (`src-tauri/src/engine/ride_sound.rs`). Every sound
+comes from a simulator signal, each sample: the motor from its electrical frequency (the plant's
+pole pairs × wheel revolutions per second) and phase current, low as on a real wheel; the tyre
+from the wheel speed and the world's material under the wheel (a band and grain per material,
+joint ticks on pavers and setts, a hiss when wet, the hum of the tread's 15 knob repeats); the
+wind from the speed. The ride ducks by 0.22 under each beep. Only a free ride sends the bed's
+samples; other runs keep the buzzer alone.
+
+The panel's Sound row sets the master volume (squared into the gain, kept in localStorage as
+`euc-studio.soundVolume`) and mutes (`euc-studio.soundMuted`); `useSoundMix` sends them with
+`engine_sound_mix {volume, bed}`. While the window is hidden the run goes on and the bed fades out
+over 0.3 s; the buzzer still sounds. The Display card's bell switches the wheel's sound off
+altogether. Nothing runs on the frame loop for sound.
 
 ## Drive and lean
 

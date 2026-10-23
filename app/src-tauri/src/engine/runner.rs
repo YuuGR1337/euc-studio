@@ -329,6 +329,15 @@ impl Runner {
         self.audio_status()
     }
 
+    /// The master volume (0 to 1) and whether the ride bed sounds (false while the window is
+    /// hidden). Native audio keeps them across runs.
+    pub fn set_sound_mix(&self, volume: f64, bed: bool) -> Result<(), String> {
+        match &self.audio {
+            Ok(audio) => audio.set_mix(volume, bed).map_err(|error| error.to_string()),
+            Err(_) => Ok(()),
+        }
+    }
+
     /// Where the pump sends from now on (a reloaded web view attaches again).
     pub fn attach(&self, sinks: Sinks) {
         *lock(&self.sinks) = Some(sinks);
@@ -1163,11 +1172,12 @@ impl Sim {
         host.drain_events(&mut self.events);
         host.drain_ble_tx(&mut self.ble);
         host.drain_tones(&mut self.tones);
+        let ride = host.ride_sound(&self.snapshot);
         self.recordings.ingest(&self.snapshot, &self.events, &self.ble, host.outputs().as_ref());
         if self.audio_playing
             && let Some(audio) = &self.audio
             && audio.status().state != "error"
-            && let Err(error) = audio.submit(self.session_id, self.snapshot.t_s, audio_rate, &self.tones)
+            && let Err(error) = audio.submit(self.session_id, self.snapshot.t_s, audio_rate, &self.tones, ride)
         {
             eprintln!("[audio] {error}");
         }

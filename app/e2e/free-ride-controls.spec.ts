@@ -296,6 +296,23 @@ test("the HUD shows the firmware's PWM and the simulated motor headroom, and war
   await page.keyboard.up("w");
 });
 
+test("the Sound row keeps its volume and mutes", async ({ page }) => {
+  await open(page);
+  const sound = page.getByRole("region", { name: "Sound" });
+  await expect(sound.getByText("80")).toBeVisible();
+  const mute = sound.getByRole("button", { name: "Mute" });
+  await mute.click();
+  await expect(sound.getByRole("button", { name: "Unmute" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await page.reload();
+  await expect(
+    page.getByRole("region", { name: "Sound" }).getByRole("button", { name: "Unmute" }),
+  ).toBeVisible();
+  expect(await page.evaluate(() => localStorage.getItem("euc-studio.soundMuted"))).toBe("true");
+});
+
 test("an engine without drive caps leans and shows no drive choice", async ({ page }) => {
   await open(page);
   await expect(page.getByRole("radiogroup", { name: "Forward and back" })).toHaveCount(0);

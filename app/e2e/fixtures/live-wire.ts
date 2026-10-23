@@ -11,6 +11,8 @@ const wire = {
   /** The last comparison's channels: run A, run B and its messages. */
   compare: null as { a: Deliver; b: Deliver; messages: Deliver } | null,
   calls: [] as string[],
+  /** The last native sound mix the studio asked for. */
+  soundMix: null as Record<string, unknown> | null,
 };
 window.liveWire = wire;
 declare global {
@@ -69,6 +71,9 @@ export async function invoke<T>(command: string, args: Record<string, unknown> =
         b: channel("streamB"),
         messages: channel("messages"),
       };
+      return undefined as T;
+    case "engine_sound_mix":
+      wire.soundMix = args;
       return undefined as T;
     default:
       return undefined as T;

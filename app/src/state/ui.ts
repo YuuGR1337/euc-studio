@@ -62,6 +62,10 @@ interface UiState {
   layoutEpoch: number;
   /** Play the wheel's buzzer through the speakers (on by default). */
   buzzerSound: boolean;
+  /** The master volume of the buzzer and the ride sound, 0 to 1 (the slider's position). */
+  soundVolume: number;
+  /** Mute the buzzer and the ride sound, keeping the volume. */
+  soundMuted: boolean;
 
   navigate: (route: Route) => void;
   setAccent: (accent: AccentName) => void;
@@ -76,6 +80,8 @@ interface UiState {
   setShortcutsOpen: (open: boolean) => void;
   setRecordingsOpen: (open: boolean) => void;
   setBuzzerSound: (on: boolean) => void;
+  setSoundVolume: (volume: number) => void;
+  setSoundMuted: (muted: boolean) => void;
 }
 
 const DEFAULT_DOCKS: DockState = { right: true, bottom: true };
@@ -98,6 +104,14 @@ const initialAccent: AccentName =
   storedAccent in accents ? (storedAccent as AccentName) : DEFAULT_ACCENT;
 applyAccent(initialAccent);
 
+/** The stored master volume, 0 to 1; 0.8 by default and for anything unreadable. */
+function storedVolume(): number {
+  const value = readStored<unknown>("soundVolume", 0.8);
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 1
+    ? value
+    : 0.8;
+}
+
 export const useUi = create<UiState>((set, get) => ({
   route: initialRoute,
   workspace: initialRoute === "gallery" ? "ride" : initialRoute,
@@ -118,6 +132,8 @@ export const useUi = create<UiState>((set, get) => ({
   recordingsOpen: false,
   layoutEpoch: 0,
   buzzerSound: readStored<boolean>("buzzerSound", true) !== false,
+  soundVolume: storedVolume(),
+  soundMuted: readStored<boolean>("soundMuted", false) === true,
 
   navigate: (route) => {
     if (get().route === route) return;
@@ -162,6 +178,15 @@ export const useUi = create<UiState>((set, get) => ({
   setBuzzerSound: (buzzerSound) => {
     writeStored("buzzerSound", buzzerSound);
     set({ buzzerSound });
+  },
+  setSoundVolume: (volume) => {
+    const soundVolume = Math.min(1, Math.max(0, Number.isFinite(volume) ? volume : 0));
+    writeStored("soundVolume", soundVolume);
+    set({ soundVolume });
+  },
+  setSoundMuted: (soundMuted) => {
+    writeStored("soundMuted", soundMuted);
+    set({ soundMuted });
   },
 }));
 

@@ -75,6 +75,11 @@ pub trait Host {
     }
     /// Buzzer changes since the last call, at their exact simulated time.
     fn drain_tones(&mut self, _out: &mut Vec<Tone>) {}
+    /// What the ride sounds like at this sample (motor, tyre, wind), from `snapshot` and the
+    /// host's own state; None for a host whose rides make no sound but the buzzer.
+    fn ride_sound(&self, _snapshot: &Snapshot) -> Option<super::native_audio::Ride> {
+        None
+    }
     /// Takes manual control of the rider (keyboard, gamepad), or gives it back (`None`). A host
     /// without a rider ignores it.
     fn set_manual(&mut self, _manual: Option<Manual>) {}

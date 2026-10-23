@@ -839,6 +839,32 @@ impl FreeRideHost {
     }
 }
 
+/// The tread's knob repeats round the tyre: "staggered rectangular knobs, 15 repeats of 24 deg",
+/// measured on the scan (profiles/begode-extreme/geometry.toml, [tire] tread).
+const KNOB_REPEATS: f64 = 15.0;
+
+/// A sample of the ride's sound from the snapshot: the motor's electrical frequency (pole pairs ×
+/// wheel revolutions per second) and phase current, the speed, the tread's knob rate and the
+/// ground under the wheel (a world's; asphalt and dry off one). None while a signal is missing.
+fn ride_sound(
+    snapshot: &Snapshot,
+    pole_pairs: u32,
+    surface: Option<euc_world::Surface>,
+) -> Option<super::native_audio::Ride> {
+    let signals = &snapshot.signals;
+    let wheel_rev_s = f64::from(signals.wheel_rad_s).abs() / std::f64::consts::TAU;
+    let ride = super::native_audio::Ride {
+        t_s: snapshot.t_s,
+        electrical_hz: f64::from(pole_pairs) * wheel_rev_s,
+        phase_current_a: f64::from(signals.iq_a).abs(),
+        speed_mps: f64::from(signals.speed_kmh).abs() / 3.6,
+        knob_hz: KNOB_REPEATS * wheel_rev_s,
+        surface: surface.map_or(euc_world::Material::Asphalt, |s| s.material),
+        wet: surface.is_some_and(|s| s.wet),
+    };
+    ride.valid().then_some(ride)
+}
+
 impl Host for FreeRideHost {
     fn step(&mut self, sim_s: f64) {
         let count = (sim_s / self.session.sample_period_s()).round().max(1.0) as u32;
@@ -898,6 +924,11 @@ impl Host for FreeRideHost {
     fn drain_tones(&mut self, out: &mut Vec<Tone>) {
         self.watch.drain_tones(out);
     }
+    fn ride_sound(&self, snapshot: &Snapshot) -> Option<super::native_audio::Ride> {
+        let pole_pairs = self.session.machine().plant().live_part()?.electrical().params().motor.pole_pairs;
+        let surface = self.physics().ground_surface();
+        ride_sound(snapshot, pole_pairs, surface)
+    }
     fn handler_counters(&self) -> Option<super::tune::HandlerCounters> {
         self.session.machine().isr_metrics_available().then(|| super::tune::handler_counters(self.session.machine()))
     }
@@ -928,6 +959,27 @@ mod tests {
 
     const EPOCH: u64 = 42;
     const SOURCE: InputSource = InputSource::KeyboardSlider;
+
+    #[test]
+    fn a_ride_sound_sample_carries_the_motor_the_tread_and_the_ground() {
+        let mut snapshot = Snapshot { t_s: 3.0, ..Snapshot::default() };
+        snapshot.signals.wheel_rad_s = -20.0;
+        snapshot.signals.iq_a = -35.0;
+        snapshot.signals.speed_kmh = -16.2;
+        let wet_setts = euc_world::Surface::of(euc_world::Material::Cobblestones, true);
+        let ride = super::ride_sound(&snapshot, 26, Some(wet_setts)).unwrap();
+        let rev_s = 20.0 / std::f64::consts::TAU;
+        assert!((ride.electrical_hz - 26.0 * rev_s).abs() < 1e-9);
+        assert!((ride.knob_hz - 15.0 * rev_s).abs() < 1e-9);
+        assert_eq!((ride.t_s, ride.phase_current_a), (3.0, 35.0));
+        assert!((ride.speed_mps - 4.5).abs() < 1e-6);
+        assert_eq!((ride.surface, ride.wet), (euc_world::Material::Cobblestones, true));
+        // Off a world: asphalt, dry. A missing signal: no sample.
+        let pad = super::ride_sound(&snapshot, 26, None).unwrap();
+        assert_eq!((pad.surface, pad.wet), (euc_world::Material::Asphalt, false));
+        snapshot.signals.speed_kmh = f32::NAN;
+        assert!(super::ride_sound(&snapshot, 26, None).is_none());
+    }
 
     fn spec(model: &str) -> FreeRideSpec {
         FreeRideSpec {

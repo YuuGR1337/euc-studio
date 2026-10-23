@@ -56,6 +56,7 @@ pub fn run() {
             engine::recordings::recordings_status,
             engine::recordings::recordings_suggest_filename,
             engine::engine_sound,
+            engine::engine_sound_mix,
             engine::engine_audio_status,
             engine::engine_set_firmware,
             engine::engine_import_scenario,
