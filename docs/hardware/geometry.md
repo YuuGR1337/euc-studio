@@ -209,48 +209,45 @@ kept or dropped.
 
 The side pad covers are not in the scan (the scanned packs show their bare outer faces with rivet
 rows). The render model sculpts them from the owner's two photos of a removed cover (2026-10-22:
-one from above, one low from its front end) and a retailer's parts diagram (not in the repo; its
-left and right side pads). Their shape is INFERRED; their size and place are ESTIMATES.
+one from above, one low from its front end), sizes and places them from the owner's side photo of
+the wheel with the cover mounted (2026-10-22), and checks them against a retailer's parts diagram
+(not in the repo; its left and right side pads). The owner's words: the pads start below the top
+of the battery case.
 
-- **How the shape was measured.** Twenty points of the cover (the hole, the lettering block's top
-  corners, the three screw heads, groove ends, the round block's top, and six points where the
-  cover touches the floor) were picked in both photos. A bundle adjustment with the phone's known
-  focal length (48 mm equivalent) solves both cameras and the points together: 5.5 px RMS in the
-  top photo and 3.1 px in the low one. The floor is the cover's mounting face, so each point's
+- **Shape (INFERRED).** Twenty points of the cover (the hole, the lettering block's top corners,
+  the three screw heads, groove ends, the round block's top, and six points where the cover touches
+  the floor) were picked in both photos of the removed cover. A bundle adjustment with the phone's
+  known focal length (48 mm equivalent) solves both cameras and the points together: 5.5 px RMS in
+  the top photo and 3.1 px in the low one. The floor is the cover's mounting face, so each point's
   height above the floor is how far it stands out from the packs. Outlines come from the top
-  photo, projected onto the plane of their face. A fit of the diagram's left pad picture to the
-  same points (9 px RMS) gives the diagram views.
+  photo, projected onto the plane of their face.
 - **What it is.** A C of moulded black plastic, open at the back with 3.5 mm walls (ESTIMATE): a
   lettering block at the front top (its lettered face slopes from its top face to the mounting
   face; the hole in its top face; the maker's lettering is left out); an upper arm running back
-  as a bar about 32 mm deep, clear of the mounting face, that ramps up into a raised end block (the
-  upper arm's rear leg); a spine down from the lettering block, also clear of the mounting face;
-  the lower arm, solid to the mounting face, with three diagonal grooves, its front end and rear
-  end sloping down to the packs; on the lower arm a slotted block by the spine (two pockets, one
-  with a screw in its floor, and a shallow tray at its front) and a round-topped block at the rear
-  end; three steel screw heads. Edges are rounded 4-18 mm and the elements blend with 7 mm
-  fillets.
-- **Size: 401 x 320 mm, 106 mm deep, ESTIMATE.** The photos give the proportions, not the scale.
-  The scale is the diagram's median per-part scale (0.96 mm per px): 401 mm long, 372-447 mm over
-  the diagram's per-part range (370-510 mm from the screw heads in the photo). Heights above the
-  mounting face at that scale (INFERRED, +-20 % from the reconstruction): upper arm and lower arm
-  59-60 mm, lettering block 95 mm, slotted block rim 70-92 mm, end block and round block 108 mm.
-- **Place: ESTIMATE +-40 mm.** The cover's screw holes could not be matched to frame holes: the
-  scan shows none on the packs' outer faces under the footprint (only rivets), so the mounts are
-  hidden. The place follows the photos: the cover-off photos expose the linkage, and the early
-  photos show the arms' rear-end blocks outboard of the linkage at its rear. So the arms end
-  beside the rocker's rear lobes (x -205 mm), the C opens around the linkage, the spine is at the
-  front (x +196 mm), the top edge at z 476 mm, and the mounting face on the packs' outer faces at
-  |y| 102.5 mm (the scan reaches |y| 102.0 under the footprint, nothing further out). The outer
-  faces then reach |y| 162-210 mm, inside the deployed pedals (|y| 247 mm).
+  as a bar clear of the mounting face that ramps up into a raised end block (the upper arm's rear
+  leg); a spine down from the lettering block, also clear of the mounting face; the lower arm,
+  solid to the mounting face, with three diagonal grooves, its front and rear ends sloping down to
+  the packs; on the lower arm a slotted block by the spine (two pockets, one with a screw in its
+  floor, and a shallow tray at its front) and a round-topped block at the rear end; three steel
+  screw heads. Edges are rounded 4-18 mm and the elements blend with 7 mm fillets.
+- **Size and place (MEASURED from the mounted photo).** The camera of the side photo is solved
+  from points that are in the scan or the model: pack rivets, the rocker's top-eye bolt and empty
+  hole, the rear handle's roller bolt and its three windows (6.9 px RMS, with the phone's 24 mm
+  equivalent focal length). The cover's own points (the hole, the three screws, the groove ends,
+  the round block's top) then fix its place, scale and in-plane proportions (4.5 px RMS): 366 +-8
+  mm long and 299 +-6 mm tall, x -182 to +184 mm, z 55 to 354 mm (+-6 mm), turned 2.6 degrees nose
+  up. Its top is 16 mm below the packs' top (370 mm), as the owner says; its bottom edge is 43 mm
+  above the deployed pedals' top. Against the removed-cover photos the mounted cover is 2.4 %
+  shorter across (up-down), within their error. The mounting face sits on the packs' outer faces
+  at |y| 102.5 mm (from the scan; a side view does not show depth).
+- **How far it stands out (INFERRED at that scale, +-20 %).** Arms 54-55 mm above the packs,
+  lettering block 87 mm, slotted block rim 70-84 mm, end block and round block 99 mm; outer faces
+  at |y| 157-202 mm, inside the deployed pedals (|y| 247 mm).
 - **Calf contact faces (for a later leg-pad contact model).** The outer faces where the rider's
-  legs can rest are listed in `geometry.toml` `[pad_covers] contact_faces` (ESTIMATE, from the
-  element outlines above): the lettering block's top, the upper arm, the end block's top, the
-  round block's top and the lower arm.
+  legs can rest are listed in `geometry.toml` `[pad_covers] contact_faces` (from the element
+  outlines above): the lettering block's top, the upper arm, the end block's top, the round
+  block's top and the lower arm.
 - **Not physics.** The covers have no collision solid and no mass in `plant.toml`.
-
-The owner's length of a removed cover with a tape and one photo of it mounted, from the side, will
-replace the size and the place.
 
 ## Rolling radius and the electrical model
 
@@ -336,8 +333,8 @@ height does not change (same thickness and pin), so `pedal_below_axle_m` stays.
 
 ## The render model
 
-`app/public/models/begode-extreme/` holds three levels of detail (LOD0 340k triangles 2.9 MB, LOD1
-134k 1.4 MB, LOD2 48k 0.43 MB, meshopt compressed). Its README lists the nodes. How it is made from
+`app/public/models/begode-extreme/` holds three levels of detail (LOD0 332k triangles 2.8 MB, LOD1
+135k 1.3 MB, LOD2 51k 0.43 MB, meshopt compressed). Its README lists the nodes. How it is made from
 the scan (the tools live in the private research folder):
 
 1. **Parts.** Simple rules split the scan: tire (wheel pieces that reach the tread), hub, seat
@@ -385,8 +382,14 @@ the scan (the tools live in the private research folder):
    replace are removed; what remains of the scan there (brackets, a sloped base plate) is cleaned
    (loose flaps under 150 mm2 dropped, holes closed, smoothed). The roller is cut out of the seat
    before decimation, and its end caps (speakers) are modelled from their measured profile. The
-   **side pad covers** are sculpted from the owner's photos, an ESTIMATE in size and place ("Pad
-   covers" above), grained like the shell.
+   **side pad covers** are sculpted from the owner's photos and placed from the mounted photo ("Pad
+   covers" above), grained like the shell. The **front handle** is the same orange CNC part as the
+   rear one (the owner; the parts diagram's front handle parts and black crossbar): per side an arm
+   with a foot bolted to the frame's front top by 2 x 2 bolts, rising from the foot's front end and
+   leaning back to the crossbar. Its outline and three windows come from the scan's side plates
+   (both sides agree), its faces from the scan (|y| 59.5-67.5 mm, the foot raised to 74 mm); the
+   foot bolts match the mounted photo within 5 px. The crossbar stays the scan's 20 mm tube, black
+   like the rear grip.
 7. **No trademarks.** The brand emblem pressed into the seat top is flattened (a quadratic surface
    fitted to the plain ring around it), the pedal band stays plain, and the shock carries no brand
    marks.
@@ -398,7 +401,8 @@ the scan (the tools live in the private research folder):
 9. **Looks.** The scan has no colour. Materials follow the owner's photos: textured dark-grey shell
    (a tileable grain normal map on LOD0 and LOD1), black rubber tire, matte black motor covers, orange
    flange ring, textured matte black linkage plates, smoked grey tail-light sleeves (they glow with
-   the LEDs in the studio), satin aluminium handle tube, black anodised pedals with steel pins,
+   the LEDs in the studio), orange front handle arms with a black crossbar, black anodised pedals
+   with steel pins,
    smoked display window. Ambient occlusion is baked into the vertex colours. The anodised orange
    is set from the owner's photo (mean sRGB 184, 91, 47 on the handle). Under the studio's lights
    (neutral tone mapping, neutral rim light) the handle, the chrome bolt heads and the shell render
@@ -415,8 +419,7 @@ What the owner can measure to close the remaining gaps (centre to centre, in mm)
   the sag: push a slider pipe's O-ring down to its seal, stand on the wheel, step off and measure
   how far the O-ring rose; or the spring preload (how far the collar is wound down from the
   spring's free length). With both, the leverage becomes a measured curve.
-- **Pad covers.** The length of a removed cover with a tape, and one photo of it mounted, from the
-  side (the model's cover is an ESTIMATE, "Pad covers" above).
+- **Pad covers.** A tape length of a removed cover would check the photo-measured 366 mm.
 - **Shock stroke.** Printed on the shock or in its listing (55 mm is an ESTIMATE, 50-57 mm range).
 - **Pedals.** The deck's width at the middle (hinge edge to outer edge) and its thickness, with a
   tape; and the hinge rod's length if it comes out.

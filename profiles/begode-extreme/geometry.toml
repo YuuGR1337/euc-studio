@@ -102,6 +102,13 @@ y_m = [-0.0931, 0.0914]
 
 [handle]
 # Front carry handle: a 20 mm tube along y between two side plates. MEASURED (circle fit 0.02 mm)
+# The plates are orange CNC arms like the rear handle's (the owner; the mounted side photo; the parts
+# diagram's front handle parts), each with a foot bolted to the frame top by 2 x 2 bolts; the
+# tube is black.
+arm_faces_y_m = [0.0595, 0.0675]       # MEASURED (scan): inner and outer face, +-y
+arm_foot_outer_y_m = 0.074             # MEASURED (scan): the foot stands out further
+arm_bounds_xz_m = [[0.111, 0.1875], [0.3645, 0.485]]  # MEASURED (scan outline)
+foot_bolts_xz_m = [[0.124, 0.387], [0.139, 0.387], [0.124, 0.403], [0.139, 0.403]]  # ESTIMATE, match the mounted side photo within 5 px
 tube_centre_m = [0.1323, 0.0, 0.4738]
 tube_radius_m = 0.0100
 tube_half_length_m = 0.069
@@ -265,28 +272,30 @@ pedal_left = { centre = [0.0, 0.1763, 0.0075], half = [0.145, 0.0675, 0.0045] }
 pedal_right = { centre = [0.0, -0.1763, 0.0075], half = [0.145, 0.0675, 0.0045] }
 
 # Side pad covers: C-shaped moulded covers of textured black plastic, not in the scan. Shape INFERRED
-# from a two-view reconstruction of the owner's photos of a removed cover (5.5 / 3.1 px RMS) and a
-# retailer's parts diagram; size and place ESTIMATE (docs/hardware/geometry.md "Pad covers"). Left
-# cover; mirror y for the right. Drawing only: no collision solid, no mass.
+# from a two-view reconstruction of the owner's photos of a removed cover (5.5 / 3.1 px RMS); size
+# and place MEASURED from the owner's side photo with the cover mounted (camera 6.9 px RMS on scan
+# points, the cover's points 4.5 px RMS); docs/hardware/geometry.md "Pad covers". Left cover;
+# mirror y for the right. Drawing only: no collision solid, no mass.
 [pad_covers]
 in_scan = false
-length_m = 0.401               # ESTIMATE: 0.372-0.447 (diagram scales), 0.370-0.510 (photo screw heads)
-height_m = 0.320               # ESTIMATE, same scale
-depth_m = 0.106                # INFERRED proportion at that scale (+-20 %): mounting face to the end and round blocks' tops
-heights_m = { arms = 0.060, lettering_block = 0.095, slotted_block_rim = [0.070, 0.092], end_block = 0.108, round_block = 0.108 }  # INFERRED, above the mounting face
+length_m = 0.366               # MEASURED (mounted photo) +-0.008
+height_m = 0.299               # MEASURED (mounted photo) +-0.006
+depth_m = 0.099                # INFERRED (+-20 %): mounting face to the end and round blocks' tops
+heights_m = { arms = 0.055, lettering_block = 0.087, slotted_block_rim = [0.070, 0.084], end_block = 0.099, round_block = 0.099 }  # INFERRED, above the mounting face
 wall_m = 0.0035                # ESTIMATE: open-backed moulded walls
-x_range_m = [-0.205, 0.196]    # ESTIMATE +-0.040: arms' rear ends beside the rocker's rear lobes, spine at the front
-z_range_m = [0.157, 0.476]     # ESTIMATE +-0.040: the upper arm's lower edge just above the rocker plates
+x_range_m = [-0.182, 0.184]    # MEASURED (mounted photo) +-0.006
+z_range_m = [0.055, 0.354]     # MEASURED (mounted photo) +-0.006: the top 16 mm below the packs' top
+pitch_deg = 2.6                # MEASURED (mounted photo): nose up
 inner_y_m = 0.1025             # on the packs' outer faces (the scan reaches 0.1020 under the footprint)
-outer_y_m = 0.2085             # the end and round blocks; arms at about 0.162
-screws_m = [[-0.119, 0.166, 0.432], [-0.115, 0.164, 0.224], [0.116, 0.169, 0.231]]  # INFERRED: the three visible screw heads (upper arm, lower arm, slotted block)
-# Where the rider's legs can rest (a later leg-pad contact model): outer faces, ESTIMATE
+outer_y_m = 0.2015             # the end and round blocks; arms at about 0.157
+screws_m = [[-0.104, 0.160, 0.311], [-0.103, 0.159, 0.125], [0.108, 0.163, 0.122]]  # MEASURED (mounted photo): the three visible screw heads (upper arm, lower arm, slotted block)
+# Where the rider's legs can rest (a later leg-pad contact model): outer faces (INFERRED depth)
 contact_faces = [
-  { name = "lettering_block_top", x_m = [0.060, 0.118], z_m = [0.376, 0.457], y_m = 0.1980 },
-  { name = "upper_arm", x_m = [-0.116, 0.060], z_m = [0.382, 0.464], y_m = 0.1618 },
-  { name = "end_block_top", x_m = [-0.155, -0.127], z_m = [0.405, 0.442], y_m = 0.2107 },
-  { name = "round_block_top", x_m = [-0.164, -0.108], z_m = [0.256, 0.303], y_m = 0.2105 },
-  { name = "lower_arm", x_m = [-0.158, 0.136], z_m = [0.159, 0.259], y_m = 0.1626 },
+  { name = "lettering_block_top", x_m = [0.059, 0.114], z_m = [0.252, 0.324], y_m = 0.1899 },
+  { name = "upper_arm", x_m = [-0.101, 0.060], z_m = [0.259, 0.336], y_m = 0.1568 },
+  { name = "end_block_top", x_m = [-0.137, -0.111], z_m = [0.288, 0.321], y_m = 0.2015 },
+  { name = "round_block_top", x_m = [-0.146, -0.096], z_m = [0.154, 0.196], y_m = 0.2013 },
+  { name = "lower_arm", x_m = [-0.142, 0.125], z_m = [0.059, 0.159], y_m = 0.1575 },
 ]
 
 # The cleaned render model (public), see app/public/models/begode-extreme/README.md.
