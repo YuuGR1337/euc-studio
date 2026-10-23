@@ -600,6 +600,13 @@ pub struct RiderControl {
     /// Manual control only: fastest change of the forward lean, degrees per second
     /// (`lean_rate_deg_s` for scripted riding).
     pub manual_lean_rate_deg_s: f64,
+    /// Manual drive only (`Intent::Accel`): largest forward or backward lean, degrees
+    /// (`lean_max_deg` everywhere else). It sets the drive caps: `g·tan(lean)` minus or plus drag.
+    pub manual_drive_lean_max_deg: f64,
+    /// Manual drive only: extra acceleration asked per m/s that the reference speed leads the
+    /// measured speed, 1/s (the lead is capped at 0.5 m/s). It holds speed against what the lean
+    /// for the drag alone does not cover.
+    pub manual_drive_kp: f64,
 }
 
 impl Default for RiderControl {
@@ -631,6 +638,8 @@ impl Default for RiderControl {
             manual_turn_lean_max_deg: 35.0,
             manual_turn_lean_rate_deg_s: 60.0,
             manual_lean_rate_deg_s: 30.0,
+            manual_drive_lean_max_deg: 22.0,
+            manual_drive_kp: 1.2,
         }
     }
 }
@@ -661,6 +670,7 @@ impl RiderControl {
             ("manual_turn_rate_max_rad_s", self.manual_turn_rate_max_rad_s),
             ("manual_turn_lean_rate_deg_s", self.manual_turn_lean_rate_deg_s),
             ("manual_lean_rate_deg_s", self.manual_lean_rate_deg_s),
+            ("manual_drive_kp", self.manual_drive_kp),
         ];
         for (name, value) in nonnegative {
             if !value.is_finite() || value < 0.0 {
@@ -677,8 +687,12 @@ impl RiderControl {
         if !self.twist_fade_mps.is_finite() || self.twist_fade_mps <= 0.0 {
             return Err(ParamError("rider.control.twist_fade_mps must be finite and positive".into()));
         }
-        if !self.lean_max_deg.is_finite() || !(0.0..90.0).contains(&self.lean_max_deg) {
-            return Err(ParamError("rider.control.lean_max_deg must be finite and in [0, 90)".into()));
+        for (name, value) in
+            [("lean_max_deg", self.lean_max_deg), ("manual_drive_lean_max_deg", self.manual_drive_lean_max_deg)]
+        {
+            if !value.is_finite() || !(0.0..90.0).contains(&value) {
+                return Err(ParamError(format!("rider.control.{name} must be finite and in [0, 90)")));
+            }
         }
         if !self.tiltback_feel_deg.is_finite() || !(0.0..=90.0).contains(&self.tiltback_feel_deg) {
             return Err(ParamError("rider.control.tiltback_feel_deg must be finite and in [0, 90]".into()));

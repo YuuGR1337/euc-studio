@@ -1315,7 +1315,7 @@ impl Ride {
         let mut snapshot = session.step();
         snapshot.signals.target_speed_kmh = match intent {
             Intent::Speed(v) => (v * 3.6) as f32,
-            Intent::Lean(_) => f32::NAN,
+            Intent::Lean(_) | Intent::Accel(_) => f32::NAN,
         };
         let physics = session.machine().plant().live_part().map(crate::plant::Live::physics);
         let state = physics.map(euc_physics::Physics::state);

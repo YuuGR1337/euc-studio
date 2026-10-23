@@ -253,6 +253,28 @@ DEFAULT 1000 N·m/rad, 60 N·m·s/rad, 180 N·m), so they give under a bump and 
   a full turn input at a stop turned the wheel 3.75 rad in 1.5 s, and at 3.8-4.1 m/s it settled at
   6.8-7.0 m/s² of lateral acceleration with 34° of lean. Scripted riding keeps its limits (1.0 rad/s,
   20°, 30°/s, 12°/s, no turning at a stop), so no scenario changes.
+- **Manual drive** (Free Ride's drive mode; `Intent::Accel`, by hand only). The rider is asked for
+  an acceleration, net of drag, instead of a lean. It leans for the ask plus the drag at the speed
+  now, `tan(lean) = (a + drag) / g`. It also follows a reference speed that the asks add up to,
+  adding `manual_drive_kp` (1.2 /s) per m/s that the reference leads. An ask carries the reference at
+  most 0.5 m/s past the wheel, so a wheel the firmware holds back does not wind the rider up. The
+  reference never follows the wheel's speed ripple (about ±0.25 m/s at 2.5 Hz at 40 km/h): a
+  clamp to the measured speed ratcheted it down and lost 7 km/h in 10 s. With no ask after a half
+  throttle to 40 km/h the speed overshoots to 44 km/h as the lean returns and stays at 40-44 km/h
+  for 10 s. A brake after a ride eases near the stop (at most
+  2.5 /s times the reference) and ends at zero. The rider holds the stop while the brake stays,
+  and a brake let go below 0.5 m/s also stops; the wheel then rocks within ±0.6 km/h while the
+  pedals settle. Only a new back ask from rest reverses. In a
+  firmware tiltback the rider eases off as in speed mode; there is no other hidden assist.
+  The lean limit is its own, `manual_drive_lean_max_deg` (22°; `lean_max_deg` stays 15°).
+  Measured on stock (2026-10-23, city world, articulated rider): the wheel follows every limit
+  from 15° to 22° at low speed, at 0.83 to 0.84 of the ask (2.1 m/s² at 15°, 3.25 m/s² at 22°),
+  and no limit made it fall below 50 km/h. 22°, the largest limit allowed, is therefore used;
+  overlean stays possible and visible. Normal riding at half throttle (40 km/h and a stop) is fine
+  at 100, 50 and 20 % charge. No top-speed result is recorded yet. Above about 55 km/h the motor
+  plant saturates: its modulation reaches 100 % at about 68 km/h on a full pack, while the
+  firmware's own PWM figure reads about 70 %. The owner's report has the real wheel at 78 km/h on
+  an 80 % pack with headroom left, so the plant is being calibrated against the owner's ride log.
 - **Foot state.** `Physics::feet()` reports each foot: contact, the pedal's normal load and friction,
   and how far the sole has moved on its deck since the model was built (slip) and above it (lift).
 - **Leaving.** A step-off, a let-go and (contact feet) a lost footing release the pedal welds or
@@ -490,6 +512,7 @@ Rider and aids (scenario `[rider]`, `[rider.control]`, `[assist]`; these are the
 | `control.tiltback_feel_deg`, `tiltback_ease_kmh_per_deg`, `tiltback_ease_brake` | 2°, 1.5 km/h per degree, 1 m/s² | DEFAULT: how a rider reacts to tiltback |
 | `control.steer_kp`, `steer_kd`, `steer_max_nm` | 2000 N·m/rad, 200 N·m·s/rad, 60 N·m | DEFAULT: how a rider keeps the line |
 | `control.manual_turn_rate_max_rad_s`, `manual_turn_lean_max_deg`, `manual_turn_lean_rate_deg_s`, `manual_lean_rate_deg_s` | 2.5 rad/s, 35°, 60°/s, 30°/s | DEFAULT, riding by hand only (Free Ride, Ride's manual mode): the turn cap at a stop, falling with speed to `g·tan(35°)/v`; scripted riding keeps 1.0 rad/s, 20°, 30°/s and 12°/s |
+| `control.manual_drive_lean_max_deg`, `manual_drive_kp` | 22°, 1.2 /s | DEFAULT, manual drive only (`Intent::Accel`): the drive lean limit (stock follows up to 22° at low speed) and the reference-speed gain (tuned on stock at 40 km/h: holds speed, stops cleanly) |
 | `let_go.enabled`, `after_cut_deg`, `fall_deg`, `reaction_s` | true, 20°, 45°, 0.1 s | DEFAULT: when a rider leaves a wheel that goes down |
 | `assist.roll_stiffness`, `roll_damping` | 5000 N·m/rad, 500 N·m·s/rad | on the shell; for `articulated_contact_v1` also on the upper body |
 

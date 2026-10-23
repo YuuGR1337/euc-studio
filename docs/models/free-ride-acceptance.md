@@ -17,6 +17,18 @@ guard. New stock tests, all on the streaming world, seed 42:
 | `stock_articulated_buttons_while_riding` | Handle hold, two handle presses and a power press at speed; the horn command over BLE; two handle presses at a stop | Ignored at 6.8 km/h; the horn sounds; at a stop the second press cuts the drive command to 1 (19 after the first) |
 | `stock_free_ride_keeps_no_ble_backlog` | 20 s with the runner's drains | 7,386 BLE bytes read, none left on the board |
 
+Drive mode (2026-10-23), same world and rider, the owner's preset unless named, with the world's
+total-mass fix (the rider senses the true air drag in the city):
+
+| Test | What it checks | Observed |
+|---|---|---|
+| `{stock,compat,clean}_drive_speed_step_and_tiltback` | Half throttle 0 to 20 km/h, 6 s with no ask, half brake to a stop; then full throttle 20 s on the blank preset (tiltback at 20 km/h); quanta 4000, 3000, 2000 | All 9 runs: 20 km/h in 3.53 s, 20.0-24.8 km/h with no ask, stop in 3.3 s, then a rock within ±0.55 km/h; in the tiltback the rider eases off, top 35.4-35.7 km/h, nobody falls |
+| `stock_drive_half_throttle_normal_ride_at_three_charges` | Half throttle to 40 km/h, 10 s with no ask, half brake, at 100, 50 and 20 % | 40 km/h in 6.7 s, 40.1-44.2 km/h with no ask, stop in 5.8 s, then a rock within ±0.6 km/h; no fall |
+
+The compat and clean images come from `firmware/build` (`EUC_FIRMWARE_DIR`). They must be built
+from the same tree as the probe map. Top speed is not tested: the motor plant saturates near
+68 km/h on a full pack, below the owner's report, and is being calibrated.
+
 The rigid crash and idle tests passed with the numbers in brackets. The respawn wall times come from
 a release build with four tests in parallel on the development Mac.
 

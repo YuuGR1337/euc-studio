@@ -782,6 +782,20 @@ impl Physics {
         &mut self.rider
     }
 
+    /// What resists motion, as the rider senses it: rolling resistance and air drag.
+    fn drag(&self) -> rider::Drag {
+        let setup = &self.setup;
+        let drag_area = 0.5 * setup.air_density * setup.rider.cda_m2;
+        rider::Drag { rolling: setup.wheel.tire.crr * setup.gravity, aero: drag_area / self.total_mass }
+    }
+
+    /// Manual drive limits at the speed now, m/s²: the strongest forward acceleration and the
+    /// strongest braking (positive) the drive lean limit can ask for, net of rolling resistance and
+    /// air drag (`RiderControl::manual_drive_lean_max_deg`). The firmware may deliver less.
+    pub fn drive_caps(&self) -> (f64, f64) {
+        self.rider.drive_caps(self.state().speed_mps, self.setup.gravity, self.drag())
+    }
+
     /// Sets desired world heading in radians. Rejects nonfinite input without changing state.
     /// This changes a target for the external yaw aid, never a pose or velocity.
     pub fn set_heading_target(&mut self, rad: f64) -> Result<(), String> {
@@ -1115,7 +1129,7 @@ impl Physics {
         let setup = &self.setup;
         let drag_area = 0.5 * setup.air_density * setup.rider.cda_m2;
         let aero = drag_area * att.speed * att.speed.abs();
-        let drag = rider::Drag { rolling: setup.wheel.tire.crr * setup.gravity, aero: drag_area / self.total_mass };
+        let drag = self.drag();
         let sense = rider::Sense {
             dt: TIMESTEP_S,
             speed: att.speed,

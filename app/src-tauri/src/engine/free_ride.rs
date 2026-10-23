@@ -15,6 +15,12 @@ use euc_telemetry::{BodyInfo, Event, Outputs, Snapshot};
 /// The watchdog: an input older than this counts as neutral controls (no lean, turn or crouch).
 const INPUT_TIMEOUT: Duration = Duration::from_millis(250);
 const MAX_LEAN_RAD: f64 = 10.0 * std::f64::consts::PI / 180.0;
+/// The largest drive ask a packet may carry, m/s² either way (the view scales its throttle to the
+/// status caps, which stay well below this).
+const MAX_ACCEL_MPS2: f64 = 12.0;
+/// Time constant of each of the two smoothing stages of the achieved acceleration in the status
+/// (the speed, then its change), seconds: the wheel's speed ripples at a few hertz.
+const ACCEL_FILTER_S: f64 = 0.3;
 /// A full crouch input, radians of knee flexion (`Physics::set_crouch` takes 0 to 1.2).
 const CROUCH_MAX_RAD: f64 = 1.2;
 /// Simulated seconds the firmware boots on the stand before the stand lets go and the controls
@@ -158,6 +164,11 @@ pub struct ManualInput {
     /// articulated rider bends toward it at the physics' crouch rate; the rigid rider ignores it.
     #[serde(default)]
     pub crouch: f64,
+    /// Drive mode: the asked acceleration, m/s², forward positive, net of rolling resistance and
+    /// air drag, at most 12 either way. When present the rider drives (`Intent::Accel`) and
+    /// `desired_lean_rad` must be 0; absent, the rider holds `desired_lean_rad`.
+    #[serde(default)]
+    pub desired_accel_mps2: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -188,6 +199,13 @@ pub struct FreeRideStatus {
     pub on_pedals: bool,
     /// Simulated seconds until the firmware has booted on the stand and the controls are live.
     pub boot_remaining_s: Option<f64>,
+    /// Drive mode: the strongest forward acceleration the rider's drive lean limit can ask for at
+    /// the speed now, m/s², net of drag. The firmware may deliver less; asking more overleans.
+    pub accel_cap_mps2: Option<f64>,
+    /// Drive mode: the strongest braking at the speed now, m/s² (positive), drag included.
+    pub brake_cap_mps2: Option<f64>,
+    /// The wheel's achieved acceleration along its heading, m/s², smoothed twice over 0.3 s.
+    pub accel_mps2: Option<f64>,
 }
 
 impl Default for FreeRideStatus {
@@ -212,6 +230,9 @@ impl Default for FreeRideStatus {
             crouch: None,
             on_pedals: false,
             boot_remaining_s: None,
+            accel_cap_mps2: None,
+            brake_cap_mps2: None,
+            accel_mps2: None,
         }
     }
 }
@@ -225,6 +246,10 @@ pub(super) struct HostReport {
     pub boot_remaining_s: Option<f64>,
     /// Where the wheel is on its world (world runs only), for a quick reset.
     pub world_pose: Option<WorldPose>,
+    /// Drive caps now: forward acceleration and braking, m/s².
+    pub drive_caps: (f64, f64),
+    /// Achieved acceleration, m/s², smoothed.
+    pub accel_mps2: f64,
 }
 
 #[derive(Default)]
@@ -398,6 +423,14 @@ impl FreeRideState {
         {
             return Err("Manual lean or turn rate is outside its limits".into());
         }
+        if let Some(accel) = input.desired_accel_mps2 {
+            if !accel.is_finite() || accel.abs() > MAX_ACCEL_MPS2 {
+                return Err("Drive acceleration is outside ±12 m/s²".into());
+            }
+            if input.desired_lean_rad != 0.0 {
+                return Err("Send a lean or a drive acceleration, not both".into());
+            }
+        }
         if inner.status.mode != "free_ride" || inner.status.epoch != input.run_epoch {
             return Err("Manual input belongs to an old run".into());
         }
@@ -473,6 +506,9 @@ impl FreeRideState {
         inner.status.crouch = report.crouch.and_then(number);
         inner.status.on_pedals = report.on_pedals;
         inner.status.boot_remaining_s = report.boot_remaining_s.and_then(number);
+        inner.status.accel_cap_mps2 = number(report.drive_caps.0);
+        inner.status.brake_cap_mps2 = number(report.drive_caps.1);
+        inner.status.accel_mps2 = number(report.accel_mps2);
         if report.world_pose.is_some() {
             inner.world_pose = report.world_pose;
         }
@@ -622,8 +658,11 @@ pub(super) struct FreeRideHost {
     /// The finite map's edges pause the run; a world has none.
     map: Option<Arc<HeightMap>>,
     boot_ready: bool,
-    /// The last manual lean, turn rate and crouch noted on the timeline.
-    last_motion: Option<(f64, f64, f64)>,
+    /// The last manual lean (or drive ask), turn rate and crouch noted on the timeline.
+    last_motion: Option<(Option<f64>, f64, f64, f64)>,
+    /// The smoothed speed, m/s, and the achieved acceleration, m/s², smoothed.
+    smooth_speed: Option<f64>,
+    accel_mps2: f64,
     /// Samples so far, to space the restart-spot checks.
     samples: u32,
     /// The last spot on a world where a reset may stand the wheel again ([`clear_spot`]).
@@ -646,6 +685,8 @@ impl FreeRideHost {
             map,
             boot_ready: false,
             last_motion: None,
+            smooth_speed: None,
+            accel_mps2: 0.0,
             samples: 0,
             last_clear: None,
             edge_paused: false,
@@ -681,6 +722,18 @@ impl FreeRideHost {
         let on_pedals = !physics.rider_off();
         let articulated = !physics.rider_joints().is_empty();
         let crouch = (articulated && on_pedals).then(|| physics.crouch_rad() / CROUCH_MAX_RAD);
+        let drive_caps = physics.drive_caps();
+        // The achieved acceleration: the change of the smoothed speed, smoothed again.
+        let dt = self.session.sample_period_s();
+        let gain = dt / (ACCEL_FILTER_S + dt);
+        if let Some(smooth) = self.smooth_speed {
+            let next = smooth + (speed - smooth) * gain;
+            self.accel_mps2 += ((next - smooth) / dt - self.accel_mps2) * gain;
+            self.smooth_speed = Some(next);
+        } else {
+            self.smooth_speed = Some(speed);
+        }
+        let physics = Self::physics_of(&mut self.session);
         // Where the wheel stands now on its world, and (every few samples, while the rider is still on
         // the pedals) whether a respawn may stand it there again: never where it fell.
         self.samples = self.samples.wrapping_add(1);
@@ -695,7 +748,15 @@ impl FreeRideHost {
                 self.last_clear = Some(here);
             }
         }
-        HostReport { turn_cap_rad_s, crouch, on_pedals, boot_remaining_s, world_pose: self.last_clear }
+        HostReport {
+            turn_cap_rad_s,
+            crouch,
+            on_pedals,
+            boot_remaining_s,
+            world_pose: self.last_clear,
+            drive_caps,
+            accel_mps2: self.accel_mps2,
+        }
     }
 
     fn sample(&mut self) {
@@ -753,22 +814,25 @@ impl FreeRideHost {
         }
     }
 
-    /// Rides with one manual input: lean, turn and crouch.
+    /// Rides with one manual input: lean or drive ask, turn and crouch.
     fn apply(&mut self, input: ManualInput) {
-        self.session.set_intent(Intent::Lean(input.desired_lean_rad));
+        self.session.set_intent(input.desired_accel_mps2.map_or(Intent::Lean(input.desired_lean_rad), Intent::Accel));
         // The rider turns its own line at the requested rate, within its manual turn cap.
         Self::physics_of(&mut self.session).rider().set_turn_rate(input.heading_rate_rad_s);
         if !self.physics().rider_joints().is_empty() && !self.physics().rider_off() {
             // The articulated rider bends at its crouch rate; the rigid one cannot crouch.
             let _ = self.session.set_crouch(input.crouch * CROUCH_MAX_RAD);
         }
-        let motion = (input.desired_lean_rad, input.heading_rate_rad_s, input.crouch);
+        let motion = (input.desired_accel_mps2, input.desired_lean_rad, input.heading_rate_rad_s, input.crouch);
         if self.last_motion != Some(motion) {
+            let ask = motion.0.map_or_else(
+                || format!("Manual lean {:.2} deg", motion.1.to_degrees()),
+                |accel| format!("Drive {accel:.2} m/s²"),
+            );
             self.session.note(format!(
-                "Manual lean {:.2} deg, turn {:.2} deg/s, crouch {:.0} %",
-                motion.0.to_degrees(),
-                motion.1.to_degrees(),
-                motion.2 * 100.0
+                "{ask}, turn {:.2} deg/s, crouch {:.0} %",
+                motion.2.to_degrees(),
+                motion.3 * 100.0
             ));
             self.last_motion = Some(motion);
         }
@@ -892,6 +956,7 @@ mod tests {
             heading_rate_rad_s: 0.0,
             armed: false,
             crouch: 0.0,
+            desired_accel_mps2: None,
         }
     }
 
@@ -1117,6 +1182,8 @@ mod tests {
             on_pedals: true,
             boot_remaining_s: Some(1.0),
             world_pose: Some(pose),
+            drive_caps: (2.5, 2.8),
+            accel_mps2: 0.4,
         };
         state.update_rider(EPOCH + 1, rider, report);
         let restart = state.restart_spec(EPOCH + 1, false).unwrap();
@@ -1127,6 +1194,10 @@ mod tests {
         assert_eq!(
             (status.turn_cap_rad_s, status.crouch, status.on_pedals, status.boot_remaining_s),
             (Some(2.5), Some(0.5), true, Some(1.0))
+        );
+        assert_eq!(
+            (status.accel_cap_mps2, status.brake_cap_mps2, status.accel_mps2),
+            (Some(2.5), Some(2.8), Some(0.4))
         );
         // A start place needs a world, and must be finite.
         assert!(FreeRideSpec { start: Some(pose), ..spec("articulated_sagittal_v1") }.validate().is_err());
@@ -1150,6 +1221,33 @@ mod tests {
         }
         state.input(ManualInput { ..packet(u32::MAX) }).unwrap();
         assert!(state.input(ManualInput { ..packet(0) }).is_err(), "sequence wrap needs a new run");
+    }
+
+    #[test]
+    fn a_drive_packet_carries_an_ask_within_12_and_no_lean() {
+        let state = ready_state();
+        let before = mailbox(&state);
+        for accel in [f64::NAN, f64::INFINITY, 12.0 + 1e-9, -12.0 - 1e-9] {
+            assert!(state.input(ManualInput { desired_accel_mps2: Some(accel), ..packet(2) }).is_err());
+            assert_eq!(mailbox(&state), before);
+        }
+        let both = ManualInput { desired_accel_mps2: Some(1.0), desired_lean_rad: 0.05, ..packet(2) };
+        assert!(state.input(both).is_err(), "a lean or an ask, not both");
+        assert_eq!(mailbox(&state), before);
+        for (seq, accel) in [(2, 12.0), (3, -12.0), (4, 0.0)] {
+            state.input(ManualInput { desired_accel_mps2: Some(accel), ..packet(seq) }).unwrap();
+            assert_eq!(state.current(EPOCH).unwrap().desired_accel_mps2, Some(accel));
+        }
+        let json = json!({
+            "run_epoch": EPOCH, "seq": 9, "source": "gamepad", "desired_lean_rad": 0.0,
+            "heading_rate_rad_s": 0.2, "crouch": 0.0, "desired_accel_mps2": 2.5
+        });
+        let parsed = serde_json::from_value::<ManualInput>(json).unwrap();
+        assert_eq!(parsed.desired_accel_mps2, Some(2.5));
+        let status = serde_json::to_value(&state.lock().status).unwrap();
+        for field in ["accel_cap_mps2", "brake_cap_mps2", "accel_mps2"] {
+            assert!(status.get(field).is_some(), "the status names {field}");
+        }
     }
 
     #[test]
@@ -1469,6 +1567,7 @@ mod stock_rider_acceptance {
             heading_rate_rad_s: 0.0,
             armed: false,
             crouch: 0.0,
+            desired_accel_mps2: None,
         }
     }
 
@@ -2502,6 +2601,248 @@ mod stock_rider_acceptance {
     #[ignore = "needs cached pinned stock firmware; play mode: handle and power buttons while riding"]
     fn stock_articulated_buttons_while_riding() {
         buttons_while_riding("articulated_sagittal_v1");
+    }
+
+    /// The seed-42 city with an ideal road (no potholes, manholes, cracks, rough or wet patches,
+    /// speed bumps): the drive tests measure firmware and rider, not the road. The spawn is on the
+    /// arterial, heading along it.
+    fn ideal_city() -> WorldChoice {
+        let densities = euc_world::Densities {
+            potholes: 0.0,
+            manholes: 0.0,
+            cracks: 0.0,
+            rough_patches: 0.0,
+            wet_patches: 0.0,
+            speed_bumps: 0.0,
+            ..euc_world::Densities::default()
+        };
+        WorldChoice { seed: 42, densities }
+    }
+
+    /// A Free Ride on [`ideal_city`] driven by drive packets, with the firmware, settings preset,
+    /// battery charge and largest CPU quantum under test.
+    struct Drive {
+        host: FreeRideHost,
+        state: FreeRideState,
+        seq: u32,
+        events: Vec<euc_telemetry::Event>,
+    }
+
+    impl Drive {
+        fn new(model: &str, firmware: &str, settings: &str, soc: f64, quantum: u32) -> Self {
+            require_cached_stock();
+            let state = FreeRideState::default();
+            let choice = ideal_city();
+            let spec = FreeRideSpec {
+                wheel: "begode-extreme".into(),
+                settings: settings.into(),
+                rider_model: model.into(),
+                map: None,
+                world: Some(choice),
+                start: None,
+            };
+            let rider = spec.rider().unwrap();
+            let files = euc_sim::WheelFiles::load(&ProfileSource::Builtin, "begode-extreme").unwrap();
+            let board =
+                if settings == "blank" { files.board.clone() } else { files.board_with_settings(settings).unwrap() };
+            let loaded = super::super::images::load(&files, firmware, &mut |_| {}).unwrap();
+            let world = super::super::world::shared(choice.spec()).unwrap();
+            let spawn = world.spawn();
+            let start = euc_physics::WorldStart {
+                xy_m: [spawn.position[0], spawn.position[1]],
+                heading_rad: spawn.heading[1].atan2(spawn.heading[0]),
+            };
+            let ground = euc_physics::WorldGround::with_world(world, start).unwrap();
+            state.begin_world(EPOCH, ground.clone(), rider);
+            let live = files.live_on_world(rider, Default::default(), ground).unwrap();
+            let config = euc_sim::MachineConfig {
+                board: &board,
+                stockmap: loaded.map.as_ref(),
+                image: &loaded.image,
+                load_addr: files.profile.board.app.base,
+                hclk: files.hclk(),
+                plant: euc_sim::PlantState::default(),
+                injections: Vec::new(),
+                power_cycles: Vec::new(),
+                cpi: euc_sim::DEFAULT_CPI,
+                exception_timing: loaded.exception_timing(),
+                max_quantum: quantum,
+                marker_window_s: 4.0,
+            };
+            let machine =
+                euc_sim::Machine::new_live(&config, &euc_sim::registry(), loaded.factory().unwrap(), live).unwrap();
+            let mut session = Session::new(machine, loaded.map.as_ref(), 120.0);
+            if soc < 1.0 {
+                // The scenarios' own battery_soc fault, from a one-entry timeline.
+                let text = format!(
+                    "schema = 1\nname = \"soc\"\ndescription = \"soc\"\nwheel = \"begode-extreme\"\nseconds = 10.0\n\
+                     release_s = 1.0\nspeed_kmh = [[0, 0]]\n[[timeline]]\nat_s = 0.0\nfault = \"battery_soc\"\nsoc = {soc}\n"
+                );
+                let scenario = euc_sim::scenario::Scenario::from_toml(&text).unwrap();
+                let euc_sim::scenario::Fault::Plant(fault) = scenario.faults[0].fault.clone() else {
+                    unreachable!("battery_soc is a plant fault")
+                };
+                let live = session.machine_mut().plant_mut().live_part_mut().unwrap();
+                live.electrical_mut().add_fault(0, None, fault).unwrap();
+            }
+            let host = FreeRideHost::new(session, state.clone(), EPOCH, None);
+            let mut drive = Self { host, state, seq: 0, events: Vec::new() };
+            while drive.host.booting() {
+                drive.host.step(STEP_S);
+                drive.drain();
+            }
+            drive
+        }
+
+        fn drain(&mut self) {
+            assert!(self.host.halted().is_none(), "native halt: {:?}", self.host.halted());
+            self.host.drain_events(&mut self.events);
+            self.host.drain_ble_tx(&mut Vec::new());
+            self.host.drain_tones(&mut Vec::new());
+        }
+
+        fn status(&self) -> FreeRideStatus {
+            self.state.lock().status.clone()
+        }
+
+        /// One 1/120 s sample asking `accel` (m/s²), straight on.
+        fn step(&mut self, accel: f64) -> Snapshot {
+            self.seq += 1;
+            let input = ManualInput {
+                run_epoch: EPOCH,
+                seq: self.seq,
+                source: InputSource::KeyboardSlider,
+                desired_lean_rad: 0.0,
+                heading_rate_rad_s: 0.0,
+                armed: false,
+                crouch: 0.0,
+                desired_accel_mps2: Some(accel),
+            };
+            self.state.input(input).unwrap();
+            self.host.step(STEP_S);
+            self.drain();
+            let mut snapshot = Snapshot::default();
+            self.host.snapshot(&mut snapshot);
+            snapshot
+        }
+
+        /// The rider fell or the firmware cut out: the run is over for this ask.
+        fn crashed(&self) -> bool {
+            !self.status().on_pedals
+                || self.events.iter().any(|e| matches!(e.kind, EventKind::Cutoff) || e.text.contains("fell over"))
+        }
+    }
+
+    /// Drive mode at a fraction of the caps until `done` (speed in km/h) or `limit_s`: the time it
+    /// took, the speeds seen, and whether the rider fell.
+    fn drive_until(
+        d: &mut Drive,
+        fraction: f64,
+        limit_s: f64,
+        done: impl Fn(f64) -> bool,
+    ) -> (f64, f64, f64, Option<f64>) {
+        let start = d.host.time_s();
+        let (mut low, mut high) = (f64::INFINITY, f64::NEG_INFINITY);
+        loop {
+            let status = d.status();
+            let cap = if fraction >= 0.0 { status.accel_cap_mps2 } else { status.brake_cap_mps2 };
+            let speed = f64::from(d.step(fraction * cap.unwrap()).signals.speed_kmh);
+            (low, high) = (low.min(speed), high.max(speed));
+            if d.crashed() {
+                return (d.host.time_s() - start, low, high, Some(speed));
+            }
+            if done(speed) || d.host.time_s() - start >= limit_s {
+                return (d.host.time_s() - start, low, high, None);
+            }
+        }
+    }
+
+    /// Drive mode, the speed step on the owner's preset (tiltback 69 km/h): half throttle from rest
+    /// to 20 km/h, 6 s with no ask, then a half brake to a clean stop.
+    fn drive_speed_step(firmware: &str, quantum: u32) {
+        let mut d = Drive::new("articulated_sagittal_v1", firmware, "tarik-2026-10-15", 1.0, quantum);
+        let (rise, _, _, fell) = drive_until(&mut d, 0.5, 8.0, |v| v >= 20.0);
+        assert!(fell.is_none() && rise < 5.0, "{firmware} q{quantum}: 20 km/h in {rise:.2} s, fell {fell:?}");
+        let (_, low, high, fell) = drive_until(&mut d, 0.0, 6.0, |_| false);
+        assert!(fell.is_none(), "{firmware} q{quantum}: fell cruising at {fell:?}");
+        let (stop, _, _, fell) = drive_until(&mut d, -0.5, 10.0, |v| v.abs() < 0.3);
+        assert!(fell.is_none() && stop < 8.0, "{firmware} q{quantum}: stop in {stop:.2} s, fell {fell:?}");
+        // The brake held 1 s more, then nothing asked: the clean stop holds.
+        let (_, after_low, _, _) = drive_until(&mut d, -0.5, 1.0, |_| false);
+        let (_, rest_low, rest_high, fell) = drive_until(&mut d, 0.0, 3.0, |_| false);
+        println!(
+            "drive speed step {firmware} q{quantum}: 0-20 km/h in {rise:.2} s; no ask for 6 s: {low:.1}-{high:.1} km/h; \
+             stop in {stop:.2} s; after: lowest {:.2} km/h, then {rest_low:.2}..{rest_high:.2} km/h",
+            after_low.min(rest_low)
+        );
+        assert!(fell.is_none());
+        assert!(low > 17.0 && high < 27.0, "{firmware} q{quantum}: cruise {low:.1}-{high:.1} km/h");
+        // The pedals settle after the brake: the wheel may rock a little, never ride away.
+        assert!(after_low.min(rest_low) > -1.0 && rest_high < 1.0, "{firmware} q{quantum}: not a clean stop");
+    }
+
+    /// Drive mode, the tiltback: full throttle on the blank preset, whose speed tiltback starts at
+    /// 20 km/h. The firmware tilts the pedals back, the rider eases off, and nobody falls.
+    fn drive_into_tiltback(firmware: &str, quantum: u32) {
+        let mut d = Drive::new("articulated_sagittal_v1", firmware, "blank", 1.0, quantum);
+        let (mut top, mut eased) = (0.0_f64, false);
+        for _ in 0..2400 {
+            let cap = d.status().accel_cap_mps2.unwrap();
+            top = top.max(f64::from(d.step(cap).signals.speed_kmh));
+            eased |= d.status().desired_lean_deg.is_some_and(|lean| lean < 0.0);
+            assert!(!d.crashed(), "{firmware} q{quantum}: fell at {top:.1} km/h");
+        }
+        println!("drive into tiltback {firmware} q{quantum}: full throttle 20 s, top {top:.1} km/h, eased off {eased}");
+        assert!(eased, "the rider eases off in the tiltback");
+        assert!((20.0..45.0).contains(&top), "{firmware} q{quantum}: top {top:.1} km/h");
+    }
+
+    fn drive_matrix(firmware: &str) {
+        for quantum in [4000, 3000, 2000] {
+            drive_speed_step(firmware, quantum);
+            drive_into_tiltback(firmware, quantum);
+        }
+    }
+
+    #[test]
+    #[ignore = "needs cached pinned stock firmware; drive mode speed step and tiltback at three quanta"]
+    fn stock_drive_speed_step_and_tiltback() {
+        drive_matrix("stock");
+    }
+
+    #[test]
+    #[ignore = "needs firmware/build/target-compat (EUC_FIRMWARE_DIR); drive mode speed step and tiltback at three quanta"]
+    fn compat_drive_speed_step_and_tiltback() {
+        drive_matrix("ours-compat");
+    }
+
+    #[test]
+    #[ignore = "needs firmware/build/target-clean (EUC_FIRMWARE_DIR); drive mode speed step and tiltback at three quanta"]
+    fn clean_drive_speed_step_and_tiltback() {
+        drive_matrix("ours-clean");
+    }
+
+    /// Drive mode, normal riding at half throttle on stock, at three charges: to 40 km/h, 10 s
+    /// with no ask, a half brake to a clean stop. The rider never falls.
+    #[test]
+    #[ignore = "needs cached pinned stock firmware; drive mode half throttle at 100, 50 and 20 % charge"]
+    fn stock_drive_half_throttle_normal_ride_at_three_charges() {
+        for soc in [1.0, 0.5, 0.2] {
+            let mut d = Drive::new("articulated_sagittal_v1", "stock", "tarik-2026-10-15", soc, 4000);
+            let (rise, _, _, fell) = drive_until(&mut d, 0.5, 12.0, |v| v >= 40.0);
+            assert!(fell.is_none() && rise < 10.0, "soc {soc}: 40 km/h in {rise:.2} s, fell {fell:?}");
+            let (_, low, high, fell) = drive_until(&mut d, 0.0, 10.0, |_| false);
+            assert!(fell.is_none(), "soc {soc}: fell cruising at {fell:?}");
+            let (stop, _, _, fell) = drive_until(&mut d, -0.5, 15.0, |v| v.abs() < 0.3);
+            assert!(fell.is_none() && stop < 12.0, "soc {soc}: stop in {stop:.2} s, fell {fell:?}");
+            let (_, rest_low, rest_high, fell) = drive_until(&mut d, 0.0, 3.0, |_| false);
+            println!(
+                "drive half throttle soc {soc}: 0-40 km/h in {rise:.2} s; no ask for 10 s: {low:.1}-{high:.1} km/h; \
+                 stop in {stop:.2} s; then {rest_low:.2}..{rest_high:.2} km/h"
+            );
+            // A hard stop from 40 km/h leaves the pedals pitched; the wheel rocks a little as they settle.
+            assert!(fell.is_none() && rest_low > -1.0 && rest_high < 1.0, "soc {soc}: not a clean stop");
+        }
     }
 
     // A concrete host permits exact read-only physics diagnostics, without adding downcasts to

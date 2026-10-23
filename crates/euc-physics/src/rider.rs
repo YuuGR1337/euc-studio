@@ -25,6 +25,29 @@ const RIDING_PITCH_S: f64 = 3.0;
 /// stops, nor one past ±π that would turn it the other way.
 const MANUAL_HEADING_SLACK_RAD: f64 = 0.5;
 
+/// Manual drive: how far an ask may carry the reference speed ahead of (or behind) the measured
+/// speed, m/s. When the firmware or the lean limit holds the wheel back, the reference waits there
+/// instead of winding up, and the rider never leans for more than the ask plus `manual_drive_kp`
+/// times this. The reference never follows the measured speed's ripple (that would ratchet it).
+const DRIVE_WINDUP_MPS: f64 = 0.5;
+
+/// Manual drive: an ask this small, m/s², counts as none (it ends the hold of a clean stop).
+const DRIVE_IDLE_MPS2: f64 = 0.05;
+
+/// Manual drive: as the wheel nears a stop the rider eases a brake to this rate times the reference
+/// speed, m/s² per m/s, so the lean is back near upright when the wheel stops (the lean returns at
+/// a finite rate). Below [`DRIVE_STOP_SNAP_MPS`] the reference snaps to zero.
+const DRIVE_STOP_RATE_PER_S: f64 = 2.5;
+
+/// Manual drive: the reference (or wheel) speed below which a brake after a ride ends in the
+/// clean stop, m/s.
+const DRIVE_STOP_SNAP_MPS: f64 = 0.05;
+
+/// Manual drive: a clean stop needs a ride of at least this speed, m/s, the other way first (with
+/// the ask along it, or none). A creep, or the wheel's roll back as the rider leans into a launch,
+/// is not a ride: an ask out of it rides on through zero.
+const DRIVE_STOP_FROM_MPS: f64 = 0.5;
+
 /// Wraps a finite angle to [-π, π], retaining small angles without rounding changes.
 /// Nonfinite values pass through; public heading setters reject them before wrapping.
 pub fn wrap_angle(rad: f64) -> f64 {
@@ -79,6 +102,10 @@ pub enum Intent {
     Speed(f64),
     /// Hold this lean from vertical, radians, forward positive.
     Lean(f64),
+    /// Manual drive: accelerate at this rate, m/s², forward positive, net of rolling resistance
+    /// and air drag. The rider leans for it (`tan(lean) = (accel + drag) / g`) and follows the
+    /// reference speed the asks add up to; braking that reaches zero ends in a clean stop.
+    Accel(f64),
 }
 
 /// Rolling resistance and air drag, as decelerations.
@@ -111,6 +138,19 @@ fn eased(wanted: f64, felt: f64, s: &Sense, c: &RiderControl) -> f64 {
         return wanted;
     }
     wanted.min(s.speed - c.tiltback_ease_kmh_per_deg * tilt / 3.6).max(0.0)
+}
+
+/// The acceleration the rider asks for in manual drive: `asked`, unless the pedals tip back
+/// (`felt`) while the wheel rolls forward. Then the rider eases off as in speed mode, which aims
+/// `tiltback_ease_kmh_per_deg` per degree below the speed now at `speed_kp`: no more pushing, and
+/// a gentle slowing of at most `tiltback_ease_brake`. A harder brake asked by hand stays.
+fn eased_accel(asked: f64, felt: f64, s: &Sense, c: &RiderControl) -> f64 {
+    let tilt = (felt - c.tiltback_feel_deg.to_radians()).max(0.0).to_degrees();
+    if tilt <= 0.0 || c.tiltback_ease_kmh_per_deg <= 0.0 || s.speed <= 0.0 {
+        return asked;
+    }
+    let ease = (c.speed_kp * c.tiltback_ease_kmh_per_deg * tilt / 3.6).min(c.tiltback_ease_brake);
+    asked.min(-ease)
 }
 
 /// What the rider senses in one step.
@@ -178,6 +218,14 @@ pub struct RiderController {
     turn_lean: f64,
     /// A person rides by hand (Free Ride, Ride's manual mode): the manual limits apply.
     manual: bool,
+    /// Manual drive: the reference speed the asks add up to, m/s.
+    drive_speed: f64,
+    /// Manual drive: a clean stop holds the reference at zero against an ask of this sign.
+    drive_stop: Option<f64>,
+    /// Manual drive: the fastest reference speed ridden this way since the last zero, m/s.
+    drive_peak: f64,
+    /// Manual drive: the last step braked a ride (the ask against the reference).
+    drive_braking: bool,
 }
 
 /// How the rider steers in one step.
@@ -213,6 +261,10 @@ impl RiderController {
             applied_turn_rate: 0.0,
             turn_lean: 0.0,
             manual: false,
+            drive_speed: 0.0,
+            drive_stop: None,
+            drive_peak: 0.0,
+            drive_braking: false,
         }
     }
 
@@ -305,11 +357,16 @@ impl RiderController {
     /// The command delay and lean slew limit apply on physics steps, never on input arrival.
     /// A speed/lean mode switch clears the speed integral and reseeds delays on the next step.
     pub const fn set_intent(&mut self, intent: Intent) {
-        let (Intent::Lean(value) | Intent::Speed(value)) = intent;
+        let (Intent::Lean(value) | Intent::Speed(value) | Intent::Accel(value)) = intent;
         if !value.is_finite() {
             return;
         }
-        if !matches!((self.intent, intent), (Intent::Lean(_), Intent::Lean(_)) | (Intent::Speed(_), Intent::Speed(_))) {
+        if !matches!(
+            (self.intent, intent),
+            (Intent::Lean(_), Intent::Lean(_))
+                | (Intent::Speed(_), Intent::Speed(_))
+                | (Intent::Accel(_), Intent::Accel(_))
+        ) {
             self.integral = 0.0;
             self.mode_changed = true;
         }
@@ -370,8 +427,22 @@ impl RiderController {
     pub const fn desired_lean(&self) -> f64 {
         match self.intent {
             Intent::Lean(lean) => lean,
-            Intent::Speed(_) => self.desired_lean,
+            Intent::Speed(_) | Intent::Accel(_) => self.desired_lean,
         }
+    }
+
+    /// Manual drive limits at `speed` (m/s), m/s²: the strongest forward acceleration and the
+    /// strongest braking (positive) that the drive lean limit can ask for, net of rolling
+    /// resistance and air drag. The firmware may deliver less; asking for more overleans.
+    pub(crate) fn drive_caps(&self, speed: f64, gravity: f64, drag: Drag) -> (f64, f64) {
+        let lean = gravity * self.control.manual_drive_lean_max_deg.to_radians().tan();
+        let drag = drag.decel(speed);
+        (lean - drag, lean + drag)
+    }
+
+    /// Manual drive: the reference speed the asks add up to, m/s.
+    pub const fn drive_speed(&self) -> f64 {
+        self.drive_speed
     }
 
     /// The lean the ankles are holding, radians from vertical, forward positive.
@@ -392,6 +463,13 @@ impl RiderController {
                 self.applied_intent = match self.intent {
                     Intent::Lean(_) => Intent::Lean(s.lean),
                     Intent::Speed(_) => Intent::Speed(s.speed),
+                    Intent::Accel(_) => {
+                        // Drive on from the speed now, with the acceleration the lean holds now.
+                        self.drive_speed = s.speed;
+                        self.drive_stop = None;
+                        self.drive_peak = 0.0;
+                        Intent::Accel(s.gravity * s.lean.tan() - s.drag.decel(s.speed))
+                    }
                 };
                 self.applied_heading_target = s.heading;
                 self.applied_turn_rate = 0.0;
@@ -434,7 +512,13 @@ impl RiderController {
         observation.sense.dt = s.dt;
         self.feedback = Some(observation.sense);
         let s = &observation.sense;
-        let max_lean = c.lean_max_deg.to_radians();
+        // Manual drive has its own lean limit; every other mode keeps `lean_max_deg`.
+        let max_lean = if self.manual && matches!(self.applied_intent, Intent::Accel(_)) {
+            c.manual_drive_lean_max_deg
+        } else {
+            c.lean_max_deg
+        }
+        .to_radians();
         let felt = if c.feedback_delay_s == 0.0 || s.held {
             self.felt_tiltback(s)
         } else {
@@ -459,6 +543,7 @@ impl RiderController {
                 // a steady error.
                 ((limited + s.drag.decel(speed)) / s.gravity).atan()
             }
+            Intent::Accel(asked) => self.drive(asked, felt, s),
         };
         self.desired_lean = target;
         let target = target.clamp(-max_lean, max_lean);
@@ -467,6 +552,82 @@ impl RiderController {
         self.lean_command += (target - self.lean_command).clamp(-step, step);
         let torque = c.lean_kp * (self.lean_command - s.lean) - c.lean_kd * s.lean_rate;
         torque.clamp(-c.ankle_max_nm, c.ankle_max_nm)
+    }
+
+    /// Manual drive, one step: the lean for the asked acceleration (with the drag at this speed)
+    /// plus `manual_drive_kp` times the reference speed's lead over the measured speed. The lead is capped
+    /// at [`DRIVE_WINDUP_MPS`], so a wheel that cannot follow does not wind the rider up; the rider
+    /// still leans for the whole ask, and an ask beyond what the wheel delivers overleans.
+    fn drive(&mut self, asked: f64, felt: f64, s: &Sense) -> f64 {
+        let c = self.control;
+        if s.held {
+            self.drive_speed = s.speed;
+            self.drive_stop = None;
+            self.drive_peak = 0.0;
+            return 0.0;
+        }
+        let mut accel = eased_accel(asked, felt, s, &c);
+        // A clean stop: braking that brings the reference through zero, after a ride, holds it at
+        // zero until the ask lets go or turns around; only a new ask from rest rides the other way.
+        if let Some(sign) = self.drive_stop {
+            if accel * sign > DRIVE_IDLE_MPS2 {
+                accel = 0.0;
+            } else {
+                self.drive_stop = None;
+            }
+        }
+        // Near a stop after a ride the rider eases the brake, the way a speed target eases it.
+        let stopping = self.drive_stop.is_none() && self.drive_peak >= DRIVE_STOP_FROM_MPS;
+        // Letting go of that brake at walking pace means stopping: the reference settles at zero.
+        let braked = std::mem::replace(&mut self.drive_braking, stopping && accel * self.drive_speed < 0.0);
+        if braked && accel.abs() < DRIVE_IDLE_MPS2 && self.drive_speed.abs() < DRIVE_STOP_FROM_MPS {
+            self.drive_speed = 0.0;
+            self.drive_peak = 0.0;
+        }
+        if stopping && accel * self.drive_speed < 0.0 {
+            let most = DRIVE_STOP_RATE_PER_S * self.drive_speed.abs();
+            accel = accel.clamp(-most, most);
+        }
+        let mut next = self.drive_speed + accel * s.dt;
+        // The stop snaps when the reference or the wheel itself gets there (the wheel may stop
+        // first: the reference leads it by up to the band).
+        let wheel_stopped = s.speed.abs() < DRIVE_STOP_SNAP_MPS || s.speed * self.drive_speed <= 0.0;
+        if stopping && accel * self.drive_speed < 0.0 && (next.abs() < DRIVE_STOP_SNAP_MPS || wheel_stopped) {
+            next = 0.0;
+        }
+        if self.drive_speed * next < 0.0 || (self.drive_speed != 0.0 && next == 0.0) {
+            if self.drive_peak >= DRIVE_STOP_FROM_MPS {
+                self.drive_stop = Some(accel.signum());
+                self.drive_speed = 0.0;
+                accel = 0.0;
+            } else {
+                self.drive_speed = next;
+            }
+            self.drive_peak = 0.0;
+        } else if self.drive_stop.is_none() {
+            // An ask carries the reference at most the band past the measured speed (and never
+            // pulls back one already beyond it); no ask leaves it where it is. An ask against a
+            // reference beyond the band brings it back to the band at once.
+            let (low, high) = (s.speed - DRIVE_WINDUP_MPS, s.speed + DRIVE_WINDUP_MPS);
+            if accel > 0.0 {
+                next = next.min(self.drive_speed.max(high));
+            } else if accel < 0.0 {
+                next = next.max(self.drive_speed.min(low));
+            }
+            if accel * (next - s.speed) < 0.0 {
+                next = next.clamp(low, high);
+            }
+            self.drive_speed = next;
+            if accel * self.drive_speed >= 0.0 {
+                self.drive_peak = self.drive_peak.max(self.drive_speed.abs());
+            }
+        }
+        let lead = (self.drive_speed - s.speed).clamp(-DRIVE_WINDUP_MPS, DRIVE_WINDUP_MPS);
+        // Holding a clean stop, or resting at zero with no ask, is standing still: the scripted
+        // rider's gain for it.
+        let resting = self.drive_speed == 0.0 && accel.abs() < DRIVE_IDLE_MPS2;
+        let kp = if self.drive_stop.is_some() || resting { c.speed_kp } else { c.manual_drive_kp };
+        ((accel + kp * lead + s.drag.decel(s.speed)) / s.gravity).atan()
     }
 
     /// How the rider steers this step: back onto the line (the heading target), turning at the
@@ -504,6 +665,194 @@ impl RiderController {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A manual rider in drive mode, its mode seeded at `speed`.
+    fn driver(speed: f64) -> RiderController {
+        let mut rider = RiderController::new(RiderControl::default());
+        rider.set_manual(true);
+        rider.set_intent(Intent::Accel(0.0));
+        rider.ankle_torque(&sense(speed));
+        rider
+    }
+
+    #[test]
+    fn drive_leans_for_the_ask_plus_drag_and_follows_the_reference() {
+        let drag = Drag { rolling: 0.15, aero: 0.003 };
+        let mut rider = driver(5.0);
+        assert_eq!(rider.drive_speed(), 5.0, "the reference starts at the speed now");
+        rider.set_intent(Intent::Accel(1.0));
+        rider.ankle_torque(&Sense { drag, ..sense(5.0) });
+        // At the speed now the lead is 1 ms of the ask: the feed-forward is the whole lean.
+        let kp = RiderControl::default().manual_drive_kp;
+        let lead = 0.001 * 1.0;
+        let expected = ((1.0 + kp * lead + drag.decel(5.0)) / 9.81).atan();
+        assert!((rider.desired_lean() - expected).abs() < 1e-12, "{} vs {expected}", rider.desired_lean());
+        // A wheel that cannot follow: the reference leads by at most 0.5 m/s.
+        for _ in 0..5000 {
+            rider.ankle_torque(&Sense { drag, ..sense(5.0) });
+        }
+        assert!((rider.drive_speed() - 5.5).abs() < 1e-9, "{}", rider.drive_speed());
+        let capped = ((1.0 + kp * 0.5 + drag.decel(5.0)) / 9.81).atan();
+        assert!((rider.desired_lean() - capped).abs() < 1e-12);
+    }
+
+    #[test]
+    fn drive_reference_holds_through_speed_ripple_without_a_ratchet() {
+        let mut rider = driver(10.0);
+        // No ask: the wheel's speed ripples ±0.8 m/s around a slow fall; the reference stays.
+        for step in 0..4000 {
+            let ripple = 0.8 * (f64::from(step) * 0.001 * TAU * 2.5).sin();
+            rider.ankle_torque(&sense(10.0 - 0.0002 * f64::from(step) + ripple));
+        }
+        assert_eq!(rider.drive_speed(), 10.0, "held where the ask left it");
+        // A brake against a reference beyond the band brings it back to the band at once.
+        rider.set_intent(Intent::Accel(-1.0));
+        rider.ankle_torque(&sense(8.0));
+        assert!((rider.drive_speed() - 8.5).abs() < 1e-9, "{}", rider.drive_speed());
+    }
+
+    #[test]
+    fn drive_lean_limit_is_its_own_and_manual_only() {
+        let control = RiderControl::default();
+        let mut rider = driver(0.0);
+        rider.set_intent(Intent::Accel(12.0));
+        for _ in 0..2000 {
+            rider.ankle_torque(&sense(0.0));
+        }
+        let drive = control.manual_drive_lean_max_deg.to_radians();
+        assert!(rider.desired_lean() > drive, "the ask is reported in full: {}", rider.desired_lean());
+        assert!((rider.lean_command() - drive).abs() < 1e-12, "{}", rider.lean_command());
+        // Direct lean, and a scripted rider, keep `lean_max_deg`.
+        rider.set_intent(Intent::Lean(1.0));
+        for _ in 0..2000 {
+            rider.ankle_torque(&sense(0.0));
+        }
+        assert!((rider.lean_command() - control.lean_max_deg.to_radians()).abs() < 1e-12);
+        let mut scripted = RiderController::new(control);
+        scripted.set_intent(Intent::Accel(12.0));
+        for _ in 0..2000 {
+            scripted.ankle_torque(&sense(0.0));
+        }
+        assert!((scripted.lean_command() - control.lean_max_deg.to_radians()).abs() < 1e-12);
+    }
+
+    #[test]
+    fn drive_braking_stops_cleanly_and_reverses_only_from_rest() {
+        let mut rider = driver(1.0);
+        rider.set_intent(Intent::Accel(-3.0));
+        // The wheel follows the reference. The brake eases near the stop (at most 2.5 /s times the
+        // reference speed), then the reference snaps to zero and stays there.
+        let mut last = rider.drive_speed();
+        for _ in 0..2000 {
+            rider.ankle_torque(&sense(last));
+            let now = rider.drive_speed();
+            if now > 0.0 {
+                assert!((last - now) / 0.001 <= 2.5 * last + 1e-9, "{now} after {last}");
+            }
+            last = now;
+        }
+        assert_eq!(rider.drive_speed(), 0.0, "a clean stop");
+        rider.ankle_torque(&sense(0.1));
+        assert!(rider.desired_lean() < 0.0, "the rider leans back to stop the wheel still rolling");
+        for _ in 0..400 {
+            rider.ankle_torque(&sense(0.0));
+        }
+        assert_eq!(rider.drive_speed(), 0.0, "the held brake does not ride backwards");
+        assert!(rider.desired_lean().abs() < 1e-12, "{}", rider.desired_lean());
+        // Let go (the view's brake gate sends no ask at rest), then ask backwards: it reverses.
+        rider.set_intent(Intent::Accel(0.0));
+        rider.ankle_torque(&sense(0.0));
+        rider.set_intent(Intent::Accel(-1.0));
+        for _ in 0..100 {
+            rider.ankle_torque(&sense(0.0));
+        }
+        assert!(rider.drive_speed() < -0.09, "{}", rider.drive_speed());
+        // A brake let go at walking pace after a ride stops: the reference settles at zero.
+        let mut rider = driver(3.0);
+        rider.set_intent(Intent::Accel(-2.0));
+        for _ in 0..1500 {
+            rider.ankle_torque(&sense(rider.drive_speed() - 0.2));
+        }
+        assert!((0.1..0.5).contains(&rider.drive_speed()), "{}", rider.drive_speed());
+        rider.set_intent(Intent::Accel(0.0));
+        rider.ankle_torque(&sense(0.2));
+        assert_eq!(rider.drive_speed(), 0.0, "let go at walking pace: a stop");
+        // Let go at speed: the reference holds where it is.
+        let mut rider = driver(3.0);
+        rider.set_intent(Intent::Accel(-2.0));
+        for _ in 0..100 {
+            rider.ankle_torque(&sense(rider.drive_speed()));
+        }
+        rider.set_intent(Intent::Accel(0.0));
+        rider.ankle_torque(&sense(2.8));
+        assert!((rider.drive_speed() - 2.8).abs() < 1e-9, "{}", rider.drive_speed());
+        // The wheel stops before the reference (here at once): the stop snaps then. Forward from
+        // the hold rides at once: the ask turned around.
+        let mut rider = driver(1.0);
+        rider.set_intent(Intent::Accel(-2.0));
+        rider.ankle_torque(&sense(0.0));
+        assert_eq!(rider.drive_speed(), 0.0);
+        rider.set_intent(Intent::Accel(1.0));
+        for _ in 0..100 {
+            rider.ankle_torque(&sense(0.0));
+        }
+        assert!(rider.drive_speed() > 0.09, "{}", rider.drive_speed());
+    }
+
+    #[test]
+    fn drive_rides_on_through_zero_out_of_a_creep_or_a_launch_roll_back() {
+        // A creep backwards (the pedals settling after the stand lets go), then full forward.
+        let mut rider = driver(-0.05);
+        rider.set_intent(Intent::Accel(3.0));
+        for _ in 0..100 {
+            rider.ankle_torque(&sense(-0.05));
+        }
+        assert!(rider.drive_speed() > 0.2, "rides forward: {}", rider.drive_speed());
+        // A launch: the wheel rolls back 0.8 m/s while the rider leans in; the reference waits at
+        // zero (it never follows the wheel back), then the wheel goes forward and so does it.
+        let mut rider = driver(0.0);
+        rider.set_intent(Intent::Accel(3.0));
+        for _ in 0..300 {
+            rider.ankle_torque(&sense(-0.8));
+        }
+        assert_eq!(rider.drive_speed(), 0.0);
+        for _ in 0..500 {
+            rider.ankle_torque(&sense(0.5));
+        }
+        assert!(rider.drive_speed() > 0.9, "no stop latched: {}", rider.drive_speed());
+    }
+
+    #[test]
+    fn drive_eases_off_for_tiltback_like_speed_mode() {
+        let c = RiderControl::default();
+        let tilted = |pitch_deg: f64| Sense { pitch_up: pitch_deg.to_radians(), ..sense(8.0) };
+        // 1 degree past the feel threshold: speed mode aims 1.5 km/h lower at 0.6 /s.
+        let felt = (c.tiltback_feel_deg + 1.0).to_radians();
+        let eased = eased_accel(3.0, felt, &tilted(0.0), &c);
+        assert!((eased + 0.6 * 1.5 / 3.6).abs() < 1e-12, "{eased}");
+        assert_eq!(eased_accel(-2.0, felt, &tilted(0.0), &c), -2.0, "a harder brake by hand stays");
+        let steep = (c.tiltback_feel_deg + 30.0).to_radians();
+        assert_eq!(eased_accel(3.0, steep, &tilted(0.0), &c), -c.tiltback_ease_brake);
+        assert_eq!(eased_accel(3.0, 0.0, &tilted(0.0), &c), 3.0, "no tiltback: the ask");
+        assert_eq!(eased_accel(3.0, felt, &sense(-1.0), &c), 3.0, "only while rolling forward");
+        // Through the controller: the firmware's tiltback is what the rider feels.
+        let mut rider = driver(8.0);
+        rider.set_commanded_tiltback(Some(felt));
+        rider.set_intent(Intent::Accel(3.0));
+        rider.ankle_torque(&sense(8.0));
+        assert!(rider.desired_lean() < 0.0, "eases off: {}", rider.desired_lean());
+    }
+
+    #[test]
+    fn drive_caps_follow_the_lean_limit_and_the_drag() {
+        let rider = RiderController::new(RiderControl::default());
+        let drag = Drag { rolling: 0.15, aero: 0.003 };
+        let lean = 9.81 * RiderControl::default().manual_drive_lean_max_deg.to_radians().tan();
+        let (accel, brake) = rider.drive_caps(10.0, 9.81, drag);
+        assert!((accel - (lean - drag.decel(10.0))).abs() < 1e-12);
+        assert!((brake - (lean + drag.decel(10.0))).abs() < 1e-12);
+        assert!(brake > accel, "drag helps a brake");
+    }
 
     fn sense(speed: f64) -> Sense {
         Sense {
