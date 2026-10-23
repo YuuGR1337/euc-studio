@@ -1,9 +1,12 @@
 # Free Ride redesign (FR)
 
-Status, 2026-10-22: FR1 study and plan approved. FR2 (controls), FR2b (native controls, by the
-physics owner), FR3 (the Chase camera), the rider body (FR9's body, moved ahead: their rider,
-copied) and the play mode (no clicks, crash freely, respawn, the wheel's pad; see the end of the
-decisions) are built. The other phases are not built.
+Status, 2026-10-23: FR1 study and plan approved. Built: FR2 (controls), FR2b (native controls,
+by the physics owner), FR3 (the Chase camera), FR4 (the city's daylight, by the World agent), the
+play mode (no clicks, crash freely, respawn, the wheel's pad; see the end of the decisions), drive
+mode (a throttle; the physics owner's intent-level rider), the HUD's motor readout, FR6's first
+sound phase (motor, tyre, wind), and the rider body: first EUC Thrills' Cool Rider, copied, now
+the street kit, EUC Studio's own look of the owner's riding outfit. Not built: FR5, the rest of
+FR6 (gauges, warning pills, impact sounds), FR7, FR8, FR9's effects and FR10.
 
 Tarik (Human) asked for a better Free Ride: the world looks primitive, there is no sky, and the
 controls feel bad. He pointed at [EUC Thrills](https://github.com/VibezZzCoder/EUC-thrills), an
@@ -51,8 +54,9 @@ answered each point:
    from the firmware and the electrical plant. The studio never invents them.
 3. **A developer tool, honest by default.** Visuals never change physics. A visual must not
    suggest physics that is not there (a solid-looking object the wheel rides through, a body
-   pose the physics does not hold). Every cosmetic layer can be switched off to show the physics
-   bodies as they are.
+   pose the physics does not hold). The rider figure follows the physics bodies part by part.
+   (Until 2026-10-23 every cosmetic layer could also be switched off to show the bodies' raw
+   shapes; the owner had that view removed, so the figure is the only way the rider is drawn.)
 4. **The Tauri webview.** macOS WebKit with WebGL 2 on Metal. The simulation thread already uses
    about 56 % of one core in Free Ride (`docs/models/world.md`). Rendering must leave the UI
    responsive. A software renderer gets the low tier automatically.
@@ -118,6 +122,12 @@ lesson in the game.
 | Hand-built venues (kickers, berms, decks, Switchback Park) | Authored features with entry and exit heights; "feature left, bypass right". | Skip for now | `euc-world` has plazas, stairs and ramps. A park or trail biome (designed, not built) is the place for features later. |
 | Water at the ford | None; the ford is a dry dip with a boardwalk. | Re-implement our own (World) | We already have wet patches and potholes that hold water. Wet gloss and puddle surfaces are in world.md's "not built" list. |
 
+**Built (2026-10-22): FR4, by the World agent** (`world: daylight for the city world (FR4)`): the
+painted sky with one sun shared by the sky and its shadows, fog in the horizon colour, the sky's
+environment for reflections, the daylight palette and contact pools under the wheel and the
+rider, in world mode only; scenarios keep the studio sweep. `docs/models/world.md` has the
+details.
+
 ### Camera
 
 EUC Thrills' chase camera (`src/render/chaseCamera.ts`, constants in `src/data/tuning.ts`) is the
@@ -147,12 +157,12 @@ yaw rate. We cannot copy that part. What carries over is how input becomes a smo
 | Item | What they do | Decision | Why, and how for us |
 | --- | --- | --- | --- |
 | One input layer | Semantic actions; each device keeps its own state; axes merge as "strongest magnitude wins"; blur or a hidden tab clears everything; raw values, smoothing in one place downstream. | Re-implement (Free Ride) | Ride's manual mode (`lib/riderInput.ts`) and Free Ride (`controller.ts`) map input differently. One module serves both, with one set of limits and one test file. |
-| Throttle to lean | `target = throttle × max lean`, chased with τ 0.14 s and a rate limit of 3 rad/s. Their comment calls τ "the single most important number" for responsiveness. | Re-implement (Free Ride) | Our intent is the same kind of thing: a desired lean the rider's ankles hold and the firmware answers with torque. Keys get a first-order lag (τ about 0.15 s) toward their level instead of a step; sticks and triggers pass through. The physics keeps its own lean-rate limit (12°/s today), which is the body's limit; whether it should be faster is a physics question (below). |
+| Throttle to lean | `target = throttle × max lean`, chased with τ 0.14 s and a rate limit of 3 rad/s. Their comment calls τ "the single most important number" for responsiveness. | Re-implement (Free Ride) | Our intent is the same kind of thing: a desired lean the rider's ankles hold and the firmware answers with torque. Keys get a first-order lag (τ about 0.15 s) toward their level instead of a step; sticks and triggers pass through. The physics keeps its own lean-rate limit (12°/s before FR2b; manual lean 30°/s since), which is the body's limit. |
 | Dead zones and curves | Stick: radial, rescaled, 0.18, capped at magnitude 1, linear after. Triggers: RT − LT, 0.08. Touch: 1.35 exponent. | Re-implement (Free Ride) | Keep our radial 0.15 with hysteresis; add triggers as forward and back lean (max of stick and trigger, never the sum); an optional response exponent in settings. |
 | Brake to a stop, then reverse | Holding brake below 0.6 m/s for 0.35 s is needed before reverse; until then "a stop is a stop"; a shoulder-check glance shows during the wait. | Re-implement as intent logic (Free Ride) | Below 0.6 m/s the back-lean intent is pulled toward zero until back is held for 0.35 s more. This shapes intent only; the firmware still decides what the wheel does. |
-| Steering authority by speed | Yaw-rate authority 3.6 rad/s at rest falling to 0.85 rad/s by 9 m/s (exponent 1.5), clamped so lateral acceleration stays under 0.75 g (1.05 g at speed) times grip; roll follows from `atan(a/g)`. | Re-implement within physics caps (Free Ride, physics owner for the caps) | Our physics already leans the wheel by `atan(v·rate/g)` and caps the lean at 20° (0.36 g). Steer input becomes a turn-rate request scheduled by speed and capped by that same lateral limit, so a fast turn goes wide for a reason the rider can feel. Today's 30°/s cap (Free Ride host) and 1.0 rad/s (physics) block the low-speed part. |
-| Turning at walking pace | Steering is off below 0.05 m/s. | Physics decision | Our physics fades manual turn requests to zero below 1.5 m/s. Real riders twist the wheel at a standstill. Open question for the physics owner. |
-| Crouch | Hold Shift or LB; knees bend (τ 0.07 s); charges a bigger hop over 0.40 s. | Re-implement crouch (Free Ride, studio backend) | `Physics::set_crouch(knee_rad)` exists (0 to 1.2 rad, no pose writes). Free Ride's input packet needs a crouch field. Then crouch is a real body motion that lowers the centre of mass. |
+| Steering authority by speed | Yaw-rate authority 3.6 rad/s at rest falling to 0.85 rad/s by 9 m/s (exponent 1.5), clamped so lateral acceleration stays under 0.75 g (1.05 g at speed) times grip; roll follows from `atan(a/g)`. | Re-implement within physics caps (Free Ride, physics owner for the caps) | Our physics already leans the wheel by `atan(v·rate/g)` and caps the lean at 20° (0.36 g). Steer input becomes a turn-rate request scheduled by speed and capped by that same lateral limit, so a fast turn goes wide for a reason the rider can feel. Before FR2b a 30°/s cap (Free Ride host) and 1.0 rad/s (physics) blocked the low-speed part; since FR2b a manual turn may ask up to 2.5 rad/s, and the physics caps it with speed. |
+| Turning at walking pace | Steering is off below 0.05 m/s. | Physics decision | Before FR2b our physics faded manual turn requests to zero below 1.5 m/s. Since FR2b there is no fade: the rider turns at a standstill, as real riders twist the wheel (decision 3). |
+| Crouch | Hold Shift or LB; knees bend (τ 0.07 s); charges a bigger hop over 0.40 s. | Re-implement crouch (Free Ride, studio backend) | `Physics::set_crouch(knee_rad)` exists (0 to 1.2 rad, no pose writes). Free Ride's input packet has a crouch field since FR2b, so crouch is a real body motion that lowers the centre of mass (and, since 2026-10-23, a tuck with less drag). |
 | Hop, 180 spin, one-foot | Hop sets a launch speed of 3.0 m/s; the spin is a scripted 0.42 s heading sweep; one-foot is presentation only. | Skip | All three set kinematics directly. A physical hop needs the welded-feet rider to unweight and lift the wheel with its legs: a feasibility study for the physics owner first. |
 | Quick reset | R puts the rider at the spawn, stopped and upright, keeps held keys, snaps the camera. | Re-implement (Free Ride, physics owner for semantics) | Built in the play mode: R starts a new run at once at the last clear spot (Shift+R at the world's start), the firmware booting again unthrottled, about 0.7 to 0.8 s from the key to riding. No re-pose with a running firmware. In Free Ride R is the respawn key, not the studio's restart. |
 | One-shot buffer | Presses are buffered for 0.15 s, fire on the rising edge, and a press refreshes rather than queues. | Re-implement (Free Ride) | For reset, view and later hop. |
@@ -171,7 +181,7 @@ matches our MuJoCo rider, whose poses arrive per body every frame.
 | --- | --- | --- | --- |
 | Construction | Each part a loft: stacked cross-sections with a squareness exponent (2 an ellipse, about 3 a rounded box). Parts overlap past each joint; limb ends closed with hemispheres; parts sharing a joint and material merged. | Re-implement (Free Ride) | One group per MuJoCo body (torso, head, arms, thighs, shanks, feet), each part sized from that body's geoms so the silhouette matches what the physics simulates. |
 | Clothing and gear | Moto jacket and trousers, accent panels, gloves with fingers, boots with soles, a double-walled helmet with a clear visor; a procedural seam atlas; colours kept lighter than real black so they do not crush. | Re-implement a generic, fictional kit (Free Ride) | No real rider's look. Muted mid-values, a reflective trim in our accent. Atlas later, if the plain kit is not enough. |
-| Animation | Lean, carve, crouch, tuck, arm carriage, head stabilisation and look-into-turn, idle with a foot down: all computed from the controller's smoothed state, with analytic two-bone IK. | Draw physics poses as they are; cosmetic motion only where the physics has no joint (Free Ride) | The physics owns hips, knees, ankles and lean. Cosmetic layers only for what it lacks: head look into the turn (from steer intent, about 0.42 rad, τ 0.16 s), small hand and forearm offsets, the jacket hem. No counter-rolled upper body: it would put the drawn centre of mass somewhere the physics does not. A "Physics bodies" toggle shows the raw geoms. |
+| Animation | Lean, carve, crouch, tuck, arm carriage, head stabilisation and look-into-turn, idle with a foot down: all computed from the controller's smoothed state, with analytic two-bone IK. | Draw physics poses as they are; cosmetic motion only where the physics has no joint (Free Ride) | The physics owns hips, knees, ankles and lean. Cosmetic layers only for what it lacks: head look into the turn (from steer intent, about 0.42 rad, τ 0.16 s), small hand and forearm offsets, the jacket hem. No counter-rolled upper body: it would put the drawn centre of mass somewhere the physics does not. A "Physics bodies" toggle showed the raw geoms (built, then removed on 2026-10-23 at the owner's request). |
 | Crash ragdoll | 11 Verlet particles, a 0.12 s slerp from the riding pose. | Skip | Our rider falls physically. |
 
 **Built (2026-10-22): their rider, copied.** Tarik asked for their body as it is, so the rows
@@ -292,15 +302,22 @@ warning discipline (`src/ui/hudModel.ts`, `src/ui/game.css`).
 | Accessibility | Polite live region for warnings, reduced motion keeps the warning lit, diff-only DOM writes. | Re-implement (Free Ride) | Fits DESIGN.md's reduced-motion rules. |
 | Look | Their typography and colours. | Skip | DESIGN.md governs. |
 
+**Built (2026-10-23): the motor readout.** While riding, the Free Ride HUD shows "PWM (firmware)",
+the firmware's own PWM figure, and "Motor headroom (sim)", 100 % less the simulated modulation.
+Only the headroom warns: at 25 % or less it turns the caution colour and reads "low" (on stock the
+modulation sits at 77 to 83 % for 10 to 15 s before a cut). The PWM zones planned above are not
+built: no threshold of ours draws them. The other rows (layout, gauges, pills, the beep you can
+see) wait for the rest of FR6.
+
 ### Audio
 
 | Item | What they do | Decision | Why, and how for us |
 | --- | --- | --- | --- |
 | Warning beeps | A 75 ms 2565 Hz sample with an invented geometric cadence (1.10 s to 0.14 s); load-ladder beeps coded but silenced by their owner. | Skip their beeps | Our buzzer already plays the firmware's own tone changes (DESIGN.md, 2026-10-16). Kept. |
-| Mix | Buses (ride, warnings, master) through a limiter; warnings on their own bus and slider "so the wheel can still tell you"; every change glides with `setTargetAtTime`. | Re-implement (Free Ride) | Ride sounds and the buzzer get separate volumes; the buzzer bus is never ducked. |
+| Mix | Buses (ride, warnings, master) through a limiter; warnings on their own bus and slider "so the wheel can still tell you"; every change glides with `setTargetAtTime`. | Re-implement (Free Ride) | Built: one master volume and Mute for both; the ride sound ducks, the buzzer is never ducked. |
 | Wind | Pink noise through a band-pass sweeping 240 Hz to 1.2 kHz with speed; gain `0.17 × ramp^1.7` from 9 m/s; ×1.3 in the air. | Re-implement synthesized (Free Ride) | From the physical speed. No samples. |
 | Tyre | Per-surface noise bands (pavement 1750 Hz down to wood 330 Hz), a loop that taps once per wheel revolution, grain from suspension speed, 0.2 s equal-power crossfades between surfaces. | Re-implement synthesized (Free Ride) | Surface from `euc-world` under the wheel, taps from the wheel angle, grain from our suspension channel. |
-| Motor | A whine at the electrical frequency (rotation × 15 pole pairs) with load opening a filter; built but set to zero by their owner because a real wheel is nearly silent. | Re-implement, off by default (Free Ride) | We have real electrical frequency, PWM and current, so ours can be honest. Open question whether Tarik wants it. |
+| Motor | A whine at the electrical frequency (rotation × 15 pole pairs) with load opening a filter; built but set to zero by their owner because a real wheel is nearly silent. | Re-implement, on at a low level (Free Ride, decision 8) | We have real electrical frequency and current, so ours is honest: the pitch from the plant's pole pairs and the wheel speed, the level from the phase current. |
 | Ducking | The ride bed ducks 0.22 on each beep (30 ms attack, 300 ms release). | Re-implement (Free Ride) | Duck on the real buzzer signal. |
 | Recordings | Wind, offroad tyre and siren loops (CC0); crash voices (permission-only or machine-generated). | Skip | Synthesis covers wind and tyre; nothing else is needed. |
 
@@ -352,7 +369,7 @@ before the next one starts.
 | FR6 HUD and audio | A, Free Ride | HUD grid; battery, PWM and temperature gauges; firmware warning pills; buzzer-synced indicator; synthesized wind and tyre; optional motor sound; mix and ducking; settings disclosure. | M | FR2 |
 | FR7 Buildings and skyline | B, World | Building kinds, roofs, storey bands and the facade atlas (render payload fields only); ring 2; distant silhouettes; fog pushed out to match. | L | FR4 |
 | FR8 Vegetation and props | B, World | Lobed broadleaf crowns, conifers, shrubs (visual) with LOD; instanced grass with fade and sway; better furniture; new solid kinds in `euc-world` where a wheel can hit them; optional birds. | M to L | FR5 |
-| FR9 Rider and effects | A, Free Ride | Lofted parts per MuJoCo body, generic kit, cosmetic head and hands, "Physics bodies" toggle; spin cue; dust; sparks and spray once FR2b gives the signals. | L | FR3; sparks wait for FR2b |
+| FR9 Rider and effects | A, Free Ride | Lofted parts per MuJoCo body, generic kit, cosmetic head and hands, "Physics bodies" toggle (built, then removed on 2026-10-23); spin cue; dust; sparks and spray once FR2b gives the signals. | L | FR3; sparks wait for FR2b |
 | FR10 Ambient life | B, World, with the physics owner | Parked vehicles as solids; pedestrians and traffic under the rule Tarik chooses. | L | Tarik's answer, FR8 |
 
 Shared files: World owns lighting, background, fog and camera range in `Scene.tsx` (through a

@@ -201,3 +201,14 @@ its rider still.
 The controlled-transport browser tests (`e2e/free-ride-controls.spec.ts`, Chromium and WebKit)
 cover the panel, the HUD, the controller and the API validation against a fixture that answers
 as the play-mode engine does. No live ride with the native engine is part of these tests.
+
+From `app/`:
+
+```sh
+pnpm test src/workspaces/freeRide src/lib/rideControls.test.ts src/engine/freeRide.test.ts
+pnpm exec playwright test -c e2e/free-ride-controls.config.ts --workers=2
+cargo test --manifest-path src-tauri/Cargo.toml --lib -- free_ride native_audio ride_sound
+```
+
+The last line runs the native host's and the sound's unit tests; the stock-rider acceptance
+tests in `free_ride.rs` are `--ignored` and need the cached stock image.
