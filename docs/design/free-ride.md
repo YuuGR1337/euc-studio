@@ -222,7 +222,11 @@ After the lead's review the same day: the jeans are a mid-blue denim (the photos
 the shade taken out against the white shoe), baggy, with folds over the knee and stacked above
 the shoe, lighter over the front and darker down the inner seam; the guards sit on their own
 forms over the wider legs; the sneakers have a rounded toe and heel and a thicker, rounded sole
-edge; and the arms ride in the carriage above.
+edge; and the arms ride in the carriage above. Then, to match the lateral rider's contact shapes
+(a 5 cm knee ball, 3.5 cm shin and 5 cm calf capsules that touch the side pads), the wheel side
+of the jeans is flattened to about 5.6 cm from the leg's axis and that of the guards to about
+6.2 cm, so the drawn legs rest on the pads instead of sinking into them; the outside stays
+baggy.
 
 ### Navigation targets (intent level)
 

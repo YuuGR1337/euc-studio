@@ -69,6 +69,29 @@ describe("rider figure", () => {
     rig.dispose();
   });
 
+  it("keeps the legs' wheel side near the physics contact, the outside baggy", () => {
+    const rig = buildRiderRig();
+    for (const leg of rig.legs) {
+      let inner = 0;
+      let outer = 0;
+      for (const part of [leg.thigh, leg.shin])
+        for (const child of part.children) {
+          if (!(child instanceof THREE.Mesh)) continue;
+          const position = (child as THREE.Mesh).geometry.getAttribute("position");
+          for (let i = 0; i < position.count; i++) {
+            // In a leg's frame +x is the rider's left: the wheel side is -x on the left leg.
+            const x = position.getX(i) * leg.side;
+            inner = Math.max(inner, -x);
+            outer = Math.max(outer, x);
+          }
+        }
+      // The lateral rider's knee ball, shin and calf touch the pads about 5 cm from the axis.
+      expect(inner).toBeLessThan(0.0625);
+      expect(outer).toBeGreaterThan(0.09);
+    }
+    rig.dispose();
+  });
+
   it("turns the game's joint frame into the physics body frame", () => {
     const along = (x: number, y: number, z: number) =>
       new THREE.Vector3(x, y, z)

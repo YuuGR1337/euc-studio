@@ -380,18 +380,56 @@ const THIGH_FORM = rows([
   [-0.3, 0.1, 0.099],
   [-0.24, 0.1, 0.099],
 ]);
-/** A strap all the way round the leg. */
-const strapRound = (at: number, height = 0.024): RiderPatch =>
-  patch({
-    anchor: "back",
-    u0: -Math.PI,
-    u1: Math.PI,
-    from: at - height / 2,
-    to: at + height / 2,
-    lift: 0.005,
-    uSegments: 36,
+/**
+ * How far the legs reach toward the wheel, m from the leg's axis: the lateral rider's contact
+ * shapes (a 5 cm knee ball, 3.5 cm shin and 5 cm calf capsules) touch the side pads at about
+ * 5 cm, so the jeans and the guards are flattened on that side to sit there, not in the pads.
+ * The outside stays baggy, as cloth pressed on the pads does.
+ */
+const INNER_REACH = { jeans: 0.056, guards: 0.062 };
+
+/**
+ * Flattens the wheel-side (inner) face of a leg part to `reach`: the inner side is -x on the left
+ * leg (`side` +1) and +x on the right, in the leg's frame. A smooth squeeze (tanh), so a fold or a
+ * cell keeps its shape near the axis and nothing passes `reach`.
+ */
+function hugInner<T extends THREE.BufferGeometry>(geometry: T, side: number, reach: number): T {
+  const position = geometry.getAttribute("position");
+  for (let i = 0; i < position.count; i++) {
+    const inner = -side * position.getX(i);
+    if (inner > 0) position.setX(i, -side * reach * Math.tanh(inner / reach));
+  }
+  position.needsUpdate = true;
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
+/** A band on `profile` between two heights, across `u0`..`u1`, in the guard's black. */
+function band(
+  profile: LoftProfile,
+  options: { from: number; to: number; u0: number; u1: number; lift: number } & Partial<
+    Parameters<typeof patchGeometry>[1]
+  >,
+): THREE.BufferGeometry {
+  const { from, to, ...rest } = options;
+  return patchGeometry(profile, {
+    uSegments: 24,
     vSegments: 2,
     shade: guard,
+    ...rest,
+    v0: vAtHeight(profile, from),
+    v1: vAtHeight(profile, to),
+  });
+}
+/** A strap all the way round the leg. */
+const strapRound = (profile: LoftProfile, at: number, height = 0.024) =>
+  band(profile, {
+    from: at - height / 2,
+    to: at + height / 2,
+    u0: -Math.PI * 1.5,
+    u1: Math.PI / 2,
+    lift: 0.005,
+    uSegments: 36,
   });
 const KNEE_CUP = { u: 0.95, from: 0.04, to: -0.13, lift: 0.016, taper: 0.28 };
 
@@ -413,35 +451,46 @@ function cup(profile: LoftProfile, span: typeof KNEE_CUP): THREE.BufferGeometry 
 }
 const UPPER_CUP = { u: 0.95, from: -0.305, to: -0.43, lift: 0.014, taper: 0.3 };
 
-/** The knee guard's lower half (the cup over the knee) and the shin plate, on the shin. */
+/**
+ * The knee guard's lower half (the cup over the knee), the shin plate and two straps, on the
+ * shin; their wheel side flattened like the jeans'.
+ */
 const KNEE_GUARD: RiderPanelGroup = Object.freeze({
   role: "gear",
   casts: true,
-  patches: Object.freeze([
-    patch({
-      anchor: "front",
-      u0: -0.85,
-      u1: 0.85,
-      from: -0.235,
-      to: -0.095,
-      lift: 0.007,
-      taper: 0.45,
-      bulge: 0.06,
-      uSegments: 24,
-      vSegments: 14,
-      shade: guard,
-    }),
-    strapRound(-0.13),
-    strapRound(-0.22),
-  ]),
-  build: () => cup(KNEE_FORM, KNEE_CUP),
+  patches: Object.freeze([]),
+  build: (side: number) =>
+    hugInner(
+      mergeGeometries([
+        cup(KNEE_FORM, KNEE_CUP),
+        band(SHIN, {
+          from: -0.235,
+          to: -0.095,
+          u0: Math.PI / 2 - 0.85,
+          u1: Math.PI / 2 + 0.85,
+          lift: 0.007,
+          taper: 0.45,
+          bulge: 0.06,
+          vSegments: 14,
+        }),
+        strapRound(SHIN, -0.13),
+        strapRound(SHIN, -0.22),
+      ]),
+      side,
+      INNER_REACH.guards,
+    ),
 });
 /** The knee guard's upper half, above the knee, with its strap round the thigh. */
 const THIGH_GUARD: RiderPanelGroup = Object.freeze({
   role: "gear",
   casts: true,
-  patches: Object.freeze([strapRound(-0.315)]),
-  build: () => cup(THIGH_FORM, UPPER_CUP),
+  patches: Object.freeze([]),
+  build: (side: number) =>
+    hugInner(
+      mergeGeometries([cup(THIGH_FORM, UPPER_CUP), strapRound(THIGH, -0.315)]),
+      side,
+      INNER_REACH.guards,
+    ),
 });
 
 // -- Hands ---------------------------------------------------------------------------------------
@@ -669,8 +718,14 @@ export const STREET_KIT: RiderLook = Object.freeze({
     boot: Object.freeze([laces]),
   }),
   paint: Object.freeze({
-    thigh: fade(-0.02, -0.4, 0.1),
-    shin: fade(0.04, -0.12, 0.08),
+    thigh: (geometry: THREE.BufferGeometry, side: number) => {
+      fade(-0.02, -0.4, 0.1)(geometry, side);
+      hugInner(geometry, side, INNER_REACH.jeans);
+    },
+    shin: (geometry: THREE.BufferGeometry, side: number) => {
+      fade(0.04, -0.12, 0.08)(geometry, side);
+      hugInner(geometry, side, INNER_REACH.jeans);
+    },
     hand: paintGlove,
     boot: paintSneaker,
   }),
