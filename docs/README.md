@@ -112,6 +112,6 @@ true now.
 
 Kept for their decisions and evidence. They describe the state of their date, not the current one.
 
-- [Articulated rider plan](superpowers/plans/2026-10-16-articulated-rider.md) (2026-10-16)
-- [Project completion plan](superpowers/plans/2026-10-16-project-completion.md) (2026-10-16)
-- [Desktop change review](../plans/reports/code-review-2026-10-16-desktop-ux.md) (2026-10-16)
+- [Articulated rider plan](history/2026-10-16-articulated-rider.md) (2026-10-16)
+- [Project completion plan](history/2026-10-16-project-completion.md) (2026-10-16)
+- [Desktop change review](history/code-review-2026-10-16-desktop-ux.md) (2026-10-16)

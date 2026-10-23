@@ -14,7 +14,7 @@ The first physical `articulated_sagittal_v1` slice is implemented in `euc-physic
 Actual cached stock FreeRide acceptance now passes for both models after the articulated task-torque mapping correction.
 The articulated model remains experimental. Mechanical braking, mild grades, a small bump, and momentum-preserving release now pass focused tests. Native generated-terrain steering passes for both rider models over 14 driven seconds. These bounded checks do not establish measured rider behavior.
 Sections describing later increments remain requirements, not completion claims.
-See [the articulated implementation handoff](../superpowers/plans/2026-10-16-articulated-rider.md) for exact interfaces and regression evidence.
+See [the articulated implementation handoff](../history/2026-10-16-articulated-rider.md) for exact interfaces and regression evidence.
 
 ## 1. Scope and decisions
 
