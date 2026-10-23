@@ -273,6 +273,7 @@ Each `[[terrain.feature]]` has a `kind`:
 |---|---|---|
 | `pothole` | `at_m`, `depth_m`, `length_m` | A hole with steep walls. |
 | `bump` | `at_m`, `height_m`, `length_m` | A smooth hump, `height · (1 − cos)/2` over its length. |
+| `curb` | `at_m`, `height_m`, `yaw_deg` (default 0) | A step up onto a sidewalk with a sharp edge: a box whose face crosses the path at `at_m`, turned `yaw_deg` from square on (within ±80, its face 1 m or more ahead of the start across the strip). The path rides it for 4 m / cos(yaw). |
 
 A feature must start at 1 m or later, end before `length_m`, be at least 8 cm long, and have a depth
 or height between 0 and 1 m. Features add to the slope. The path runs along world +x; the ground is a
