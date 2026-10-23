@@ -284,7 +284,13 @@ as INFERRED). The firmware does not care: its speed and odometer come from elect
 0.0505 m, and the force at the ground per amp, 1.5 psi I / (0.0505 / 2 pi), does not depend on the
 pole pairs either, so the motor flux from the no-load speed stays the same. What changes is the
 mechanics: the wheel's size, its spin speed for a given road speed (7 % lower), the torque per amp
-(8 % higher) and the contact geometry. The "16 x 3 inch (published)" note in the electrical model
+(8 % higher) and the contact geometry.
+
+**Revised 2026-10-23.** The table assumes that the firmware's 0.0505 m per electrical turn is the
+true rolling circumference per pole pair. The owner's ride log (2026-10-17) shows that it is not: GPS
+reads 0.905 of the displayed speed over 54 steady rows. The plant keeps this tire's 0.2251 m and now
+has 31 pole pairs, so the firmware shows 1.107 times the true speed, as on the owner's wheel
+(`docs/models/electrical.md`, "Calibration against the owner's ride log"). The "16 x 3 inch (published)" note in the electrical model
 conflicts with the tire on the scanned wheel; the owner's photo confirms the 3.00-12 tire.
 
 ## Pedals

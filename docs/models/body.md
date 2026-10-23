@@ -550,7 +550,7 @@ Wheel (`[body]` in `plant.toml`, Begode Extreme values):
 
 | Parameter | Value | Source |
 |---|---|---|
-| `tire.radius_m` | 0.2251 m | INFERRED: loaded rolling radius, 28 pole pairs × 0.0505 m (the firmware's distance per electrical turn) / 2π; the scanned 3.00-12 tire's free radius is 0.2296 m |
+| `tire.radius_m` | 0.2251 m | ESTIMATE: loaded rolling radius, 4.5 mm under the scanned 3.00-12 tire's free radius of 0.2296 m. The firmware's 0.0505 m per electrical turn with 31 pole pairs then shows 1.107 × the true speed, as the owner's ride log does (electrical.md) |
 | `tire.half_width_m` | 0.0407 m | MEASURED: 81.4 mm wide (used only without a torus) |
 | `geometry.toml` `tire_torus` | tube 0.058 m at 0.1716 m | MEASURED: crown lateral radius; 0.2296 m outside, the free tire |
 | `tire.friction` | 1.1 | ESTIMATE: owner's report, dry asphalt about 1.0-1.2 |
