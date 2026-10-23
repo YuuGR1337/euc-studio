@@ -93,8 +93,8 @@ What the scan cannot give:
 On each side the axle sits in a carriage that slides on a vertical rod inside the channel between the
 fore and aft packs. The rods are 30.0 mm (cylinder fit, spread 0.1 mm) at x -0.2, y +63.6 and -64.9 mm,
 vertical within 0.15 degrees (top 0.13 degrees rearward). The carriage block's top face is at z
-251 mm; the rod is free above it for 108.5 mm up to a ring on the rod (lower face at 359.5 mm, likely
-a bump stop or boot) and 132 mm up to the frame's top plate (383 mm). Below the axle a frame block
+251 mm; the rod is free above it for 108.5 mm up to a ring on the rod (lower face at 359.5 mm: a pipe
+O-ring, a travel indicator, see "Rear linkage") and 132 mm up to the frame's top plate (383 mm). Below the axle a frame block
 holds the rods (z -52 to -20 mm). The scanned wheel stood unloaded, so the carriage is taken to be at
 the bottom of its travel (topped out); the shock's stroke, not the rod, limits the real travel.
 
@@ -122,84 +122,135 @@ points that are in the scan (pack rivets, frame bolts, the rear handle's roller 
 with the cover off fits 11 scan points to 8 px RMS, about 1 mm at the linkage. The derivation lives
 in the private research folder (`research/linkage/`).
 
-- **The rocker (MEASURED shape).** One black, textured, laser-cut steel plate on each side, outside
-  the shock, with one large window and three holes in view: the shock's top eye on a cross bar (the
-  red rebound knob beside it), an empty hole 20 mm from it, up and forward (likely a second shock
-  position), and a lower cross bar 66 mm below the top eye. The plate continues forward under the rear packs' edge,
-  where no photo reaches it.
+- **The rocker (MEASURED).** One black, textured, laser-cut steel plate on each side, outside the
+  shock. A retailer's parts diagram (not in the repo) shows the whole plate: a triangle with a notch
+  on its rear edge, three windows and four holes. Three of the holes are in the owner's photos: the
+  shock's top eye on a cross bar (the red rebound knob beside it), an empty hole 20 mm from it, up
+  and forward (likely a second shock position), and the rocker pin 66 mm below the top eye. A
+  similarity fit of the diagram's holes to these three (scale error 2 %, residuals under 0.8 mm)
+  places the fourth hole, the frame pivot, at (x -66.6, z 398.1 mm) +-3 mm (a fit to hand-picked
+  hole centres gives (-67.6, 396.9)). That is the steel pin between two frame blocks seen with the
+  seat off (x -45 +-20, z 400 +-15 mm there), so that pin is the rocker's pivot.
 - **The shock (MEASURED line).** It runs from its top eye, under the rear roller, forward and down
-  toward the carriage: a decal on the shock body places the line 44-52 degrees forward of vertical.
+  toward the carriage: a decal on the shock body places the line 42-52 degrees forward of vertical.
   So its bottom eye, 200 mm away, sits on the carriage just behind the slider channel, above the
   tire (INFERRED, +-10 mm), hidden behind the rear packs in every photo.
-- **The link (INFERRED).** Plates leave the lower cross bar forward and down, along the shock,
-  toward the bottom eye's shaft; past the bar they end in a pointed tip with a small hole. So the
-  lower cross bar is the link-to-rocker pin, and the link joins it to the carriage.
-- **The rocker's frame pivot (not located).** It is hidden in every photo. With the seat off, a
-  steel pin crosses between two frame blocks at the front end of the plates, at about (x -45 +-20,
-  z 400 +-15 mm). As the pivot of this rocker it would lock the linkage: every geometry with the
-  pivot there runs within 25 degrees of a straight link-to-rocker line (a toggle) before the shock
-  is compressed. So its role is open (a stop, a mount, or the pivot of another part). A pivot works
-  from about x -80 mm rearward; the render model draws it at (x -100, z 395 mm), the sound point
-  nearest that pin (ESTIMATE).
-- **The parts photo** (a product picture of a three-hole rocker and a two-hole link) shows a
-  smooth CNC part with three windows; the owner's plates are not that part, so its sizes are not
-  used.
+- **The link (MEASURED shape, INFERRED lower pin).** The diagram shows a straight bar, 156 mm hole
+  to hole at the rocker plate's scale, wider near its upper hole and ending in a pointed tip with a
+  small hole past it; the tip shows beside the rocker pin in the photos. In the side photo with the
+  cover off, the link's two edges, back-projected onto its plane, run 16 +-2 degrees below
+  horizontal forward from the rocker pin. Its lower pin is therefore at about (x -27, z 270 mm)
+  +-8 mm, 23 mm above the shock's bottom eye: the link does not share the shock's bottom shaft
+  (that would need 25 degrees). The lower pin must ride on the carriage too, or the rocker, its
+  pivot and the link would form a rigid triangle.
 
 | Point (full extension) | x mm | z mm | Evidence |
 | --- | --- | --- | --- |
 | Shock top eye (on the rocker) | -185 | 378 | MEASURED (photo pose, +-3) |
 | Rocker pin (link upper hole) | -177 | 313 | MEASURED (photo pose, +-3) |
 | Empty hole beside the top eye | -172.5 | 393 | MEASURED (photo pose) |
-| Shock bottom eye and link lower hole, on the carriage | -34 | 247 | INFERRED (shock line, 200 mm), +-10 |
-| Steel pin between two frame blocks | -45 | 400 | MEASURED roughly (seat-off photos), +-20 / +-15 |
-| Rocker frame pivot | -100 | 395 | ESTIMATE (drawing only), band below |
+| Rocker frame pivot (the steel pin) | -66.6 | 398.1 | MEASURED (parts-diagram fit, +-3) |
+| Link lower pin, on the carriage | -27 | 270 | INFERRED (link direction and length), +-8 |
+| Shock bottom eye, on the carriage | -34 | 247 | INFERRED (shock line, 200 mm), +-10 |
 
-**The leverage (ESTIMATE, not used by the physics yet).** A Monte Carlo over the measured points
-(+-2 mm), the shock line (44-52 degrees), the link's direction (18-32 degrees below the rocker pin,
-from the plates) and its lower pin on the carriage, with the frame pivot anywhere the photos leave
-room for it (between the rear packs, under the frame top), keeps 24,000 of 160,000 sampled geometries
-(link and rocker at least 20 degrees from a straight line, the shock compressed monotonically). Their pivots
-lie at x -128 to -81 mm, z 376 to 413 mm (5th to 95th percentile). They agree on three things:
+**The leverage: two readings, not used by the physics yet.** The photos place the link's lower
+pin but do not show what holds it. A short video from the side, pad cover off, while the seat is
+pressed down decides: does the rocker turn?
 
-- the ratio at rest is 2.1-2.7 (median 2.4) axle mm per shock mm, not the 1.6-1.9 that the owner's
-  sag gives with the 0-2 mm of preload assumed so far. To match the owner's sag at that ratio, the
-  spring needs about 6-11 mm of preload;
-- the rods' stop (108.5 mm of axle travel above the carriage) ends the travel before the shock's
-  stroke in 87 % of them: only 41-55 mm (median 47) of the 55 mm stroke is used;
-- the ratio near the end of the travel rises (median 2.6 at 100 mm, band 1.6-3.6).
+- **(a) The rocker turns: the link's lower pin rides on the carriage** (what the studio draws). As
+  the carriage rises, the shock is pushed toward its top eye while the link turns the rocker a few
+  degrees, first so that the top eye rises with it and, once the link passes horizontal (about 50
+  mm of travel), back. Drawn as in the table, the ratio is 2.34 axle mm per shock mm at rest, 2.03
+  at 45 mm, 1.84 at 75 mm and 1.70 at 93.5 mm (a falling ratio: the wheel gets stiffer through the
+  travel), and the 55 mm stroke ends at 107.5 mm of axle travel. A Monte Carlo over the points'
+  uncertainties (pivot, top eye and rocker pin +-3 mm, shock line 42-52 degrees, link 14-18
+  degrees and 153-159 mm; 4,000 samples) gives a ratio of 2.0-2.5 at rest (median 2.2) and 1.3-2.1
+  at 93.5 mm (median 1.6), and the stroke ending at 89-121 mm (median 101); a coarser grid over
+  the same ranges spans 1.9-2.7 at rest and 1.0-2.4 at 93.5 mm. The owner's sag then needs about
+  4-9 mm of spring preload (median 6, 7 for the drawn points), against the 2 mm assumed so far: with
+  2 mm the owner would sag about 25 mm at the axle (the owner reports about 15) and the default 80
+  kg rider 23-37 mm (31 for the drawn points) instead of the 18 mm of the constant 1.7.
+- **(b) The rocker is fixed: the link's lower pin is on the frame.** The pivot, the link and the
+  frame then form a rigid triangle, the rocker is a shock bracket with two positions (the empty
+  hole), and only the carriage moves the shock's bottom eye. The ratio is the shock's angle alone
+  and constant: 1.52 at the drawn 49 degrees (1.34-1.62 over the photographed 42-52 degrees, 1.70
+  at 54 degrees). It matches the owner's sag with little preload: 14 mm at the axle with no
+  preload at 1.52, 14 mm with 2 mm at 1.70. At 1.52 the 55 mm stroke ends at 84 mm of axle travel.
 
-The physics keeps the constant `linkage_ratio` 1.7 of `plant.toml` until two inputs arrive: where
-the rocker's front end is bolted (or whether the steel pin turns when the seat is pressed), and the
-spring preload (or a sag reading on an O-ring on the shock shaft). With them the curve becomes a
-measured `ratio_curve`.
+The ring on each slider rod (lower face 108.5 mm above the carriage) is a pipe O-ring (the parts
+diagram lists pipe O-rings with the slider pipes): a travel indicator, not a stop. The frame's top
+plate, 132 mm above the carriage, is the hard limit. The physics keeps the constant `linkage_ratio`
+1.7 of `plant.toml` (it fits reading (b) near 54 degrees) until the video. If it shows (a),
+`docs/hardware/suspension-linkage.md` holds the candidate `ratio_curve` and preload; the O-ring's
+rise after the owner steps off (the sag at the axle) checks either reading.
 
-**The drawn linkage.** The render model draws the measured points with the pivot ESTIMATE above.
-Over the physics travel (93.5 mm with the constant 1.7) its shock shortens 38 mm where the physics'
-shock travel is 55 mm: the drawing's shock length differs from the `shock_mm` channel by up to 17 mm
-(2 mm at 10 mm of travel, 11 mm at 60 mm). The rocker turns 11 degrees at most. The studio poses the
-drawing from `suspension_mm`, so all parts stay joined; the shock's length follows the drawing.
+**The drawn linkage.** The render model draws the rocker plates and links from the diagram's
+outlines, placed by the fits above, with the carriage points of the table; the studio poses it as
+reading (a), and one flag (`LINKAGE_READING` in `app/src/workspaces/ride/shockLinkage.ts`) switches
+it to (b), where the rocker, the link and the link's lower pin stay still. Seen from the solved
+camera of the cover-off side photo, its holes, windows, notch and link fall on the photo within a
+few millimetres. Over the physics travel (93.5 mm with the constant 1.7) its shock shortens 46.6 mm
+where the physics' shock travel is 55 mm: the drawing's shock length differs from the `shock_mm`
+channel by up to 8.4 mm. The rocker turns 4.3 degrees at most. The studio poses the drawing from
+`suspension_mm`, so all parts stay joined; the shock's length follows the drawing.
 
 **Superseded.** The first estimate (2026-10-22, before the cover-off and seat-off photos) read the
 2026-10-16 photos with the scan's old shafts as anchors: a shock leaning 23.5 degrees forward from
 the old bottom shaft, a frame pivot forward of the top eye, and a rising curve from 1.75 at rest to
 2.38 at 103.5 mm. The new photos contradict its positions (the top eye sits 40 mm further back and
 the old bottom shaft is gone), so it is not used. Its scenario runs (no verdict changed against the
-constant 1.7) say nothing about the real linkage. `docs/hardware/suspension-linkage.md` records the
-readings considered and why each was kept or dropped.
+constant 1.7) say nothing about the real linkage. The second estimate, before the parts diagram,
+had the link on the shock's bottom shaft and the pivot hidden: its Monte Carlo (pivots between the
+rear packs, ratio 2.1-2.7 at rest, 41-55 mm of stroke used) is superseded by the located pivot and
+link pin. `docs/hardware/suspension-linkage.md` records the readings considered and why each was
+kept or dropped.
 
 ## Pad covers
 
-The owner's photos of 2026-10-22 show a removed side pad cover: a C-shaped part of textured black
-molded plastic, with two arms joined by a spine, raised blocks at the arms' ends (one with the
-maker's lettering, one with a round recess), diagonal grooves and four screw holes. The scan does
-not contain it: the scanned packs show their bare outer faces with rivet rows. Its outline is traced
-from the photo (the private pipeline's `pad_cover()`), but two things are open: its size (the screw
-heads give 0.14-0.19 mm per photo pixel, so its length is 370-510 mm) and where it sits on the wheel
-(the photo of it mounted shows only part of it). So the render model does not draw it yet.
+The side pad covers are not in the scan (the scanned packs show their bare outer faces with rivet
+rows). The render model sculpts them from the owner's two photos of a removed cover (2026-10-22:
+one from above, one low from its front end) and a retailer's parts diagram (not in the repo; its
+left and right side pads). Their shape is INFERRED; their size and place are ESTIMATES.
 
-Where the rider's calves would touch it is open for the same reason. The raised blocks are the
-likely contact faces; once the cover is placed, `geometry.toml` gets their outer faces as contact
-boxes for a leg-pad contact model.
+- **How the shape was measured.** Twenty points of the cover (the hole, the lettering block's top
+  corners, the three screw heads, groove ends, the round block's top, and six points where the
+  cover touches the floor) were picked in both photos. A bundle adjustment with the phone's known
+  focal length (48 mm equivalent) solves both cameras and the points together: 5.5 px RMS in the
+  top photo and 3.1 px in the low one. The floor is the cover's mounting face, so each point's
+  height above the floor is how far it stands out from the packs. Outlines come from the top
+  photo, projected onto the plane of their face. A fit of the diagram's left pad picture to the
+  same points (9 px RMS) gives the diagram views.
+- **What it is.** A C of moulded black plastic, open at the back with 3.5 mm walls (ESTIMATE): a
+  lettering block at the front top (its lettered face slopes from its top face to the mounting
+  face; the hole in its top face; the maker's lettering is left out); an upper arm running back
+  as a bar about 32 mm deep, clear of the mounting face, that ramps up into a raised end block (the
+  upper arm's rear leg); a spine down from the lettering block, also clear of the mounting face;
+  the lower arm, solid to the mounting face, with three diagonal grooves, its front end and rear
+  end sloping down to the packs; on the lower arm a slotted block by the spine (two pockets, one
+  with a screw in its floor, and a shallow tray at its front) and a round-topped block at the rear
+  end; three steel screw heads. Edges are rounded 4-18 mm and the elements blend with 7 mm
+  fillets.
+- **Size: 401 x 320 mm, 106 mm deep, ESTIMATE.** The photos give the proportions, not the scale.
+  The scale is the diagram's median per-part scale (0.96 mm per px): 401 mm long, 372-447 mm over
+  the diagram's per-part range (370-510 mm from the screw heads in the photo). Heights above the
+  mounting face at that scale (INFERRED, +-20 % from the reconstruction): upper arm and lower arm
+  59-60 mm, lettering block 95 mm, slotted block rim 70-92 mm, end block and round block 108 mm.
+- **Place: ESTIMATE +-40 mm.** The cover's screw holes could not be matched to frame holes: the
+  scan shows none on the packs' outer faces under the footprint (only rivets), so the mounts are
+  hidden. The place follows the photos: the cover-off photos expose the linkage, and the early
+  photos show the arms' rear-end blocks outboard of the linkage at its rear. So the arms end
+  beside the rocker's rear lobes (x -205 mm), the C opens around the linkage, the spine is at the
+  front (x +196 mm), the top edge at z 476 mm, and the mounting face on the packs' outer faces at
+  |y| 102.5 mm (the scan reaches |y| 102.0 under the footprint, nothing further out). The outer
+  faces then reach |y| 162-210 mm, inside the deployed pedals (|y| 247 mm).
+- **Calf contact faces (for a later leg-pad contact model).** The outer faces where the rider's
+  legs can rest are listed in `geometry.toml` `[pad_covers] contact_faces` (ESTIMATE, from the
+  element outlines above): the lettering block's top, the upper arm, the end block's top, the
+  round block's top and the lower arm.
+- **Not physics.** The covers have no collision solid and no mass in `plant.toml`.
+
+The owner's length of a removed cover with a tape and one photo of it mounted, from the side, will
+replace the size and the place.
 
 ## Rolling radius and the electrical model
 
@@ -223,24 +274,48 @@ conflicts with the tire on the scanned wheel; the owner's photo confirms the 3.0
 
 ## Pedals
 
-**ESTIMATE, to be updated from the owner's measurements** (pedal height, size and position; the owner
-also says the drawn design does not match his pedals). The CNC decks were off the wheel for the scan. The model draws our own deck in their style: a black
-anodised aluminium plate with a D-shaped outer edge and a bright chamfer, hexagonal through-cut-outs in
-the front and rear thirds, a plain solid band in the middle, gold grip pins on the cell junctions
-(26 per deck) and a polished hinge pin. Left and right are mirror images. The sizes are estimates:
+The CNC decks were off the wheel for the scan; only the hinge brackets and pins are in it. The
+model's deck, hinge rod and bracket follow the owner's tape photo of a deployed deck (2026-10-16) and
+a retailer's parts diagram (not in the repo; its pedal set, pedal rods and pedal brackets). Left
+and right are mirror images.
 
-- **Hinge.** Measured: the 6 mm pin runs fore-aft at y +-114.8 mm, z +7.5 mm. The deck's notch must
-  clear the scanned bracket (46 mm long, its outer face 20.3 mm past the pin), so the notch is 50 mm
-  long and 21 mm deep. The plate (9 mm) is centred on the pin, so its top is at z +12 mm.
-- **Length and width.** Shop photos give the proportions: the hinge notch is 0.16 of the deck length
-  and the width (hinge edge to outer edge) is 0.47 of it. A 50 mm notch makes the deck about 300 mm
-  long; with a little margin around the bracket, 290 x 135 mm. Uncertainty: +-30 mm length, +-15 mm
-  width, +-5 mm deck height. One tape measure on a real pedal settles it.
+- **Length: 300 mm, MEASURED +-10 mm.** The owner's tape across the deck reads 2.6 to 32.7 cm end to
+  end; the tape lies above the deck, so the reading carries about 10 mm of parallax.
+- **Outline and width: 138 mm hinge edge to outer edge, INFERRED +-7 mm.** Traced from the diagram,
+  where the deck is 277 px long; at the tape's 300 mm that is 1.06 mm per px. The diagram is taken
+  slightly in perspective (the near end 3 % wider), and the deck is symmetric front to back (the
+  diagram's cell centres repeat within 2 px about the notch, and the tape photo shows matching
+  ends), so each traced edge is the mean of the two halves. The deck is full width over its middle
+  third and rounds off toward both ends, also on the hinge side.
+- **Cut-outs: INFERRED.** Hexagons with their points along the deck's length, on the diagram's
+  lattice: columns 51.6, 90.1 and 128.6 mm from the middle, cells 46.1 mm apart across the deck,
+  38.5 mm across the flats (7.6 mm webs) with 5 mm corner radii (the tape photo's soft corners),
+  cut back by a 7.5 mm rim along the outline. Eight cells per
+  half, the outer ones partial, as in both pictures.
+- **Solid strips: INFERRED.** A plain centre strip 62 mm long (it carries the maker's lettering on
+  the real deck; the model leaves it plain) and a solid strip 25 mm wide along the hinge edge.
+- **Edge and finish.** Black anodised faces with a bright machined side wall and top chamfer all
+  round (the tape photo shows a silver rim); steel grip pins on the web junctions (28 per deck;
+  the diagram shows them at most junctions).
+- **Hinge and notch.** MEASURED: the 6 mm pin runs fore-aft at y +-114.8 mm, z +7.5 mm. The notch
+  must clear the scanned bracket (46 mm long, its outer face 20.3 mm past the pin), so it is 50 mm
+  long and reaches 21 mm past the pin. The diagram's notch is 45-56 mm long but only about 20 mm deep
+  from the hinge edge, which would not clear the scanned bracket; the bracket fit decides. The
+  hinge rod is drawn 190 mm long (ESTIMATE: that is its length at the deck's diagram scale; 125-200
+  mm if the rods are pictured at another scale).
+- **Thickness: 9 mm, ESTIMATE +-2 mm** (no picture shows the edge square on). The plate is centred
+  on the pin, so its top is at z +12 mm.
+- **Bracket.** The scanned hanger's envelope (MEASURED: x -22.1 to 23.5, y 100.7 to 135.5, z -31.1
+  to 10.5 mm) drawn clean: a black block holding the rod, an outer web, and a bright flange at the
+  packs' bottom plane with the diagram's three screw holes (layout ESTIMATE).
 - **Fold.** Each deck is its own node with its origin on the pin, so the app folds it about x: the
   left deck up with +90 degrees, the right with -90 degrees (glTF axes).
 
-The collision boxes `pedal_left` and `pedal_right` follow these sizes: 290 x 135 x 9 mm, centred on
-the pins at y +-176.3 mm.
+**Physics values not changed.** The collision boxes `pedal_left` and `pedal_right` keep 290 x 135 x
+9 mm centred at y +-176.3 mm, and `plant.toml` keeps `pedal_below_axle_m` -0.012. With the drawn
+deck they would become 300 x 138.3 x 9 mm (half sizes 0.150, 0.0692, 0.0045) centred at y +-177.95
+mm: 10 mm longer, 3.3 mm wider, the centre (where the feet stand) 1.65 mm further out. The deck's
+height does not change (same thickness and pin), so `pedal_below_axle_m` stays.
 
 ## Collision shapes
 
@@ -256,12 +331,13 @@ the pins at y +-176.3 mm.
 - **Top and front.** A box over the seat and the top frame; a box over the handle, headlight and
   display chamfer.
 - **Rear roller and shock.** Capsules along their axes.
-- **Pedals.** The bracket boxes are measured; the decks use the estimated sizes above.
+- **Pedals.** The bracket boxes are measured; the deck boxes keep the earlier 290 x 135 mm (see
+  "Pedals").
 
 ## The render model
 
-`app/public/models/begode-extreme/` holds three levels of detail (LOD0 294k triangles 2.5 MB, LOD1
-114k 1.1 MB, LOD2 41k 0.37 MB, meshopt compressed). Its README lists the nodes. How it is made from
+`app/public/models/begode-extreme/` holds three levels of detail (LOD0 340k triangles 2.9 MB, LOD1
+134k 1.4 MB, LOD2 48k 0.43 MB, meshopt compressed). Its README lists the nodes. How it is made from
 the scan (the tools live in the private research folder):
 
 1. **Parts.** Simple rules split the scan: tire (wheel pieces that reach the tread), hub, seat
@@ -288,23 +364,29 @@ the scan (the tools live in the private research folder):
    reservoir: **200 mm eye to eye and 750 lb/in, MEASURED by the owner**; a 56 mm x 115 mm spring
    (DNM size chart for 200 mm), 8 mm x 24 mm eyelets, threaded body with a slotted collar at the
    bottom eye, red rebound knob at the top eye; stroke ESTIMATE (55 mm). The shock and the **rear
-   linkage** are drawn to the owner's photos of 2026-10-22 (see "Rear linkage" above): per side a
-   rocker plate with the photographed outline, window and empty hole, plus its hidden forward arm
-   to the pivot ESTIMATE; a link (a bar with the pointed tip past the rocker pin) to the carriage;
-   cross bars at the top eye and the rocker pin (black tubes with spacers either side of the shock
-   eye, chrome button heads with washers); the plates sit at |y| 46.5-51 mm (the rear photo's camera
-   pose fits 50-54 mm for their outer faces); the carriage's clevis and bottom shaft (hidden in
-   every photo, ESTIMATE); the pivot shaft; and the steel pin between two frame blocks at the front.
+   linkage** are drawn to the owner's photos of 2026-10-22 and the parts diagram (see "Rear
+   linkage" above): per side a rocker plate with the diagram's outline, three windows and four
+   holes; a link with the diagram's outline (wider near the rocker pin, the pointed tip and its
+   small hole past it) to its own carriage pin; cross bars at the top eye and the rocker pin (black
+   tubes with spacers either side of the shock eye, chrome button heads with washers); the plates
+   sit at |y| 46.5-51 mm (the rear photo's camera pose fits 50-54 mm for their outer faces); the
+   carriage's clevis and bottom shaft for the shock, and the link's lower pin with a plate per side
+   (its own node, so the studio can hold it on the carriage or on the frame; hidden in every photo,
+   ESTIMATE); and the pivot pin between two frame blocks.
    Nothing of the scan's older system is drawn: its shafts, plates and rear tray are removed. Each
    moving part is its own node (README), and the studio poses them from the Suspension channel.
    The **rear handle** is the orange CNC U-handle of the photos: each arm runs from a foot at the
    frame top (x -113 mm) up through the roller axis to the grip bolt, with three through-windows on
    the lower part and a blind pocket on the upper part; the windows, the foot and the grip (63.5 mm
    past the roller axis) are MEASURED on the cover-off photo (camera pose from scan points), the
-   outer face at |y| 58.7 mm on the scan, the black grip bar (26 mm) is an ESTIMATE. The scanned faces these models
+   outer face at |y| 58.7 mm on the scan, the black grip bar (26 mm) is an ESTIMATE. The physics'
+   collision solid for the grip (`[collision] rear_handle_grip`) keeps the earlier estimate, about
+   30 mm higher than the photo's grip; the rider rarely touches it. The scanned faces these models
    replace are removed; what remains of the scan there (brackets, a sloped base plate) is cleaned
    (loose flaps under 150 mm2 dropped, holes closed, smoothed). The roller is cut out of the seat
-   before decimation, and its end caps (speakers) are modelled from their measured profile.
+   before decimation, and its end caps (speakers) are modelled from their measured profile. The
+   **side pad covers** are sculpted from the owner's photos, an ESTIMATE in size and place ("Pad
+   covers" above), grained like the shell.
 7. **No trademarks.** The brand emblem pressed into the seat top is flattened (a quadratic surface
    fitted to the plain ring around it), the pedal band stays plain, and the shock carries no brand
    marks.
@@ -316,22 +398,27 @@ the scan (the tools live in the private research folder):
 9. **Looks.** The scan has no colour. Materials follow the owner's photos: textured dark-grey shell
    (a tileable grain normal map on LOD0 and LOD1), black rubber tire, matte black motor covers, orange
    flange ring, textured matte black linkage plates, smoked grey tail-light sleeves (they glow with
-   the LEDs in the studio), satin aluminium handle tube, black anodised pedals with gold pins,
-   smoked display window. Ambient occlusion is baked into the vertex colours.
+   the LEDs in the studio), satin aluminium handle tube, black anodised pedals with steel pins,
+   smoked display window. Ambient occlusion is baked into the vertex colours. The anodised orange
+   is set from the owner's photo (mean sRGB 184, 91, 47 on the handle). Under the studio's lights
+   (neutral tone mapping, neutral rim light) the handle, the chrome bolt heads and the shell render
+   within 26, 51 and 13 sRGB units of the photo's mean colours in the same view; with the earlier
+   ACES tone mapping and warm lights they were 91, 206 and 43 units off (the handle red, the chrome
+   copper, the shell brown).
 
 ## Open
 
 What the owner can measure to close the remaining gaps (centre to centre, in mm):
 
-- **Rocker linkage.** Where the rocker plate's front end is bolted to the frame: with the seat off,
-  whether the steel pin at the front turns when the seat is pressed down (then it is the pivot) or
-  the plates slide past it; a short video while pressing the seat answers it and shows the ratio.
-  And the spring preload: how far the collar is wound down from the spring's free length, or the
-  sag read on an O-ring on the shock shaft. With both, the leverage becomes a measured curve.
+- **Rocker linkage.** A short video from the side with the pad cover off while pressing the seat
+  down: whether the rocker plates turn about the steel pin and which way (reading (a) or (b)). And
+  the sag: push a slider pipe's O-ring down to its seal, stand on the wheel, step off and measure
+  how far the O-ring rose; or the spring preload (how far the collar is wound down from the
+  spring's free length). With both, the leverage becomes a measured curve.
 - **Pad covers.** The length of a removed cover with a tape, and one photo of it mounted, from the
-  side.
+  side (the model's cover is an ESTIMATE, "Pad covers" above).
 - **Shock stroke.** Printed on the shock or in its listing (55 mm is an ESTIMATE, 50-57 mm range).
-- **Pedals.** Width at the front, middle and back, and the thickness. A tape photo reads the length
-  at about 300 mm (model: 290 mm ESTIMATE); the outline and pin layout are not yet taken from it.
+- **Pedals.** The deck's width at the middle (hinge edge to outer edge) and its thickness, with a
+  tape; and the hinge rod's length if it comes out.
 - **Rear handle.** Distance from the roller axis to the grip centre.
 - **Controller.** Where the controller board sits (for the IMU height above the axle).

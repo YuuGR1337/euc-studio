@@ -1,0 +1,57 @@
+# World acceptance (W1b, docs/models/world.md): ride square into a curb on the generated city.
+# Seed 42, generator revision 2: the spawn arterial's right-hand curb (face 13.5 cm, y = -5.5 m) at
+# x = 4 m, where nothing stands on the sidewalk within 2.5 m. In the physics the curb is a box from
+# the world's solid pool; the height field steps up behind its face.
+#
+# PRELIMINARY: no measured ride over a curb backs this run. `record` checks always pass; `upright`
+# and `no_cutoff` are the safety verdict.
+schema = 1
+name = "world-curb-up-90deg"
+description = "Ride square into a 13.5 cm curb at 9 km/h on the city world (seed 42)."
+wheel = "begode-extreme"
+seconds = 14.0
+release_s = 2.5
+speed_kmh = [[0, 0], [5, 0], [7, 9], [11, 9], [13, 0]]
+settings = "tarik-2026-10-15"
+
+[world]
+seed = 42
+revision = 2
+start = { x_m = 4.0, y_m = 3.0, heading_deg = -90.0 }
+
+[[expect]]
+check = "record"
+signal = "pitch_deg"
+stat = "min"
+from_s = 8.0
+
+[[expect]]
+check = "record"
+signal = "pitch_deg"
+stat = "max"
+from_s = 8.0
+
+[[expect]]
+check = "record"
+signal = "speed_kmh"
+stat = "min"
+from_s = 8.5
+by_s = 11.0
+
+[[expect]]
+check = "record"
+signal = "iq_a"
+stat = "max"
+from_s = 8.0
+
+[[expect]]
+check = "record"
+signal = "suspension_mm"
+stat = "max"
+from_s = 8.0
+
+[[expect]]
+check = "upright"
+
+[[expect]]
+check = "no_cutoff"

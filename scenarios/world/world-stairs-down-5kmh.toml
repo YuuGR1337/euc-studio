@@ -1,0 +1,56 @@
+# World acceptance (W1b, docs/models/world.md): ride down a plaza's stairs at walking speed. Seed 42,
+# generator revision 2: plaza 526731184849724626 near (124, -52), 5 risers of 16.7 cm and treads of
+# 31 cm. The wheel starts on the platform 5.4 m behind the top step, rides down at 5 km/h and stops
+# on the sidewalk. Each step is a box in the physics; the height field steps down behind each riser.
+#
+# PRELIMINARY: no measured ride down stairs backs this run. `record` checks always pass; `upright`
+# and `no_cutoff` are the safety verdict.
+schema = 1
+name = "world-stairs-down-5kmh"
+description = "Ride down 5 steps of 16.7 cm at 5 km/h from a plaza on the city world (seed 42)."
+wheel = "begode-extreme"
+seconds = 15.0
+release_s = 2.5
+speed_kmh = [[0, 0], [5, 0], [6.5, 5], [11, 5], [12.5, 0]]
+settings = "tarik-2026-10-15"
+
+[world]
+seed = 42
+revision = 2
+start = { x_m = 124.40, y_m = -47.62, heading_deg = -95.35 }
+
+[[expect]]
+check = "record"
+signal = "pitch_deg"
+stat = "min"
+from_s = 8.5
+
+[[expect]]
+check = "record"
+signal = "pitch_deg"
+stat = "max"
+from_s = 8.5
+
+[[expect]]
+check = "record"
+signal = "speed_kmh"
+stat = "max"
+from_s = 8.5
+
+[[expect]]
+check = "record"
+signal = "iq_a"
+stat = "max"
+from_s = 8.5
+
+[[expect]]
+check = "record"
+signal = "suspension_mm"
+stat = "max"
+from_s = 8.5
+
+[[expect]]
+check = "upright"
+
+[[expect]]
+check = "no_cutoff"

@@ -10,6 +10,7 @@ publish.workspace = true
 
 [dependencies]
 euc-telemetry.workspace = true
+euc-world.workspace = true
 mujoco-rs.workspace = true
 serde.workspace = true
 thiserror.workspace = true

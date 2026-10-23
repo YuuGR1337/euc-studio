@@ -187,6 +187,35 @@ fn curb_solids_agree_with_the_sampler() {
     }
 }
 
+/// Every curb, step, platform and ramp box carries the drawn ground on its top: inside its
+/// footprint the ground is its top (a box never stands out of the ground it stands for).
+#[test]
+fn solid_tops_match_the_drawn_ground() {
+    let mut checked = [0usize; 4];
+    for seed in [42, 7] {
+        let w = world(seed);
+        for s in w.solids_in(Rect::new([-128.0, -128.0], [128.0, 128.0])) {
+            let slot = match s.kind {
+                SolidKind::Curb => 0,
+                SolidKind::Step => 1,
+                SolidKind::Platform => 2,
+                SolidKind::Ramp => 3,
+                _ => continue,
+            };
+            checked[slot] += 1;
+            for (fu, fv) in [(0.0, 0.0), (-0.8, -0.6), (0.8, 0.6), (-0.8, 0.6), (0.8, -0.6)] {
+                // Points on the top face, 5 cm in from its edges.
+                let lu = fu * (s.half[0] - 0.05).max(0.0);
+                let lv = fv * (s.half[1] - 0.05).max(0.0);
+                let p = [0, 1].map(|k| s.centre[k] + s.axes[0][k] * lu + s.axes[1][k] * lv);
+                let (Some(top), h) = (s.top_at(p, 0.0), w.height_at(p[0], p[1])) else { continue };
+                assert!((h - top).abs() < 0.02, "seed {seed}: {:?} top {top:.3} over ground {h:.3} at {p:?}", s.kind);
+            }
+        }
+    }
+    assert!(checked.iter().all(|&n| n > 0), "solids checked (curb, step, platform, ramp): {checked:?}");
+}
+
 #[test]
 fn the_spawn_is_level_clear_and_on_a_straight_road() {
     for seed in 0..12 {
@@ -392,10 +421,10 @@ fn hills_stay_gentle() {
 fn golden_digest() {
     let w = world(20_261_022);
     let mut all = 0xcbf2_9ce4_8422_2325u64;
-    for (_, d) in digests(&w, Rect::new([-32.0, -32.0], [31.0, 31.0])) {
+    for (_, d) in digests(&w, Rect::new([-80.0, -80.0], [79.0, 79.0])) {
         all = (all ^ d).wrapping_mul(0x0000_0100_0000_01b3);
     }
     assert_eq!(all, GOLDEN, "generator output changed: bump GENERATOR_REVISION and update GOLDEN ({all:#018x})");
 }
 
-const GOLDEN: u64 = 0xb1ba_9637_e3b0_c9e2;
+const GOLDEN: u64 = 0x534d_b713_2964_6e17;

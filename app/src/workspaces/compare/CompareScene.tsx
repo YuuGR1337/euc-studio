@@ -171,7 +171,7 @@ function Lights() {
           shadow-bias={-0.0004}
         />
       </FollowA>
-      <directionalLight position={[-2.5, 1.6, -2.2]} intensity={2.2} color="#FFB27A" />
+      <directionalLight position={[-2.5, 1.6, -2.2]} intensity={2.2} color="#FFFFFF" />
       <directionalLight position={[-1, 0.8, 3]} intensity={0.5} color="#CDE8FF" />
       <Environment resolution={256} frames={1}>
         <Lightformer
@@ -241,8 +241,9 @@ export function CompareScene({ active, onReady, onFirstFrame }: CompareSceneProp
       camera={{ position: OFFSET.toArray(), fov: 30, near: 0.05, far: 80 }}
       gl={{ antialias: true, powerPreference: "high-performance" }}
       onCreated={({ gl }) => {
-        gl.toneMapping = THREE.ACESFilmicToneMapping;
-        gl.toneMappingExposure = 1.05;
+        // As the Ride scene: neutral keeps the model's hues (ACES turned the orange handle red).
+        gl.toneMapping = THREE.NeutralToneMapping;
+        gl.toneMappingExposure = 1.5;
         const chosen = chooseQuality(rendererName(gl.getContext()), override);
         setQuality(chosen);
         setLowPower(chosen === "low");

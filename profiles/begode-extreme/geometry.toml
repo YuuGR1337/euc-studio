@@ -51,23 +51,26 @@ axle_height_m = 0.2296
 axle_height_loaded_m = 0.2251  # INFERRED: equals the firmware's rolling radius
 
 [pedals]
-# CNC aluminium decks (D-shaped, hexagonal cut-outs, grip pins). The decks were off the wheel for
-# the scan: only the hinge brackets and pins are in it. The owner says this design does not match
-# his pedals; shape and sizes will be updated from his measurements. Sizes below are ESTIMATES from shop photo
-# proportions (notch = 0.16 of the length, width = 0.47 of the length) and the bracket the notch
-# must clear; one real measurement replaces them.
+# CNC aluminium decks: full width over the middle, rounded ends, hexagonal cut-outs, a plain centre
+# strip, a bright machined edge, steel grip pins. The decks were off the wheel for the scan: only the
+# hinge brackets and pins are in it. Shape and sizes from the owner's tape photo (2026-10-16) and a
+# retailer's parts diagram (not in the repo); docs/hardware/geometry.md "Pedals". The [collision]
+# deck boxes keep the earlier 290 x 135 mm until a physics change takes these.
 in_scan = false
 pivot_axis = "x"               # MEASURED: a 6 mm pin, fore-aft
 pivot_y_m = 0.1148             # MEASURED: +-y, pin to pin 0.2296 m
 pivot_z_m = 0.0075             # MEASURED: above the axle
 bracket_min_m = [-0.0221, 0.1043, -0.0312]  # MEASURED: left bracket (mirror for the right)
 bracket_max_m = [0.0235, 0.1351, 0.0101]
-length_m = 0.290               # ESTIMATE +-0.030
-width_m = 0.135                # ESTIMATE +-0.015 (hinge tab edge to outer edge)
+length_m = 0.300               # MEASURED +-0.010 (owner's tape, end to end)
+width_m = 0.138                # INFERRED +-0.007 (parts diagram's ratio; hinge edge to outer edge)
 thickness_m = 0.009            # ESTIMATE +-0.002, plate centred on the pin
-inner_edge_y_m = 0.1088        # ESTIMATE: hinge tabs 6 mm inside the pin
-outer_edge_y_m = 0.2438        # ESTIMATE
-notch_m = [0.050, 0.0212]      # ESTIMATE: hinge notch length, depth past the pin (clears the bracket)
+inner_edge_y_m = 0.1088        # ESTIMATE: hinge edge 6 mm inside the pin
+outer_edge_y_m = 0.2471        # INFERRED +-0.007
+notch_m = [0.050, 0.0212]      # INFERRED: hinge notch length, depth past the pin (clears the scanned bracket; the diagram's is 0.045-0.056 long)
+cells = { flats_m = 0.0385, corner_r_m = 0.005, pitch_across_m = 0.0461, column_x_m = [0.0516, 0.0901, 0.1286], rim_m = 0.0075 }  # INFERRED (diagram lattice, tape photo's soft corners)
+centre_strip_m = 0.062         # INFERRED: plain strip in the middle (the maker's lettering on the real deck)
+hinge_rod = { diameter_m = 0.006, length_m = 0.190 }  # diameter MEASURED (scan pin); length ESTIMATE 0.125-0.200
 deck_top_z_m = 0.012           # ESTIMATE +-0.005 (grip pins add 3 mm)
 surface_height_m = 0.2416      # ESTIMATE: deck top above the ground, unloaded
 fold = "about the pin (x); the left deck folds up with +90 deg about x, the right with -90 deg"
@@ -155,8 +158,9 @@ rod_diameter_m = 0.0300                 # MEASURED: cylinder fit, spread 0.1 mm
 rod_axis_xy_m = [[-0.0002, 0.0636], [-0.0002, -0.0649]]   # left, right; MEASURED
 rod_tilt_deg = 0.13                     # MEASURED: top tilted rearward; vertical within 0.15 deg
 carriage_top_z_m = 0.2510               # MEASURED: up-facing face of the carriage block
-rod_stop_z_m = 0.3595                   # MEASURED: lower face of the ring on the rod (bump stop or
-                                        # boot, INFERRED); the frame's top plate underside at 0.383
+rod_stop_z_m = 0.3595                   # MEASURED: lower face of the ring on the rod: a pipe O-ring
+                                        # (parts diagram), a travel indicator, not a stop (INFERRED);
+                                        # the frame's top plate underside at 0.383 is the hard limit
 free_rod_above_carriage_m = 0.1085      # to the ring; 0.132 to the top plate
 frame_bottom_mount_z_m = [-0.052, -0.020]  # MEASURED: block around the rod below the axle (INFERRED frame)
 state_in_scan = "topped out (INFERRED: unloaded wheel, carriage at the bottom of the rods)"
@@ -168,27 +172,30 @@ scan_linkage_pivots_xz_m = { shock_top = [-0.1395, 0.3675], shock_bottom = [-0.2
 # Current linkage (owner photos 2026-10-22 with the pad cover and the seat off; positions from
 # camera poses solved on scan points; docs/hardware/geometry.md "Rear linkage"), per side: the
 # shock runs forward and down from its top eye on the rocker, under the rear roller, to its bottom
-# eye on the carriage; a link joins the rocker pin to the same carriage shaft; the rocker turns
-# about a frame pivot. Positions at full extension, x and z in metres:
+# eye on the carriage; a link joins the rocker pin to a second carriage pin above that eye; the
+# rocker turns about a frame pivot. Positions at full extension, x and z in metres:
 #   shock_top     MEASURED (photo pose, +-3 mm)
 #   rocker_pin    MEASURED (photo pose, +-3 mm)
 #   spare_hole    MEASURED (photo pose): an empty hole beside the top eye, a second shock position
-#   shock_bottom  INFERRED: 200 mm from the top eye along the photographed shock line (44-52 deg
+#   shock_bottom  INFERRED: 200 mm from the top eye along the photographed shock line (42-52 deg
 #                 forward of vertical), +-10 mm; hidden behind the rear packs in every photo
-#   frame_pivot   ESTIMATE: hidden in every photo. Drawn at the kinematically sound point nearest the
-#                 steel pin seen with the seat off (front_pin); band x -0.128..-0.081, z 0.376..0.413
-#   front_pin     MEASURED roughly (seat-off photos): x +-0.020, z +-0.015; a steel pin between two
-#                 frame blocks at the front end of the plates. As the rocker's pivot it would lock
-#                 the linkage (near toggle), so its role is open (a stop, a mount, or the pivot of
-#                 another part)
-linkage_pivots_xz_m = { frame_pivot = [-0.1000, 0.3950], rocker_pin = [-0.1770, 0.3130], shock_top = [-0.1850, 0.3780], shock_bottom = [-0.0338, 0.2471] }
+#   link_bottom   INFERRED: the link's lower pin, +-8 mm. In the cover-off side photo (pose on 11
+#                 scan points) the link's edges, back-projected on its plane, run 16 +-2 deg below
+#                 horizontal from the rocker pin; the parts map's link is 156 mm hole to hole at the
+#                 rocker plate's scale. It cannot be the shock's bottom shaft (that needs 25 deg).
+#                 It must ride on the carriage, or the rocker could not turn
+#   frame_pivot   MEASURED (parts-map fit, +-3 mm): the rocker plate's fourth hole. A retailer's
+#                 parts map (not in the repo) shows the plate with four holes; a similarity fit of
+#                 three of them to shock_top, rocker_pin and spare_hole (scale error 2 %, residuals
+#                 under 0.8 mm) places the fourth here. It is the steel pin between two frame blocks
+#                 seen with the seat off (x +-0.020, z +-0.015 there), so that pin is the pivot.
+linkage_pivots_xz_m = { frame_pivot = [-0.0666, 0.3981], rocker_pin = [-0.1770, 0.3130], shock_top = [-0.1850, 0.3780], shock_bottom = [-0.0338, 0.2471], link_bottom = [-0.0270, 0.2700] }
 spare_hole_xz_m = [-0.1725, 0.3930]
-front_pin_xz_m = [-0.045, 0.400]
 rocker_plates_y_m = [0.0465, 0.0510]    # ESTIMATE: |y| of each rocker plate; the rear photo's camera pose fits 0.050-0.054 for the outer face
 link_plates_y_m = [0.0405, 0.0450]      # ESTIMATE: inboard of the rocker plates
-link_length_m = 0.1576                  # INFERRED: rocker_pin to shock_bottom
-rocker_sides_m = { pivot_to_pin = 0.1125, pivot_to_eye = 0.0867, eye_to_pin = 0.0655 }  # eye_to_pin MEASURED, the others ESTIMATE
-rocker_turn_deg = 11.0                  # ESTIMATE: largest turn over the physics travel (drawn linkage)
+link_length_m = 0.1560                  # MEASURED (parts map at the rocker plate's scale, +-2 %): rocker_pin to link_bottom
+rocker_sides_m = { pivot_to_pin = 0.1394, pivot_to_eye = 0.1201, eye_to_pin = 0.0655 }  # MEASURED (photo poses and the parts-map fit)
+rocker_turn_deg = 4.3                   # INFERRED: largest turn over the physics travel (drawn linkage); it turns back once the link passes horizontal (about 50 mm)
 
 [shock]
 # Current shock: DNM coil-over without reservoir. Owner photos 2026-10-16: body and threaded collar
@@ -207,7 +214,7 @@ spring_coils = 7                        # owner photos
 spring_rate_n_per_m = 131_300           # 750 lb/in, MEASURED (owner; printed on the spring)
 eyelet_bore_m = 0.008                   # DNM listing
 eyelet_width_m = 0.024                  # DNM listing
-motion_ratio = "UNRESOLVED: the photo-measured layout needs the rocker's frame pivot (hidden) and the spring preload; with a pivot between the rear packs the ratio is 2.1-2.7 at rest (ESTIMATE). The physics keeps plant.toml's constant 1.7; docs/hardware/geometry.md"
+motion_ratio = "Two readings (docs/hardware/suspension-linkage.md): rocker turning, 2.3 at rest falling to 1.7 at 93.5 mm (band 1.9-2.7 at rest); rocker fixed, constant 1.5 (1.3-1.7). The physics keeps plant.toml's constant 1.7 until a seat-press video decides"
 
 [rear_handle]
 # Orange anodised CNC U-handle (owner photos 2026-10-16): two flat arms bolted to the frame and
@@ -257,6 +264,31 @@ pedal_bracket_right = { centre = [0.0007, -0.1197, -0.0106], half = [0.0228, 0.0
 pedal_left = { centre = [0.0, 0.1763, 0.0075], half = [0.145, 0.0675, 0.0045] }
 pedal_right = { centre = [0.0, -0.1763, 0.0075], half = [0.145, 0.0675, 0.0045] }
 
+# Side pad covers: C-shaped moulded covers of textured black plastic, not in the scan. Shape INFERRED
+# from a two-view reconstruction of the owner's photos of a removed cover (5.5 / 3.1 px RMS) and a
+# retailer's parts diagram; size and place ESTIMATE (docs/hardware/geometry.md "Pad covers"). Left
+# cover; mirror y for the right. Drawing only: no collision solid, no mass.
+[pad_covers]
+in_scan = false
+length_m = 0.401               # ESTIMATE: 0.372-0.447 (diagram scales), 0.370-0.510 (photo screw heads)
+height_m = 0.320               # ESTIMATE, same scale
+depth_m = 0.106                # INFERRED proportion at that scale (+-20 %): mounting face to the end and round blocks' tops
+heights_m = { arms = 0.060, lettering_block = 0.095, slotted_block_rim = [0.070, 0.092], end_block = 0.108, round_block = 0.108 }  # INFERRED, above the mounting face
+wall_m = 0.0035                # ESTIMATE: open-backed moulded walls
+x_range_m = [-0.205, 0.196]    # ESTIMATE +-0.040: arms' rear ends beside the rocker's rear lobes, spine at the front
+z_range_m = [0.157, 0.476]     # ESTIMATE +-0.040: the upper arm's lower edge just above the rocker plates
+inner_y_m = 0.1025             # on the packs' outer faces (the scan reaches 0.1020 under the footprint)
+outer_y_m = 0.2085             # the end and round blocks; arms at about 0.162
+screws_m = [[-0.119, 0.166, 0.432], [-0.115, 0.164, 0.224], [0.116, 0.169, 0.231]]  # INFERRED: the three visible screw heads (upper arm, lower arm, slotted block)
+# Where the rider's legs can rest (a later leg-pad contact model): outer faces, ESTIMATE
+contact_faces = [
+  { name = "lettering_block_top", x_m = [0.060, 0.118], z_m = [0.376, 0.457], y_m = 0.1980 },
+  { name = "upper_arm", x_m = [-0.116, 0.060], z_m = [0.382, 0.464], y_m = 0.1618 },
+  { name = "end_block_top", x_m = [-0.155, -0.127], z_m = [0.405, 0.442], y_m = 0.2107 },
+  { name = "round_block_top", x_m = [-0.164, -0.108], z_m = [0.256, 0.303], y_m = 0.2105 },
+  { name = "lower_arm", x_m = [-0.158, 0.136], z_m = [0.159, 0.259], y_m = 0.1626 },
+]
+
 # The cleaned render model (public), see app/public/models/begode-extreme/README.md.
 [model]
 files = ["begode-extreme-lod0.glb", "begode-extreme-lod1.glb", "begode-extreme-lod2.glb"]
@@ -266,10 +298,12 @@ pedal_nodes = ["pedal_left", "pedal_right"]  # node origin on the pin: fold abou
 roller_nodes = ["roller_sleeve_left", "roller_sleeve_right", "roller_center_band", "speaker_left",
                 "speaker_right", "ble_led"]  # sleeves and ble_led are the emissive parts
 handle_nodes = ["rear_handle"]
+pad_cover_nodes = ["pad_cover_left", "pad_cover_right"]  # ESTIMATE (see [pad_covers])
 # Current linkage per owner photos (the scan shows an older system, not drawn). "shock": the
 # coil-over only; origin on the top eye, local +Y from the bottom eye to the top eye, bottom eye at
 # local (0, -0.200, 0). "shock_mount": the carriage's clevis and bottom shaft, origin on the bottom
-# eye (moves with the axle). "rocker": origin on its frame pivot (turns about z). "link": origin on
-# the rocker pin. "shock_links": the pivot shaft, the front blocks and their pin (static). Rest
-# origins = [suspension] linkage_pivots_xz_m.
-shock_nodes = ["shock", "shock_links", "shock_mount", "rocker", "link"]
+# eye (moves with the axle). "link_bottom": the link's lower pin and its plates, origin on the pin
+# (moves with the axle in the turning reading, still in the fixed one). "rocker": origin on its frame pivot (turns about z). "link": origin on the rocker pin.
+# "shock_links": the pivot pin and its two frame blocks (static). Rest origins = [suspension]
+# linkage_pivots_xz_m.
+shock_nodes = ["shock", "shock_links", "shock_mount", "link_bottom", "rocker", "link"]

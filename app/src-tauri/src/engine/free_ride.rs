@@ -31,7 +31,27 @@ pub struct FreeRideSpec {
     pub wheel: String,
     pub settings: String,
     pub rider_model: String,
-    pub map: GeneratedMapSpec,
+    /// The finite 32 m test pad; absent when the ground is a streaming world.
+    #[serde(default)]
+    pub map: Option<GeneratedMapSpec>,
+    /// The streaming world (docs/models/world.md), Free Ride's default ground.
+    #[serde(default)]
+    pub world: Option<WorldChoice>,
+}
+
+/// The world a free ride rides: its seed and densities (city biome, this build's generator).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorldChoice {
+    pub seed: u64,
+    #[serde(default)]
+    pub densities: euc_world::Densities,
+}
+
+impl WorldChoice {
+    pub(super) fn spec(&self) -> euc_world::WorldSpec {
+        euc_world::WorldSpec { densities: self.densities, ..euc_world::WorldSpec::city(self.seed) }
+    }
 }
 
 impl FreeRideSpec {
@@ -43,7 +63,11 @@ impl FreeRideSpec {
         if self.settings.len() > 80 || self.settings.is_empty() {
             return Err("Select a settings preset".into());
         }
-        self.map.validate()
+        match (&self.map, &self.world) {
+            (Some(map), None) => map.validate(),
+            (None, Some(world)) => world.spec().validate(),
+            _ => Err("Choose either the test pad or a world".into()),
+        }
     }
 
     pub(super) fn rider(&self) -> Result<euc_physics::Rider, String> {
@@ -84,6 +108,8 @@ pub struct FreeRideStatus {
     pub yaw_aid_work_j: Option<f64>,
     pub roll_aid_work_j: Option<f64>,
     pub rider_model: &'static str,
+    /// The ground of this run: "map" (the 32 m test pad), "world" or "none".
+    pub ground: &'static str,
 }
 
 impl Default for FreeRideStatus {
@@ -103,6 +129,7 @@ impl Default for FreeRideStatus {
             yaw_aid_work_j: None,
             roll_aid_work_j: None,
             rider_model: euc_physics::RIDER_MODEL,
+            ground: "none",
         }
     }
 }
@@ -111,6 +138,7 @@ impl Default for FreeRideStatus {
 struct Inner {
     status: FreeRideStatus,
     map: Option<Arc<HeightMap>>,
+    world: Option<euc_physics::WorldGround>,
     latest: Option<ManualInput>,
     last_seq: Option<u32>,
     received: Option<Instant>,
@@ -158,14 +186,19 @@ impl FreeRideState {
         if inner.status.epoch != epoch {
             return Err("Recording map belongs to an old run".into());
         }
-        let map = inner.map.as_deref().cloned().ok_or("Free ride recording has no map")?;
+        let (height_map, world) = match (&inner.map, &inner.world) {
+            (Some(map), _) => (Some(map.as_ref().clone()), None),
+            (None, Some(ground)) => (None, Some(euc_sim::recording::WorldRecord::of(ground))),
+            (None, None) => return Err("Free ride recording has no ground".into()),
+        };
         let rider = inner.rider;
         let assist = euc_physics::Assist::default();
         let context = euc_sim::recording::RecordingContext {
             schema: 1,
             run_mode: euc_sim::recording::RunMode::FreeRide,
             rider_model: rider.model.into(),
-            height_map: Some(map),
+            height_map,
+            world,
             model_aids: euc_sim::recording::ModelAids::of(&rider, &assist),
         };
         context.validate()?;
@@ -173,21 +206,45 @@ impl FreeRideState {
     }
 
     pub(super) fn begin(&self, epoch: u64, map: Option<Arc<HeightMap>>, rider: euc_physics::Rider) {
+        self.start(epoch, map, None, rider);
+    }
+
+    /// A free ride on a streaming world.
+    pub(super) fn begin_world(&self, epoch: u64, ground: euc_physics::WorldGround, rider: euc_physics::Rider) {
+        self.start(epoch, None, Some(ground), rider);
+    }
+
+    fn start(
+        &self,
+        epoch: u64,
+        map: Option<Arc<HeightMap>>,
+        world: Option<euc_physics::WorldGround>,
+        rider: euc_physics::Rider,
+    ) {
         let mut inner = self.lock();
         let (next_start, pending_start) = (inner.next_start, inner.pending_start);
+        let free = map.is_some() || world.is_some();
         *inner = Inner {
             status: FreeRideStatus {
                 epoch,
                 rider_model: rider.model.id(),
-                mode: if map.is_some() { "free_ride" } else { "scenario" },
-                reason: if map.is_some() {
+                mode: if free { "free_ride" } else { "scenario" },
+                reason: if free {
                     "Starting firmware on the stand".into()
                 } else {
                     "Scenario controls the rider".into()
                 },
+                ground: if map.is_some() {
+                    "map"
+                } else if world.is_some() {
+                    "world"
+                } else {
+                    "none"
+                },
                 ..FreeRideStatus::default()
             },
             map,
+            world,
             rider,
             next_start,
             pending_start,
@@ -369,6 +426,17 @@ pub fn free_ride_map(state: State<'_, FreeRideState>, epoch: u64) -> Result<Heig
     inner.map.as_deref().cloned().ok_or_else(|| "This run has no generated map".into())
 }
 
+/// Where a world free ride is: its world and the frame its physics uses.
+#[tauri::command]
+pub fn free_ride_world(state: State<'_, FreeRideState>, epoch: u64) -> Result<super::world::WorldFrame, String> {
+    let inner = state.lock();
+    if inner.status.epoch != epoch {
+        return Err("World belongs to an old run".into());
+    }
+    let ground = inner.world.as_ref().ok_or("This run has no world")?;
+    Ok(super::world::WorldFrame::of(ground))
+}
+
 #[tauri::command]
 pub fn free_ride_start(
     state: State<'_, super::EngineState>,
@@ -377,7 +445,9 @@ pub fn free_ride_start(
 ) -> Result<(), String> {
     spec.validate()?;
     // Validate the generated surface before replacing any active run.
-    spec.map.generate(0)?;
+    if let Some(map) = &spec.map {
+        map.generate(0)?;
+    }
     let ticket = manual.reserve_start()?;
     let result = super::with_runner(&state, |runner| runner.start_free_ride(spec, ticket)).and_then(|result| result);
     if result.is_err() {
@@ -412,14 +482,15 @@ pub(super) struct FreeRideHost {
     watch: BoardWatch,
     state: FreeRideState,
     epoch: u64,
-    map: Arc<HeightMap>,
+    /// The finite map's edges pause the run; a world has none.
+    map: Option<Arc<HeightMap>>,
     boot_ready: bool,
     desired_heading: f64,
     last_motion: Option<(f64, f64)>,
 }
 
 impl FreeRideHost {
-    pub(super) fn new(session: Session, state: FreeRideState, epoch: u64, map: Arc<HeightMap>) -> Self {
+    pub(super) fn new(session: Session, state: FreeRideState, epoch: u64, map: Option<Arc<HeightMap>>) -> Self {
         Self {
             watch: BoardWatch::new(session.machine()),
             session,
@@ -488,9 +559,11 @@ impl FreeRideHost {
             self.state.ready(self.epoch);
         }
         if self.boot_ready {
-            let clearance =
-                |position: [f64; 3], half| self.map.edge_clearance_m([position[0], position[1]], half).unwrap_or(-1.0);
-            let edge = clearance(rider.position_m, [0.5, 0.3]).min(clearance(rider.rider_position_m, [0.8, 0.8]));
+            let edge = self.map.as_ref().map_or(f64::INFINITY, |map| {
+                let clearance =
+                    |position: [f64; 3], half| map.edge_clearance_m([position[0], position[1]], half).unwrap_or(-1.0);
+                clearance(rider.position_m, [0.5, 0.3]).min(clearance(rider.rider_position_m, [0.8, 0.8]))
+            });
             if edge <= euc_physics::map::MAP_EDGE_PAUSE_M {
                 self.session.note("Map edge guard paused the run");
                 self.state.failed(self.epoch, "Map edge. Reset before the finite ground ends");
@@ -597,7 +670,8 @@ mod tests {
             wheel: "begode-extreme".into(),
             settings: "default".into(),
             rider_model: model.into(),
-            map: GeneratedMapSpec::gentle_slope(17),
+            map: Some(GeneratedMapSpec::gentle_slope(17)),
+            world: None,
         }
     }
 
@@ -682,7 +756,7 @@ mod tests {
             let spec = spec(id);
             spec.validate().unwrap();
             assert_eq!(spec.rider().unwrap().model, model);
-            spec.map.generate(19).unwrap().validate().unwrap();
+            spec.map.as_ref().unwrap().generate(19).unwrap().validate().unwrap();
         }
         for id in ["", "rigid", "articulated", "RIGID_ANKLE_V1", "unknown"] {
             assert!(spec(id).validate().is_err());
@@ -701,9 +775,9 @@ mod tests {
         }
         FreeRideSpec { settings: "x".repeat(80), ..valid.clone() }.validate().unwrap();
         let mut invalid = valid;
-        invalid.map.grade_pct[0] = f64::NAN;
+        invalid.map.as_mut().unwrap().grade_pct[0] = f64::NAN;
         assert!(invalid.validate().is_err());
-        invalid.map = GeneratedMapSpec { schema: 99, ..GeneratedMapSpec::default() };
+        invalid.map = Some(GeneratedMapSpec { schema: 99, ..GeneratedMapSpec::default() });
         assert!(invalid.validate().is_err());
     }
 
@@ -1085,7 +1159,7 @@ mod tests {
             ("articulated_contact_v1", euc_sim::recording::RiderModel::ArticulatedContactV1, 6),
         ] {
             let spec = spec(id);
-            let map = Arc::new(spec.map.generate(37).unwrap());
+            let map = Arc::new(spec.map.as_ref().unwrap().generate(37).unwrap());
             let mut rider = spec.rider().unwrap();
             rider.control.steer_kp = 13.0;
             rider.control.steer_kd = 7.0;
@@ -1221,6 +1295,14 @@ mod stock_rider_acceptance {
         }
 
         fn on_map(model: &str, map: GeneratedMapSpec) -> Self {
+            Self::on_ground(model, Some(map), None)
+        }
+
+        fn on_world(model: &str, seed: u64) -> Self {
+            Self::on_ground(model, None, Some(WorldChoice { seed, densities: Default::default() }))
+        }
+
+        fn on_ground(model: &str, map: Option<GeneratedMapSpec>, world: Option<WorldChoice>) -> Self {
             require_cached_stock();
             let state = FreeRideState::default();
             let spec = FreeRideSpec {
@@ -1228,6 +1310,7 @@ mod stock_rider_acceptance {
                 settings: "neutral".into(),
                 rider_model: model.into(),
                 map,
+                world,
             };
             let built = super::super::firmware::build_free_host(&spec, "stock", EPOCH, state.clone(), &mut |_| {})
                 .expect("real native FreeRideHost factory");
@@ -1602,6 +1685,70 @@ mod stock_rider_acceptance {
         panic!("{model} did not physically reach the edge guard within 45 simulated seconds");
     }
 
+    // The streaming world: the ground follows the wheel and nothing pauses at an edge. Rides the
+    // spawn street straight at 7.2 km/h for 30 s (about 60 m, past the test pad's 32 m) through
+    // the real factory, and reports the host's step budget: wall time per 1/120 s sample, which
+    // the studio's runner must keep under 8.33 ms for a real-time factor of 1.
+    fn world_ride(model: &str) {
+        let mut rig = Rig::on_world(model, 42);
+        rig.boot_and_arm();
+        let ground = rig.state.lock().world.clone().expect("a world run keeps its ground");
+        assert_eq!(rig.state.lock().status.ground, "world");
+        let context = rig.state.recording_context(EPOCH).unwrap().unwrap();
+        assert_eq!(context["world"]["spec"]["seed"], 42);
+        let start = rig.snapshot();
+        let radius = f64::from(start.bodies[0].pos[2]) - ground.height_m([0.0, 0.0]);
+        let (mut lowest, mut highest, mut worst_contact) = (f64::INFINITY, f64::NEG_INFINITY, 0.0_f64);
+        let mut stepping = Duration::ZERO;
+        let samples = 3600;
+        for sample in 0..samples {
+            let began = Instant::now();
+            let snapshot = drive_sample(&mut rig, 2.0, 0.0);
+            stepping += began.elapsed();
+            let status = rig.state.lock().status.clone();
+            assert!(status.ready && status.armed, "{model} world ride stopped at {:.3}: {status:?}", snapshot.t_s);
+            let [x, y, z] = snapshot.bodies[0].pos.map(f64::from);
+            let height = ground.height_m([x, y]);
+            lowest = lowest.min(height);
+            highest = highest.max(height);
+            worst_contact = worst_contact.max((z - radius - height).abs());
+            if sample % 600 == 599 {
+                let w = ground.to_world([x, y]);
+                println!(
+                    "world-ride {model} t={:.2} physics=({x:.2}, {y:.2}) world=({:.2}, {:.2}) ground_m={height:.4} \
+                     speed_kmh={:.2} pitch_deg={:.2}",
+                    snapshot.t_s, w[0], w[1], snapshot.signals.speed_kmh, snapshot.signals.pitch_deg
+                );
+            }
+        }
+        let end = rig.snapshot();
+        let path = rig.state.lock().status.path_length_m.unwrap();
+        let simulated = end.t_s - start.t_s;
+        let per_sample_ms = stepping.as_secs_f64() * 1e3 / f64::from(samples);
+        println!(
+            "world-ride result {model}: simulated_s={simulated:.3} path_m={path:.2} ground_range_m=[{lowest:.4}, \
+             {highest:.4}] worst_contact_m={worst_contact:.4} host_ms_per_sample={per_sample_ms:.3} \
+             budget_used={:.0}% rtf_host_only={:.2}",
+            per_sample_ms / (1e3 / 120.0) * 100.0,
+            simulated / stepping.as_secs_f64()
+        );
+        assert!((simulated - 30.0).abs() < 1e-6);
+        assert!(path > 40.0, "the wheel must ride past the old 32 m pad: {path}");
+        assert!(worst_contact < 0.05, "the tire must stay on the drawn ground: {worst_contact}");
+    }
+
+    #[test]
+    #[ignore = "needs cached pinned stock firmware; real-host articulated ride on the streaming world for 30 s"]
+    fn stock_articulated_rides_the_streaming_world() {
+        world_ride("articulated_sagittal_v1");
+    }
+
+    #[test]
+    #[ignore = "needs cached pinned stock firmware; real-host rigid ride on the streaming world for 30 s"]
+    fn stock_rigid_rides_the_streaming_world() {
+        world_ride("rigid_ankle_v1");
+    }
+
     #[test]
     #[ignore = "needs cached pinned stock firmware; real-host rigid steering for 14 s after 4 s boot"]
     fn stock_rigid_sustained_steering_on_generated_terrain() {
@@ -1647,9 +1794,10 @@ mod stock_rider_acceptance {
             wheel: "begode-extreme".into(),
             settings: "neutral".into(),
             rider_model: model.into(),
-            map: GeneratedMapSpec::flat(17),
+            map: Some(GeneratedMapSpec::flat(17)),
+            world: None,
         };
-        let map = Arc::new(spec.map.generate(EPOCH as u32).unwrap());
+        let map = Arc::new(spec.map.as_ref().unwrap().generate(EPOCH as u32).unwrap());
         let rider = spec.rider().unwrap();
         state.begin(EPOCH, Some(Arc::clone(&map)), rider);
         let board = files.board_with_settings(&spec.settings).unwrap();
@@ -1672,7 +1820,7 @@ mod stock_rider_acceptance {
         let machine =
             euc_sim::Machine::new_live(&config, &euc_sim::registry(), super::super::cpu::factory().unwrap(), live)
                 .unwrap();
-        FreeRideHost::new(Session::new(machine, loaded.map.as_ref(), 120.0), state, EPOCH, map)
+        FreeRideHost::new(Session::new(machine, loaded.map.as_ref(), 120.0), state, EPOCH, Some(map))
     }
 
     fn trace(host: &FreeRideHost, model: &str, phase: &str) {

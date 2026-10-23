@@ -1,6 +1,7 @@
 import type * as THREE from "three";
 import { engine } from "../../engine/index.ts";
-import { POSE_FLOATS } from "../../engine/telemetry.gen.ts";
+import { validPoseFrame } from "../../engine/poseHistory.ts";
+import { type BodyInfo, POSE_FLOATS } from "../../engine/telemetry.gen.ts";
 
 /** The wheel's position in three.js coordinates (y up), or null before the first snapshot. */
 export function wheelPosition(out: THREE.Vector3): THREE.Vector3 | null {
@@ -84,6 +85,42 @@ export function prepareVisualFrame(nowWallMs: number): void {
 
 export function visualFrame(): Readonly<typeof rendered> {
   return rendered;
+}
+
+/**
+ * Poses one group per body from `poses` (a frame of exactly these bodies, or null). A group
+ * shows only a pose of its own body list: until one arrives it is hidden, never drawn at the
+ * origin, and without a frame it keeps the last pose it showed. `placed` remembers that list.
+ */
+export function placeBodies(
+  groups: readonly (THREE.Object3D | null | undefined)[],
+  bodies: readonly BodyInfo[],
+  poses: Float32Array | null,
+  placed: { bodies: readonly BodyInfo[] | null },
+): void {
+  if (
+    !poses ||
+    poses.length !== bodies.length * POSE_FLOATS ||
+    !validPoseFrame(poses, 0, bodies.length)
+  ) {
+    if (placed.bodies !== bodies) for (const g of groups) if (g) g.visible = false;
+    return;
+  }
+  for (let i = 0; i < bodies.length; i++) {
+    const g = groups[i];
+    if (!g) continue;
+    const o = i * POSE_FLOATS;
+    g.position.set(poses[o] as number, poses[o + 1] as number, poses[o + 2] as number);
+    // Poses are w x y z; three.js quaternions are x y z w.
+    g.quaternion.set(
+      poses[o + 4] as number,
+      poses[o + 5] as number,
+      poses[o + 6] as number,
+      poses[o + 3] as number,
+    );
+    g.visible = true;
+  }
+  placed.bodies = bodies;
 }
 
 export function visualWheelPosition(out: THREE.Vector3): THREE.Vector3 | null {

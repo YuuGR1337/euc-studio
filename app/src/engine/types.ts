@@ -3,6 +3,8 @@
 // loop and re-render only on coarse changes (`subscribe`/`getVersion`).
 
 import type { RingBuffer } from "../lib/ring.ts";
+import type { RecordedWorld } from "./recording.ts";
+import type { WorldFrame } from "./world.ts";
 import type { Tone } from "./buzzerAudio.ts";
 import type { HeightMap } from "./freeRide.ts";
 import type { BodyInfo, Outputs } from "./telemetry.gen.ts";
@@ -290,6 +292,10 @@ export interface EngineClient {
   readonly terrain: TerrainProfile | null;
   /** Authoritative saved ground for playback; absent when the recording has no map context. */
   readonly recordedMap?: HeightMap;
+  /** The streaming world a recording rode; playback regenerates its ground from it. */
+  readonly recordedWorld?: RecordedWorld;
+  /** The streaming world the live run rides (a `[world]` scenario or a world free ride). */
+  readonly liveWorld?: WorldFrame | null;
   /** Times the buzzer started sounding in this run. */
   readonly beeps: number;
   /** Buzzer changes as they arrive, at their simulated times (live engine only). */

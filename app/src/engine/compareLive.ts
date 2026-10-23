@@ -14,6 +14,7 @@ import type {
   CompareStatus,
   CompareSummary,
   RunInfo,
+  Side,
 } from "./compareTypes.ts";
 import { LANE_KEYS } from "./compareTypes.ts";
 import { type BodyInfo, CH, type ChannelKey, POSE_FLOATS } from "./telemetry.gen.ts";
@@ -161,6 +162,12 @@ export class LiveCompare implements CompareClient {
   private choices: CompareFirmwareChoice[] = [];
   private scenarioList: ScenarioInfo[] = [];
   private run = 0;
+  /**
+   * The running comparison's batches that came before its reset, in order. Tauri fetches the
+   * reset (both body lists, about 17 KB) but runs a small batch at once, so in real time the
+   * first batches arrive first; the reset then replays them into the new rings.
+   */
+  private early: Record<Side, ArrayBuffer[]> | null = null;
   private version = 0;
   private listeners = new Set<() => void>();
 
@@ -193,8 +200,9 @@ export class LiveCompare implements CompareClient {
   start(request: CompareRequest): void {
     const run = ++this.run;
     const mine = <T>(fn: (v: T) => void) => new Channel<T>((v) => run === this.run && fn(v));
-    const streamA = mine<ArrayBuffer>((buffer) => this.a.push(buffer));
-    const streamB = mine<ArrayBuffer>((buffer) => this.b.push(buffer));
+    this.early = { a: [], b: [] };
+    const streamA = mine<ArrayBuffer>((buffer) => this.sample("a", buffer));
+    const streamB = mine<ArrayBuffer>((buffer) => this.sample("b", buffer));
     const messages = mine<Message>((m) => this.onMessage(m));
     this.request = request;
     this.summary = null;
@@ -215,11 +223,18 @@ export class LiveCompare implements CompareClient {
 
   stop(): void {
     this.run++;
+    this.early = null;
     if (this.status.state === "starting" || this.status.state === "running") {
       this.status = { ...this.status, state: "stopped", message: "Stopped" };
     }
     invoke("compare_stop").catch(() => {});
     this.emit();
+  }
+
+  /** A batch of the running comparison: held until its reset, then into the rings. */
+  private sample(side: Side, buffer: ArrayBuffer): void {
+    if (this.early) this.early[side].push(buffer);
+    else this[side].push(buffer);
   }
 
   private onMessage(m: Message): void {
@@ -237,6 +252,10 @@ export class LiveCompare implements CompareClient {
         const samples = Math.ceil((m.duration_s + SLACK_S) * m.stream_hz);
         this.a.reset(samples, m.a, m.bodies_a);
         this.b.reset(samples, m.b, m.bodies_b);
+        const early = this.early;
+        this.early = null;
+        for (const buffer of early?.a ?? []) this.a.push(buffer);
+        for (const buffer of early?.b ?? []) this.b.push(buffer);
         this.terrain = m.terrain;
         this.streamHz = m.stream_hz;
         this.tolerance = { file: m.tolerance_file, note: m.tolerance_note };

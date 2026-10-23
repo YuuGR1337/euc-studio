@@ -5,7 +5,7 @@ import { type ComponentRef, type RefObject, useMemo, useRef } from "react";
 import * as THREE from "three";
 import { engine } from "../../engine/index.ts";
 import type { CameraMode } from "../../state/ui.ts";
-import type { HeightMapView } from "./mapSurface.ts";
+import type { GroundView } from "./ground.ts";
 import { visualFrame } from "./poses.ts";
 import { ChaseCamera, spring } from "./cameraTracking.ts";
 
@@ -15,7 +15,7 @@ export function CameraRig({
   moving: movingRef,
 }: {
   mode: CameraMode;
-  map?: HeightMapView | null;
+  map?: GroundView | null;
   moving: RefObject<boolean>;
 }) {
   const camera = useThree((state) => state.camera);

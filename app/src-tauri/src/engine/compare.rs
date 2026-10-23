@@ -591,7 +591,7 @@ fn ride_session(files: &WheelFiles, scenario: &Scenario, fw: &Firmware) -> Resul
         max_quantum: 4000,
         marker_window_s: 4.0,
     };
-    let live = files.live_on(scenario.rider, scenario.assist, scenario.terrain.clone()).map_err(|e| e.to_string())?;
+    let live = files.live_for(scenario).map_err(|e| e.to_string())?;
     let factory = match &fw.sil {
         Some(sil) => sil.library.factory(sil.mask),
         None => cpu::factory()?,

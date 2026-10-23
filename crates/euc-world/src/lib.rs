@@ -33,6 +33,7 @@ mod det;
 mod features;
 mod fields;
 mod parcels;
+pub mod render;
 mod roads;
 mod solid;
 mod surface;
@@ -54,7 +55,7 @@ pub use solid::{Solid, SolidKind};
 pub use surface::{Material, Surface};
 
 /// Generator revision. Change it whenever any generated output changes; recordings store it.
-pub const GENERATOR_REVISION: u32 = 1;
+pub const GENERATOR_REVISION: u32 = 2;
 /// Radius around the spawn that is level to ±1 cm, metres.
 pub const SPAWN_LEVEL_RADIUS_M: f64 = 2.0;
 /// Chunks kept in a [`World`]'s cache before it starts over.
@@ -262,6 +263,25 @@ impl World {
                 };
                 out[iy * nx + ix] = chunk.ground_at(p, inset);
             }
+        }
+    }
+
+    /// Fills `out[k]` with [`Self::ground_at`] at `points[k]`, reusing each chunk while the points
+    /// stay in it (a rotated lattice, a strip).
+    ///
+    /// # Panics
+    ///
+    /// When `out` and `points` differ in length.
+    pub fn fill_points(&self, points: &[V2], inset: f64, out: &mut [f64]) {
+        assert_eq!(out.len(), points.len(), "fill_points: one output per point");
+        let mut current: Option<Arc<Chunk>> = None;
+        for (p, h) in points.iter().zip(out.iter_mut()) {
+            let key = ChunkKey::of(*p);
+            let chunk = match &current {
+                Some(chunk) if chunk.key() == key => chunk,
+                _ => current.insert(self.chunk(key)),
+            };
+            *h = chunk.ground_at(*p, inset);
         }
     }
 

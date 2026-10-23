@@ -164,21 +164,63 @@ describe("LiveEngine pose sidecar", () => {
     expect(out[0]).toBe(99);
   });
 
-  it.each(["bodies", "reset", "epoch"] as const)(
-    "invalidates the visual history on %s",
+  it("invalidates the visual history on reset", async () => {
+    const engine = await connected();
+    wire.stream?.(batch([1], [0]));
+    const epoch = engine.poseEpoch;
+    wire.messages?.({ type: "reset", scenario: "next" });
+    const out = new Float32Array(2 * POSE_FLOATS).fill(99);
+    expect(engine.poseEpoch).toBeGreaterThan(epoch);
+    expect(engine.samplePoses(out, 100)).toBeNaN();
+    expect(out[0]).toBe(99);
+  });
+
+  it.each(["bodies", "epoch"] as const)(
+    "restarts the visual history from the newest frame on %s",
     async (kind) => {
       const engine = await connected();
-      wire.stream?.(batch([1], [0]));
+      wire.stream?.(batch([1, 1.05, 1.1], [0, 5, 10]));
+      const out = new Float32Array(2 * POSE_FLOATS);
+      expect(engine.samplePoses(out, 100)).toBe(1);
       const epoch = engine.poseEpoch;
       if (kind === "bodies") bodies();
-      else if (kind === "reset") wire.messages?.({ type: "reset", scenario: "next" });
       else status(2, true, 2);
-      const out = new Float32Array(2 * POSE_FLOATS).fill(99);
       expect(engine.poseEpoch).toBeGreaterThan(epoch);
-      expect(engine.samplePoses(out, 100)).toBeNaN();
-      expect(out[0]).toBe(99);
+      // No path from the older frames: the newest one, at once.
+      expect(engine.samplePoses(out, 100)).toBe(1.1);
+      expect(out[0]).toBe(10);
     },
   );
+
+  it("draws a frame that came before its bodies message", async () => {
+    // Tauri sends a JSON message of 8 KiB or more (the real body list) through a fetch, but runs
+    // a small batch at once: a reload on a finished run gets its only frame before its bodies.
+    const engine = new LiveEngine();
+    await Promise.resolve();
+    wire.messages?.({ type: "reset", scenario: "ride" });
+    wire.stream?.(batch([40], [7]));
+    bodies();
+    status(0, false);
+    const out = new Float32Array(2 * POSE_FLOATS);
+    expect(engine.samplePoses(out, 100)).toBe(40);
+    expect(out[0]).toBe(7);
+    expect(out[POSE_FLOATS]).toBe(17);
+    wall = 2000;
+    expect(engine.samplePoses(out, 2000)).toBe(40);
+  });
+
+  it("keeps the first frame of a paused new run when its status comes after it", async () => {
+    // The pump sends the reset and bodies before a tick's batch, and the status after it.
+    const engine = await connected();
+    wire.stream?.(batch([40], [9]));
+    wire.messages?.({ type: "reset", scenario: "next" });
+    bodies();
+    wire.stream?.(batch([0], [3]));
+    status(0, false, 2);
+    const out = new Float32Array(2 * POSE_FLOATS);
+    expect(engine.samplePoses(out, 100)).toBe(0);
+    expect(out[0]).toBe(3);
+  });
 
   it("drains on native pause and presents an explicit paused step immediately", async () => {
     const engine = await connected();

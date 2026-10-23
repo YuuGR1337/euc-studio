@@ -21,6 +21,7 @@ pub mod recordings;
 mod runner;
 mod scenarios;
 pub mod tune;
+pub mod world;
 
 use std::sync::Mutex;
 

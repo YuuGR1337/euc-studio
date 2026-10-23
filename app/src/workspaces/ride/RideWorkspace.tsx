@@ -2,38 +2,104 @@ import { DockLayout } from "../../shell/DockLayout.tsx";
 import { EventsPanel } from "./EventsPanel.tsx";
 import { RightDock } from "./TelemetryPanel.tsx";
 import { Viewport } from "./Viewport.tsx";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { engine, useEngineVersion } from "../../engine/index.ts";
 import type { HeightMap } from "../../engine/freeRide.ts";
+import type { RecordedWorld } from "../../engine/recording.ts";
+import { worldApi, type WorldFrame } from "../../engine/world.ts";
 import { FreeRidePanel } from "../freeRide/FreeRidePanel.tsx";
 import { useUi } from "../../state/ui.ts";
+import type { GroundView } from "./ground.ts";
+import { WorldView } from "./worldView.ts";
+
+/** A recording's world as a view: its frame needs the world's height at the start. */
+function useRecordedWorld(recorded: RecordedWorld | undefined): WorldView | null {
+  const [view, setView] = useState<{ recorded: RecordedWorld; view: WorldView } | null>(null);
+  useEffect(() => {
+    if (!recorded) return;
+    let cancelled = false;
+    worldApi
+      .originZ(recorded.spec, recorded.start_xy_m)
+      .then((origin_z_m) => {
+        if (!cancelled)
+          setView({
+            recorded,
+            view: new WorldView({
+              spec: recorded.spec,
+              start_xy_m: recorded.start_xy_m,
+              start_heading_rad: recorded.start_heading_rad,
+              origin_z_m,
+            }),
+          });
+      })
+      .catch((error: unknown) => console.warn("Recorded world unavailable:", error));
+    return () => {
+      cancelled = true;
+    };
+  }, [recorded]);
+  return view && view.recorded === recorded ? view.view : null;
+}
+
+/** A live scenario's world as a view, one per run. */
+function useScenarioWorld(frame: WorldFrame | null | undefined): WorldView | null {
+  return useMemo(() => (frame ? new WorldView(frame) : null), [frame]);
+}
 
 export function RideWorkspace({ active }: { active: boolean }) {
   useEngineVersion();
   const [controls, setControls] = useState(false);
-  const [cached, setCached] = useState<{ map: HeightMap; epoch: number } | null>(null);
+  const [cached, setCached] = useState<{
+    map: HeightMap | null;
+    world: { frame: WorldFrame; view: WorldView } | null;
+    epoch: number;
+  } | null>(null);
   const dockOpen = useUi((state) => state.docks.ride.right);
-  const onMap = useCallback((map: HeightMap | null, epoch: number | null) => {
-    // Closing controls pauses the run. Its ground must remain visible until the run changes.
-    if (map && epoch !== null)
+  const onGround = useCallback(
+    (ground: { map: HeightMap | null; world: WorldFrame | null } | null, epoch: number | null) => {
+      // Closing controls pauses the run. Its ground must remain visible until the run changes.
+      if (!ground || epoch === null || (!ground.map && !ground.world)) return;
       setCached((previous) =>
-        previous?.map === map && previous.epoch === epoch ? previous : { map, epoch },
+        previous?.epoch === epoch &&
+        previous.map === ground.map &&
+        previous.world?.frame === ground.world
+          ? previous
+          : {
+              map: ground.map,
+              // One view per run: the world's frame changes only with a new run.
+              world: ground.world
+                ? previous?.world?.frame === ground.world
+                  ? previous.world
+                  : { frame: ground.world, view: new WorldView(ground.world) }
+                : null,
+              epoch,
+            },
       );
-  }, []);
-  const liveMap =
+    },
+    [],
+  );
+  const recordedWorld = useRecordedWorld(
+    engine.kind === "playback" ? engine.recordedWorld : undefined,
+  );
+  const scenarioWorld = useScenarioWorld(
+    engine.kind === "live" && engine.status.runMode !== "free_ride" ? engine.liveWorld : null,
+  );
+  const live =
     engine.kind === "live" &&
     engine.status.runMode === "free_ride" &&
     engine.status.runEpoch === cached?.epoch
-      ? (cached?.map ?? null)
+      ? cached
       : null;
-  const map = engine.kind === "playback" ? (engine.recordedMap ?? null) : liveMap;
+  const ground: GroundView | null =
+    engine.kind === "playback"
+      ? (engine.recordedMap ?? recordedWorld ?? null)
+      : (live?.map ?? live?.world?.view ?? scenarioWorld);
   return (
     <DockLayout
       workspace="ride"
       center={
         <Viewport
           active={active}
-          map={map}
+          map={ground}
           freeControls={controls}
           onFreeControls={() => {
             setControls((open) => !open);
@@ -46,7 +112,7 @@ export function RideWorkspace({ active }: { active: boolean }) {
           <FreeRidePanel
             engine={engine}
             active={active && dockOpen}
-            onMap={onMap}
+            onGround={onGround}
             onExit={() => {
               engine.setScenario(
                 engine.scenarioId || engine.scenarios()[0]?.id || "ride-20kmh-stop",

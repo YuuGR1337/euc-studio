@@ -3,16 +3,17 @@ import { useMemo, useRef } from "react";
 import * as THREE from "three";
 import { surface, text } from "../../design/tokens.ts";
 import { engine, useEngineVersion } from "../../engine/index.ts";
-import { type BodyInfo, POSE_FLOATS, type Geom } from "../../engine/telemetry.gen.ts";
+import { type BodyInfo, type Geom } from "../../engine/telemetry.gen.ts";
 import { BodyPart, ShellVisual, WheelPart } from "./EucModel.tsx";
 import { Ghost } from "./Ghost.tsx";
 import { useWheelModel } from "./wheelModel.ts";
-import { visualFrame } from "./poses.ts";
+import { placeBodies, visualFrame } from "./poses.ts";
 
 // The live engine's bodies, posed every frame from the latest snapshot. Everything sits inside
 // one group that turns the physics world (MuJoCo: z up) into three.js (y up), so body poses go
 // in unchanged. The wheel and the shell get the scanned model (else the stylized one); every
-// other body (the rider, one body or many) is drawn from its MJCF geoms.
+// other body (the rider, one body or many) is drawn from its MJCF geoms. A body without a pose
+// of its list is hidden (placeBodies), never drawn at the origin.
 //
 // The Ride workspace draws the ride engine; the Compare workspace draws each of its two runs
 // (`source`), run B as a ghost. A compare run shows the plain shell: the display and tail light
@@ -104,29 +105,22 @@ export function LiveBodies({
   const model = useWheelModel();
   const bodies = source.bodies;
   const nodes = useRef<(THREE.Group | null)[]>([]);
+  const placed = useRef<{ bodies: readonly BodyInfo[] | null }>({ bodies: null });
   const own = source === engine;
 
   useFrame(() => {
-    const p = source === engine ? visualFrame().poses : source.latest.poses;
-    if (!p) return;
-    for (let i = 0; i < bodies.length; i++) {
-      const g = nodes.current[i];
-      const o = i * POSE_FLOATS;
-      if (!g || o + POSE_FLOATS > p.length) continue;
-      g.position.set(p[o] as number, p[o + 1] as number, p[o + 2] as number);
-      // Poses are w x y z; three.js quaternions are x y z w.
-      g.quaternion.set(
-        p[o + 4] as number,
-        p[o + 5] as number,
-        p[o + 6] as number,
-        p[o + 3] as number,
-      );
-    }
+    // The visual frame is of the engine's bodies now; this render may still hold the last list.
+    const frame = own ? visualFrame() : null;
+    const poses = frame ? (frame.bodies === bodies ? frame.poses : null) : source.latest.poses;
+    placeBodies(nodes.current, bodies, poses, placed.current);
   }, -50);
 
   const content = bodies.map((b, i) => (
     <group
       key={`${i}-${b.name}`}
+      name={`body:${b.name}`}
+      // Hidden until its first pose (placeBodies): a new group sits at the origin.
+      visible={false}
       ref={(g) => {
         nodes.current[i] = g;
       }}

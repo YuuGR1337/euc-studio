@@ -20,7 +20,7 @@ import { LOW_FPS, type Quality } from "./quality.ts";
 import { Scene } from "./Scene.tsx";
 import { WheelOutputs } from "./WheelOutputs.tsx";
 import { slopeAt } from "./terrain.ts";
-import { sampleMap, type HeightMapView } from "./mapSurface.ts";
+import { type GroundView, sampleGround } from "./ground.ts";
 import { shellHeading, wheelPosition } from "./poses.ts";
 import { Vector3 } from "three";
 
@@ -172,12 +172,12 @@ function Battery() {
   );
 }
 
-function Grade({ map, compact = false }: { map?: HeightMapView | null; compact?: boolean }) {
+function Grade({ map, compact = false }: { map?: GroundView | null; compact?: boolean }) {
   const grade = useLive(
     (l) => {
       if (map) {
         const position = wheelPosition(new Vector3());
-        const sample = position && sampleMap(map, position.x, -position.z);
+        const sample = position && sampleGround(map, position.x, -position.z);
         if (!sample) return Number.NaN;
         const [x, y, z] = sample.normal_world;
         const heading = shellHeading();
@@ -248,7 +248,7 @@ export function Viewport({
   onFreeControls,
 }: {
   active: boolean;
-  map?: HeightMapView | null;
+  map?: GroundView | null;
   freeControls?: boolean;
   onFreeControls?: () => void;
 }) {
@@ -256,6 +256,7 @@ export function Viewport({
   const setCamera = useUi((s) => s.setCamera);
   const [scene, setScene] = useState<{ quality: Quality; renderer: string } | null>(null);
   const [drawn, setDrawn] = useState(false);
+  const [worldError, setWorldError] = useState<string | null>(null);
   const ready = SCENE_OFF || scene !== null;
   useManualRiding(active);
 
@@ -269,7 +270,13 @@ export function Viewport({
         {SCENE_OFF ? (
           <p className="grid h-full place-items-center text-12 text-fg-3">3D view off</p>
         ) : (
-          <Scene active={active} map={map} onReady={setScene} onFirstFrame={() => setDrawn(true)} />
+          <Scene
+            active={active}
+            map={map}
+            onReady={setScene}
+            onFirstFrame={() => setDrawn(true)}
+            onWorldError={setWorldError}
+          />
         )}
       </div>
 
@@ -342,6 +349,18 @@ export function Viewport({
             </div>
           </HudCard>
           <div className="flex flex-col items-end gap-8">
+            {worldError && (
+              <Tooltip
+                side="top"
+                content={`The engine did not send world chunks (${worldError.replace(/\.$/, "")}). The physics still rides the world; the view keeps what it drew and tries again.`}
+              >
+                <span className="pointer-events-auto">
+                  <Pill tone="danger" size="md" dot>
+                    World view incomplete
+                  </Pill>
+                </span>
+              </Tooltip>
+            )}
             {scene?.quality === "low" && (
               <Tooltip
                 side="top"

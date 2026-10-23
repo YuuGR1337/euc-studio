@@ -22,6 +22,7 @@ mod mjcf;
 mod params;
 mod rider;
 mod terrain;
+pub mod world;
 
 use euc_telemetry::{BodyInfo, BodyRole, Geom, GeomKind, Pose};
 use mujoco_rs::prelude::*;
@@ -34,6 +35,7 @@ pub use params::{
 };
 pub use rider::{Intent, RiderController, wrap_angle};
 pub use terrain::{Feature, Terrain};
+pub use world::{WorldGround, WorldStart};
 
 use mjcf::names;
 
@@ -392,6 +394,8 @@ pub struct Physics {
     letting_go: Option<(f64, Leaving)>,
     /// The firmware has cut the drive (the session tells).
     drive_cut: bool,
+    /// The streaming world's window and box pool, when the ground is a world.
+    world: Option<world::Window>,
 }
 
 impl std::fmt::Debug for Physics {
@@ -459,7 +463,12 @@ impl Physics {
             articulated: articulated_ids,
         };
         let total_mass = model.body_mass().iter().sum();
-        let data = MjData::new(Box::new(model));
+        let mut data = MjData::new(Box::new(model));
+        let tire = setup.wheel.tire;
+        // The tire's contact friction on asphalt; the world scales it by the surface under it.
+        let tire_friction = [tire.friction, 0.01, tire.crr * tire.radius_m];
+        let world =
+            setup.world.clone().map(|ground| world::Window::new(ground, &mut data, tire_friction)).transpose()?;
         let rider = RiderController::new(setup.rider.control);
         let mut physics = Self {
             data,
@@ -488,6 +497,7 @@ impl Physics {
             left: None,
             letting_go: None,
             drive_cut: false,
+            world,
         };
         physics.settle();
         Ok(physics)
@@ -571,6 +581,30 @@ impl Physics {
         let q = self.ids.root_qpos;
         let p = self.data.qpos();
         [p[q], p[q + 1], p[q + 2]]
+    }
+
+    /// The streaming world under this run, if the ground is one.
+    pub fn world_ground(&self) -> Option<&WorldGround> {
+        self.world.as_ref().map(world::Window::ground)
+    }
+
+    /// The world's surface under the wheel as of the last world tick (every
+    /// [`world::TICK_STEPS`] steps), if the ground is a world.
+    pub fn ground_surface(&self) -> Option<euc_world::Surface> {
+        self.world.as_ref().map(world::Window::surface)
+    }
+
+    /// Height of the static ground (window and solids, not bodies) under `xy`, metres, by a ray
+    /// cast from 50 m above, as the contacts see it; `None` where nothing is hit.
+    pub fn ground_ray_m(&mut self, xy: [f64; 2]) -> Option<f64> {
+        let (hit, distance) = self.data.ray(&[xy[0], xy[1], 50.0], &[0.0, 0.0, -1.0], None, true, None, None);
+        hit.map(|_| 50.0 - distance)
+    }
+
+    /// World upkeep so far: window recentres, the last recentre's cost on the step thread
+    /// (seconds) and the solids in the box pool now.
+    pub fn world_upkeep(&self) -> Option<(u64, f64, usize)> {
+        self.world.as_ref().map(|w| (w.recentres, w.last_recentre_s, w.pooled()))
     }
 
     /// Current rigid rider origin, metres in world coordinates, including after detachment.
@@ -788,10 +822,22 @@ impl Physics {
         self.data.eq_active()[self.ids.stand]
     }
 
+    /// Between steps, on a fixed cadence: the streaming world's ground follows the wheel.
+    fn tick_world(&mut self) {
+        let ids = self.ids;
+        if let Some(window) = &mut self.world {
+            let (q, v) = (self.data.qpos(), self.data.qvel());
+            let position = [q[ids.root_qpos], q[ids.root_qpos + 1]];
+            let velocity = [v[ids.root_dof], v[ids.root_dof + 1]];
+            window.tick(&mut self.data, position, velocity);
+        }
+    }
+
     /// Advances one [`TIMESTEP_S`] with `motor_torque_nm` on the wheel (forward positive; the
     /// shell takes the reaction).
     pub fn step(&mut self, motor_torque_nm: f64) {
         let ids = self.ids;
+        self.tick_world();
         // Positions and velocities first, so the rider and the aids act on the current state.
         self.data.step1();
         let att = self.attitude();

@@ -8,6 +8,7 @@ import { RingBuffer } from "../lib/ring.ts";
 import { readStored } from "../lib/storage.ts";
 import { readBatch } from "./batch.ts";
 import type { Tone } from "./buzzerAudio.ts";
+import { validFrame, type WorldFrame } from "./world.ts";
 import { POSE_MAX_BODIES, PoseHistory } from "./poseHistory.ts";
 import {
   customFirmware,
@@ -75,6 +76,7 @@ export type Message =
   | { type: "lights"; layout: LightsLayout | null }
   | { type: "buzzer"; tones: Tone[] }
   | { type: "terrain"; profile: TerrainProfile | null }
+  | { type: "world"; frame: WorldFrame | null }
   | { type: "suspension"; info: EngineClient["suspension"] }
   | { type: "events"; events: TelemetryEvent[] }
   | { type: "frames"; frames: PhoneFrame[] }
@@ -161,6 +163,7 @@ export class LiveEngine implements EngineClient {
   display: DisplayLayout | null = null;
   lights: LightsLayout | null = null;
   terrain: TerrainProfile | null = null;
+  liveWorld: WorldFrame | null = null;
   suspension: EngineClient["suspension"] = null;
   beeps = 0;
   audio?: NativeAudioStatus;
@@ -207,6 +210,21 @@ export class LiveEngine implements EngineClient {
     // A caller must own the visual output. Never let sampling rewrite the raw latest frame.
     if (out.buffer === this.latest.poses?.buffer) return Number.NaN;
     return this.poseHistory.sample(out, wallNowMs, this.measuredRtf());
+  }
+
+  /**
+   * A new body list or run starts the visual history again, from the newest raw frame when it
+   * fits the bodies. That frame can come first: Tauri fetches a JSON message of 8 KiB or more
+   * (the stock body list) but runs a small batch at once, and the pump sends the status after a
+   * tick's batch. A finished or paused run sends no other frame.
+   */
+  private restartPoses(): void {
+    this.poseHistory.reset(this.bodies.length);
+    this.poseBatchSeq = null;
+    this.poseStepPending = false;
+    const raw = this.latest.poses;
+    if (raw && raw.length === this.bodies.length * POSE_FLOATS)
+      this.poseHistory.push(this.latest.t, raw, 0, performance.now());
   }
 
   private async connect(): Promise<void> {
@@ -311,9 +329,7 @@ export class LiveEngine implements EngineClient {
         break;
       case "status": {
         if (this.status.runEpoch !== undefined && this.status.runEpoch !== m.run_epoch) {
-          this.poseHistory.reset(this.bodies.length);
-          this.poseBatchSeq = null;
-          this.poseStepPending = false;
+          this.restartPoses();
         }
         this.status = {
           runMode: m.run_mode,
@@ -357,9 +373,7 @@ export class LiveEngine implements EngineClient {
         break;
       case "bodies":
         this.bodies = m.bodies;
-        this.poseHistory.reset(this.bodies.length);
-        this.poseBatchSeq = null;
-        this.poseStepPending = false;
+        this.restartPoses();
         break;
       case "display":
         this.display = m.layout;
@@ -369,6 +383,9 @@ export class LiveEngine implements EngineClient {
         break;
       case "terrain":
         this.terrain = m.profile;
+        break;
+      case "world":
+        this.liveWorld = validFrame(m.frame) ? m.frame : null;
         break;
       case "suspension":
         this.suspension = m.info;

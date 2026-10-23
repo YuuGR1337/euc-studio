@@ -1,0 +1,50 @@
+# World acceptance (W1b, docs/models/world.md): ride off a curb, square on, onto the road. Seed 42,
+# generator revision 2: from the lot behind the spawn arterial's right-hand sidewalk at x = 4 m,
+# across the sidewalk and down its 13.5 cm curb (y = -5.5 m) at 9 km/h, then stop in the lane. The
+# drop is the curb box's top edge; the road beyond is the height-field window.
+#
+# PRELIMINARY: no measured ride off a curb backs this run. `record` checks always pass; `upright`
+# and `no_cutoff` are the safety verdict.
+schema = 1
+name = "world-curb-down-90deg"
+description = "Ride off a 13.5 cm curb at 9 km/h onto the road of the city world (seed 42)."
+wheel = "begode-extreme"
+seconds = 14.0
+release_s = 2.5
+speed_kmh = [[0, 0], [5, 0], [7, 9], [10, 9], [12, 0]]
+settings = "tarik-2026-10-15"
+
+[world]
+seed = 42
+revision = 2
+start = { x_m = 4.0, y_m = -12.0, heading_deg = 90.0 }
+
+[[expect]]
+check = "record"
+signal = "pitch_deg"
+stat = "min"
+from_s = 7.5
+
+[[expect]]
+check = "record"
+signal = "pitch_deg"
+stat = "max"
+from_s = 7.5
+
+[[expect]]
+check = "record"
+signal = "iq_a"
+stat = "max"
+from_s = 7.5
+
+[[expect]]
+check = "record"
+signal = "suspension_mm"
+stat = "max"
+from_s = 7.5
+
+[[expect]]
+check = "upright"
+
+[[expect]]
+check = "no_cutoff"

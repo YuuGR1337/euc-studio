@@ -29,6 +29,7 @@ use super::native_audio::{AudioError, AudioStatus, NativeBuzzer};
 use super::phone::{PhoneDecoder, PhoneFrame};
 use super::recordings::{RecordingState, RunInfo};
 use super::tune;
+use super::world::WorldFrame;
 
 /// Physics and firmware advance in steps of this many simulated seconds.
 const STEP_S: f64 = 1.0 / 120.0;
@@ -81,6 +82,8 @@ pub struct Built {
     pub lights: Option<LightsLayout>,
     /// The ground along the path, `[x, z, slope z]` metres, when it is not flat (`terrain_profile`).
     pub terrain: Option<Vec<[f32; 3]>>,
+    /// The streaming world the run rides, when it rides one (a `[world]` scenario or a world free ride).
+    pub world: Option<WorldFrame>,
     /// The rear suspension's shock, for drawing it compressed; none on a wheel without one.
     pub suspension: Option<SuspensionInfo>,
 }
@@ -148,6 +151,10 @@ pub enum Message {
     /// The ground's height along the path (sent with the bodies; `null` on flat ground).
     Terrain {
         profile: Option<Vec<[f32; 3]>>,
+    },
+    /// The streaming world and its frame (sent with the bodies; `null` when the run has none).
+    World {
+        frame: Option<WorldFrame>,
     },
     /// The rear shock (sent with the bodies; `null` on a wheel without suspension).
     Suspension {
@@ -473,6 +480,7 @@ struct Sim {
     display: Option<DisplayLayout>,
     lights: Option<LightsLayout>,
     terrain: Option<Vec<[f32; 3]>>,
+    world: Option<WorldFrame>,
     suspension: Option<SuspensionInfo>,
     error: Option<String>,
     outputs: Option<Outputs>,
@@ -528,6 +536,7 @@ impl Sim {
             display: None,
             lights: None,
             terrain: None,
+            world: None,
             suspension: None,
             error: None,
             outputs: None,
@@ -648,6 +657,7 @@ impl Sim {
         self.display = None;
         self.lights = None;
         self.terrain = None;
+        self.world = None;
         self.suspension = None;
         self.outputs = None;
         self.outputs_at = None;
@@ -726,6 +736,7 @@ impl Sim {
                     out.messages.push(Message::Display { layout: built.display.clone() });
                     out.messages.push(Message::Lights { layout: built.lights.clone() });
                     out.messages.push(Message::Terrain { profile: built.terrain.clone() });
+                    out.messages.push(Message::World { frame: built.world.clone() });
                     out.messages.push(Message::Suspension { info: built.suspension.clone() });
                 }
                 self.build = Some(built.build);
@@ -734,6 +745,7 @@ impl Sim {
                 self.display = built.display;
                 self.lights = built.lights;
                 self.terrain = built.terrain;
+                self.world = built.world;
                 self.suspension = built.suspension;
                 self.outputs = None;
                 let mut host = built.host;
@@ -929,6 +941,7 @@ impl Sim {
                     out.messages.push(Message::Display { layout: self.display.clone() });
                     out.messages.push(Message::Lights { layout: self.lights.clone() });
                     out.messages.push(Message::Terrain { profile: self.terrain.clone() });
+                    out.messages.push(Message::World { frame: self.world.clone() });
                     out.messages.push(Message::Suspension { info: self.suspension.clone() });
                     if let Some(outputs) = outputs {
                         out.messages.push(Message::Outputs { outputs });
@@ -1295,6 +1308,7 @@ mod capture_integration_tests {
                     display: None,
                     lights: None,
                     terrain: None,
+                    world: None,
                     suspension: None,
                 })
             }),
@@ -1604,7 +1618,8 @@ mod button_state_tests {
             wheel: "begode-extreme".into(),
             settings: "blank".into(),
             rider_model: "rigid_ankle_v1".into(),
-            map: euc_physics::GeneratedMapSpec::flat(0),
+            map: Some(euc_physics::GeneratedMapSpec::flat(0)),
+            world: None,
         });
         press(&sim, buttons::Button::Power, true);
         sim.sync_button_states();

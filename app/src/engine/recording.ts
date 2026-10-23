@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import type { WorldSpec } from "./world.ts";
 import type { HeightMap } from "./freeRide.ts";
 import type { EngineClient, PhoneFrame } from "./types.ts";
 import type { Outputs } from "./telemetry.gen.ts";
@@ -37,11 +38,19 @@ interface RecordingContextBase {
   model_aids: RecordingModelAids;
 }
 
-/** Native import validates this metadata and the saved map before returning it. */
+/** A streaming world as a recording names it (never its meshes; playback regenerates it). */
+export interface RecordedWorld {
+  spec: WorldSpec;
+  start_xy_m: [number, number];
+  start_heading_rad: number;
+  digest: number;
+}
+
+/** Native import validates this metadata, the saved map and the world before returning it. */
 export type RecordingContext = RecordingContextBase &
   (
-    | { run_mode: "free_ride"; height_map: HeightMap }
-    | { run_mode: "scenario"; height_map?: HeightMap | null }
+    | { run_mode: "free_ride"; height_map?: HeightMap | null; world?: RecordedWorld | null }
+    | { run_mode: "scenario"; height_map?: HeightMap | null; world?: RecordedWorld | null }
   );
 
 export interface RecordingHeader {

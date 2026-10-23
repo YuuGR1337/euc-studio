@@ -1,0 +1,57 @@
+# World acceptance (W1b, docs/models/world.md): ride into a curb 30° off square on the generated
+# city. Seed 42, generator revision 2: the spawn arterial's right-hand curb (face 13.5 cm, y = -5.5 m),
+# met at x = 6 m. An oblique face is where a height field alone pushes the wheel the wrong way; the
+# curb box gives the true sideways push (spike D in docs/models/world.md).
+#
+# PRELIMINARY: no measured ride over a curb backs this run. `record` checks always pass; `upright`
+# and `no_cutoff` are the safety verdict.
+schema = 1
+name = "world-curb-up-30deg"
+description = "Ride into a 13.5 cm curb 30° off square at 9 km/h on the city world (seed 42)."
+wheel = "begode-extreme"
+seconds = 15.0
+release_s = 2.5
+speed_kmh = [[0, 0], [5, 0], [7, 9], [12, 9], [14, 0]]
+settings = "tarik-2026-10-15"
+
+[world]
+seed = 42
+revision = 2
+start = { x_m = 1.0, y_m = 3.0, heading_deg = -60.0 }
+
+[[expect]]
+check = "record"
+signal = "pitch_deg"
+stat = "min"
+from_s = 8.5
+
+[[expect]]
+check = "record"
+signal = "roll_deg"
+stat = "max"
+from_s = 8.5
+
+[[expect]]
+check = "record"
+signal = "roll_deg"
+stat = "min"
+from_s = 8.5
+
+[[expect]]
+check = "record"
+signal = "speed_kmh"
+stat = "min"
+from_s = 9.0
+by_s = 12.0
+
+[[expect]]
+check = "record"
+signal = "suspension_mm"
+stat = "max"
+from_s = 8.5
+
+[[expect]]
+check = "upright"
+
+[[expect]]
+check = "no_cutoff"

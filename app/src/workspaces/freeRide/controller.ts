@@ -5,10 +5,11 @@ import {
   type FreeRideInput,
   type FreeRideSource,
   type FreeRideStatus,
-  type GeneratedMapSpec,
+  type GroundChoice,
   type HeightMap,
   type RiderModel,
 } from "../../engine/freeRide.ts";
+import type { WorldFrame } from "../../engine/world.ts";
 import type { EngineClient } from "../../engine/types.ts";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 
@@ -20,7 +21,9 @@ interface Pad {
 export interface ControlSnapshot {
   status: FreeRideStatus | null;
   map: HeightMap | null;
-  applied: GeneratedMapSpec | null;
+  /** The run's world and its frame, when the ground is a world. */
+  world: WorldFrame | null;
+  applied: GroundChoice | null;
   riderModel: RiderModel;
   source: FreeRideSource;
   padIndex: number | null;
@@ -65,7 +68,7 @@ const message = (error: unknown) => (error instanceof Error ? error.message : St
 // Keep the sequence across drawer unmounts, as well as source changes. Native epochs increase.
 let sequenceEpoch: number | null = null;
 let sequence = 0;
-let lastApplied: { epoch: number; map: GeneratedMapSpec } | null = null;
+let lastApplied: { epoch: number; ground: GroundChoice } | null = null;
 function textFocus(target: EventTarget | null) {
   if (
     target instanceof Element &&
@@ -92,6 +95,7 @@ export class FreeRideController {
   private state: ControlSnapshot = {
     status: null,
     map: null,
+    world: null,
     applied: null,
     riderModel: DEFAULT_RIDER_MODEL,
     source: "keyboard_slider",
@@ -110,7 +114,7 @@ export class FreeRideController {
     neutralMs: 0,
     inputAgeMs: null,
     playing: false,
-    reason: "Select a map and start free ride.",
+    reason: "Choose a world and start free ride.",
     error: null,
   };
   private listeners = new Set<() => void>();
@@ -147,7 +151,7 @@ export class FreeRideController {
   private pausingEpochs = new Set<number>();
   private sawPlaying = false;
   private pendingStart: {
-    map: GeneratedMapSpec;
+    ground: GroundChoice;
     riderModel: RiderModel;
     epoch: number;
     at: number;
@@ -725,13 +729,13 @@ export class FreeRideController {
       clearTimeout(timeout);
     }
   };
-  start = async (map: GeneratedMapSpec) => {
+  start = async (ground: GroundChoice) => {
     if (!this.active || this.engine.kind !== "live" || this.state.starting || !this.state.status)
       return;
     this.pause("Starting a new free ride.");
     const lifecycle = this.lifecycle;
     const request = {
-      map: structuredClone(map),
+      ground: structuredClone(ground),
       riderModel: this.state.riderModel,
       epoch: this.state.status.epoch,
       at: performance.now(),
@@ -741,7 +745,7 @@ export class FreeRideController {
     this.pendingStart = request;
     this.update({ starting: true, error: null });
     try {
-      await freeRideApi.start(request.map, request.riderModel);
+      await freeRideApi.start(request.ground, request.riderModel);
       request.accepted = true;
       if (request.cancelled || !this.active || lifecycle !== this.lifecycle) {
         request.cancelled = true;
@@ -755,7 +759,11 @@ export class FreeRideController {
     } catch (error) {
       if (this.active && this.pendingStart === request) {
         this.pendingStart = null;
-        this.update({ starting: false, error: message(error), reason: "Map was not applied." });
+        this.update({
+          starting: false,
+          error: message(error),
+          reason: "The ground was not applied.",
+        });
       }
     }
   };
@@ -821,7 +829,8 @@ export class FreeRideController {
           armed: false,
           arming: false,
           map: null,
-          applied: lastApplied?.epoch === status.epoch ? lastApplied.map : null,
+          world: null,
+          applied: lastApplied?.epoch === status.epoch ? lastApplied.ground : null,
           ...(!this.riderModelEdited ? { riderModel: status.rider_model } : {}),
           reason: status.reason,
         });
@@ -841,10 +850,10 @@ export class FreeRideController {
           });
           return;
         }
-        lastApplied = { epoch: status.epoch, map: request.map };
+        lastApplied = { epoch: status.epoch, ground: request.ground };
         this.riderModelEdited = false;
         this.engine.setTargetRtf(Math.max(0.25, Math.min(1, this.engine.targetRtf)));
-        this.update({ applied: request.map, starting: false, reason: status.reason });
+        this.update({ applied: request.ground, starting: false, reason: status.reason });
         if (request.cancelled)
           this.pause("The queued run arrived after controls closed. Select Arm when ready.");
       } else if (request && !request.cancelled && performance.now() - request.at > 20_000) {
@@ -855,7 +864,10 @@ export class FreeRideController {
         });
       }
       if (status.mode === "free_ride" && this.mapEpoch !== status.epoch) {
-        const map = await freeRideApi.map(status.epoch);
+        const ground =
+          status.ground === "world"
+            ? { world: await freeRideApi.world(status.epoch), map: null }
+            : { map: await freeRideApi.map(status.epoch), world: null };
         if (
           !this.active ||
           lifecycle !== this.lifecycle ||
@@ -863,7 +875,7 @@ export class FreeRideController {
         )
           return;
         this.mapEpoch = status.epoch;
-        this.update({ map });
+        this.update(ground);
       }
     } catch (error) {
       if (this.active && lifecycle === this.lifecycle) {
