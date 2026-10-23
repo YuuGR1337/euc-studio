@@ -1,10 +1,10 @@
 //! The CPU backend this build runs firmware on.
 //!
 //! Our own Cortex-M3 core (`euc-armv7m`) runs the firmware in every build, bundles included.
-//! Unicorn is GPL-2.0, a development oracle that must never ship: `pnpm tauri dev` enables the
-//! `unicorn` feature, and `EUC_CPU=unicorn` then selects it. Every bundle (`tauri build`, release
-//! or `--debug`) compiles with Tauri's custom protocol, which clears the `dev` cfg, so the guard
-//! below stops a bundle with the feature outright.
+//! Unicorn is GPL-2.0, a development oracle that must never ship: `EUC_UNICORN=1 pnpm tauri dev`
+//! builds in the `unicorn` feature, and `EUC_CPU=unicorn` then selects it. Every bundle (`tauri
+//! build`, release or `--debug`) compiles with Tauri's custom protocol, which clears the `dev`
+//! cfg, so the guard below stops a bundle with the feature outright.
 
 use euc_sim::CpuFactory;
 use euc_sim::cpu::Backend;

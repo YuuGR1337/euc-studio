@@ -18,9 +18,9 @@ name = "euc_studio_app_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [features]
-# The Unicorn CPU backend: GPL-2.0, for development only. `pnpm tauri dev` turns it on
-# (scripts/tauri.mjs) and `EUC_CPU=unicorn` selects it; our own core runs otherwise. A bundle
-# refuses to compile with it (see src/engine/cpu.rs).
+# The Unicorn CPU backend: GPL-2.0, a development oracle, off by default. `EUC_UNICORN=1 pnpm
+# tauri dev` builds it in (scripts/tauri.mjs) and `EUC_CPU=unicorn` then selects it; our own core
+# runs otherwise. A bundle refuses to compile with it (see src/engine/cpu.rs).
 unicorn = ["euc-sim/unicorn"]
 
 [build-dependencies]
