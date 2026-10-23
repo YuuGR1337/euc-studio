@@ -264,25 +264,29 @@ pedal_bracket_right = { centre = [0.0007, -0.1197, -0.0106], half = [0.0228, 0.0
 pedal_left = { centre = [0.0, 0.1763, 0.0075], half = [0.145, 0.0675, 0.0045] }
 pedal_right = { centre = [0.0, -0.1763, 0.0075], half = [0.145, 0.0675, 0.0045] }
 
-# Side pad covers: C-shaped 3D frames of textured black plastic, not in the scan. Shape from the
-# owner's photos of a removed cover and a retailer's parts diagram; size and place ESTIMATE
-# (docs/hardware/geometry.md "Pad covers"). Left cover; mirror y for the right. Drawing only: no
-# collision solid, no mass.
+# Side pad covers: C-shaped moulded covers of textured black plastic, not in the scan. Shape INFERRED
+# from a two-view reconstruction of the owner's photos of a removed cover (5.5 / 3.1 px RMS) and a
+# retailer's parts diagram; size and place ESTIMATE (docs/hardware/geometry.md "Pad covers"). Left
+# cover; mirror y for the right. Drawing only: no collision solid, no mass.
 [pad_covers]
 in_scan = false
 length_m = 0.401               # ESTIMATE: 0.372-0.447 (diagram scales), 0.370-0.510 (photo screw heads)
-height_m = 0.332               # ESTIMATE, same scale
-depth_m = 0.065                # ESTIMATE 0.050-0.080: mounting face to outer face
+height_m = 0.320               # ESTIMATE, same scale
+depth_m = 0.106                # INFERRED proportion at that scale (+-20 %): mounting face to the end and round blocks' tops
+heights_m = { arms = 0.060, lettering_block = 0.095, slotted_block_rim = [0.070, 0.092], end_block = 0.108, round_block = 0.108 }  # INFERRED, above the mounting face
+wall_m = 0.0035                # ESTIMATE: open-backed moulded walls
 x_range_m = [-0.205, 0.196]    # ESTIMATE +-0.040: arms' rear ends beside the rocker's rear lobes, spine at the front
-z_range_m = [0.145, 0.476]     # ESTIMATE +-0.040: the upper arm's lower edge just above the rocker plates
+z_range_m = [0.157, 0.476]     # ESTIMATE +-0.040: the upper arm's lower edge just above the rocker plates
 inner_y_m = 0.1025             # on the packs' outer faces (the scan reaches 0.1020 under the footprint)
-outer_y_m = 0.1675
+outer_y_m = 0.2085             # the end and round blocks; arms at about 0.162
+screws_m = [[-0.119, 0.166, 0.432], [-0.115, 0.164, 0.224], [0.116, 0.169, 0.231]]  # INFERRED: the three visible screw heads (upper arm, lower arm, slotted block)
 # Where the rider's legs can rest (a later leg-pad contact model): outer faces, ESTIMATE
 contact_faces = [
-  { name = "upper_arm", x_m = [-0.205, 0.121], z_m = [0.356, 0.476], y_m = 0.1675 },
-  { name = "spine_and_lower_arm", x_m = [-0.205, 0.196], z_m = [0.145, 0.356], y_m = 0.1675 },
-  { name = "round_block", x_m = [-0.135, -0.056], z_m = [0.224, 0.332], y_m = 0.1895 },
-  { name = "slotted_block", x_m = [0.083, 0.196], z_m = [0.154, 0.257], y_m = 0.1795 },
+  { name = "lettering_block_top", x_m = [0.060, 0.118], z_m = [0.376, 0.457], y_m = 0.1980 },
+  { name = "upper_arm", x_m = [-0.116, 0.060], z_m = [0.382, 0.464], y_m = 0.1618 },
+  { name = "end_block_top", x_m = [-0.155, -0.127], z_m = [0.405, 0.442], y_m = 0.2107 },
+  { name = "round_block_top", x_m = [-0.164, -0.108], z_m = [0.256, 0.303], y_m = 0.2105 },
+  { name = "lower_arm", x_m = [-0.158, 0.136], z_m = [0.159, 0.259], y_m = 0.1626 },
 ]
 
 # The cleaned render model (public), see app/public/models/begode-extreme/README.md.
