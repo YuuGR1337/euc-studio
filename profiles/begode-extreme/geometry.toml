@@ -112,7 +112,8 @@ y_m = [-0.0931, 0.0914]
 arm_faces_y_m = [0.0595, 0.0675]       # MEASURED (scan): inner and outer face, +-y
 arm_foot_outer_y_m = 0.074             # MEASURED (scan): the foot stands out further
 arm_bounds_xz_m = [[0.114, 0.186], [0.367, 0.483]]  # MEASURED (diagram on the photo); the scan's plate outline agrees within 3 mm
-foot_bolts_xz_m = [[0.1276, 0.3790], [0.1404, 0.3790], [0.1276, 0.3894], [0.1404, 0.3894]]  # MEASURED (diagram on the photo) +-0.003
+foot_bolts_xz_m = [[0.1263, 0.3768], [0.1385, 0.3767], [0.1261, 0.3866], [0.1385, 0.3872]]  # MEASURED (scan: the socket heads' tops, both sides, +-0.0005); the diagram on the photo agrees within 0.0025
+foot_screw_head = { diameter_m = 0.010, height_m = 0.0065 }  # MEASURED (scan): tops 0.0062-0.0077 above the foot
 body_bolt_xz_m = [0.1689, 0.3811]      # MEASURED (diagram on the photo) +-0.003
 tube_centre_m = [0.1323, 0.0, 0.4738]
 tube_radius_m = 0.0100
@@ -293,7 +294,7 @@ in_scan = false
 length_m = 0.366               # MEASURED (mounted photo) +-0.008
 height_m = 0.299               # MEASURED (mounted photo) +-0.006
 depth_m = 0.060                # INFERRED (+-20 %): the packs' outer face to the end block's top
-heights_m = { upper_arm = 0.016, lower_arm = 0.018, spine = [0.025, 0.035], slotted_block = [0.045, 0.047], lettering_block = [0.049, 0.052], round_block = 0.056, end_block = 0.060 }  # INFERRED, out from the packs' outer face
+heights_m = { upper_arm = 0.016, lower_arm = 0.018, spine = [0.025, 0.035], slotted_block = [0.045, 0.047], lettering_block = [0.049, 0.052], round_block = 0.052, end_block = 0.060 }  # INFERRED, out from the packs' outer face
 wall_m = 0.0035                # ESTIMATE: open-backed moulded walls
 x_range_m = [-0.182, 0.184]    # MEASURED (mounted photo) +-0.006
 z_range_m = [0.055, 0.354]     # MEASURED (mounted photo) +-0.006: the top 16 mm below the packs' top
@@ -301,14 +302,14 @@ pitch_deg = 2.6                # MEASURED (mounted photo): nose up
 inner_y_m = 0.1012             # flush on the left packs' outer face (scan 0.10105); the right cover on the right packs' (0.10205), 1.0 mm further out
 wrap_y_m = 0.066               # INFERRED: past the packs' front and rear ends the cover wraps their end faces in to here (the arms' undersides on the low photo of the removed cover)
 outer_y_m = 0.1615             # the end block; arms at about 0.117-0.120
-contact_gap_m = { outline_median = 0.0002, outline_p95 = 0.0030, wrap_median = 0.0007, overlap_max = 0.00014 }  # MEASURED on the exported model against the packs
+contact_gap_m = { outline_median = 0.0002, outline_p95 = 0.0017, wrap_median = 0.0006, overlap_max = 0.0001 }  # MEASURED on the exported model against the packs
 screws_m = [[-0.104, 0.123, 0.311], [-0.103, 0.122, 0.125], [0.108, 0.126, 0.122]]  # MEASURED (mounted photo; depth INFERRED): the three visible screw heads (upper arm, lower arm, slotted block)
 # Where the rider's legs can rest (a later leg-pad contact model): outer faces (INFERRED depth)
 contact_faces = [
   { name = "lettering_block_top", x_m = [0.059, 0.114], z_m = [0.252, 0.324], y_m = 0.1506 },
   { name = "upper_arm", x_m = [-0.101, 0.060], z_m = [0.259, 0.336], y_m = 0.1173 },
   { name = "end_block_top", x_m = [-0.137, -0.111], z_m = [0.288, 0.321], y_m = 0.1613 },
-  { name = "round_block_top", x_m = [-0.146, -0.096], z_m = [0.154, 0.196], y_m = 0.1553 },
+  { name = "round_block_top", x_m = [-0.155, -0.123], z_m = [0.143, 0.198], y_m = 0.1521 },
   { name = "lower_arm", x_m = [-0.142, 0.125], z_m = [0.059, 0.159], y_m = 0.1195 },
 ]
 

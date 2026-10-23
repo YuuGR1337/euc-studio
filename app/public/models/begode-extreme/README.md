@@ -21,8 +21,9 @@ owner's measurements:
   the rocker pin to its own pin on the carriage, above the shock's bottom eye. Both carriage points
   are INFERRED and the carriage's clevis and plates are ESTIMATES: they are hidden in every photo
   (`docs/hardware/geometry.md`, "Rear linkage").
-- **Side pad covers.** Not in the scan. Sculpted moulded covers of black plastic, grained like the
-  shell, with steel screw heads (the maker's lettering is left out): the shape comes from a
+- **Side pad covers.** Not in the scan. Sculpted moulded covers of black plastic (one smooth
+  moulding with rounded edges), grained like the shell, with steel screw heads (no lettering or
+  logo): the shape comes from a
   two-view reconstruction of the owner's photos of a removed cover; the size (366 mm long) and the
   place on the wheel are measured on the owner's photo with the cover mounted. The back is cut to
   the packs: flush on their outer faces and wrapping round their front and rear ends
@@ -46,8 +47,8 @@ owner's measurements:
 | File                      | Triangles | Size    | Use                  |
 | ------------------------- | --------- | ------- | -------------------- |
 | `begode-extreme-lod0.glb` | 350k      | 2.9 MB  | close-ups            |
-| `begode-extreme-lod1.glb` | 145k      | 1.4 MB  | default view         |
-| `begode-extreme-lod2.glb` | 54k       | 0.46 MB | far away, thumbnails |
+| `begode-extreme-lod1.glb` | 146k      | 1.4 MB  | default view         |
+| `begode-extreme-lod2.glb` | 54k       | 0.48 MB | far away, thumbnails |
 
 The files use meshopt compression (`EXT_meshopt_compression`, `KHR_mesh_quantization`). three.js
 loads them with `GLTFLoader` and the `MeshoptDecoder`; drei's `useGLTF` enables it by default.

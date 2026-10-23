@@ -227,8 +227,10 @@ of the battery case.
   as a bar that ramps up into a raised end block (the upper arm's rear leg); a spine down from the
   lettering block; the lower arm, with three diagonal grooves, its front and rear ends sloping down
   to the packs; on the lower arm a slotted block by the spine (two pockets, one with a screw in its
-  floor, and a shallow tray at its front) and a round-topped block at the rear end; three steel
-  screw heads. Edges are rounded 4-18 mm and the elements blend with 7 mm fillets.
+  floor, and a shallow tray at its front) and a round-topped block at the rear end, traced on the
+  mounted photo; three steel screw heads. One smooth moulding: the joined shape is smoothed (a 4 mm
+  Gaussian on its distance field), so every edge is rounded and the elements blend with 11 mm
+  fillets; the pockets, grooves and the hole are cut after.
 - **Size and place (MEASURED from the mounted photo).** The camera of the side photo is solved
   from points that are in the scan or the model: pack rivets, the rocker's top-eye bolt and empty
   hole, the rear handle's roller bolt and its three windows (6.9 px RMS, with the phone's 24 mm
@@ -246,15 +248,17 @@ of the battery case.
   both arms touch). The top edge stays 16 mm below the packs' top, so the cover does not wrap
   there. **Contact, measured** on the exported LOD0 against the drawn packs (boxes on the scan's
   measured faces, table above): along the cover's outline over the packs' outer faces (3 mm cells,
-  the cover's innermost point in each) the gap is median 0.2 mm, 95th percentile 2.5-3.0 mm. The
-  larger values are rounded edges, the lettering block's hole (a hole, not a gap) and single cells
-  that hold only a sliver of a sloped edge (up to 15 mm; they differ between the two sides, which
-  are the same mesh). The wrap faces are 0.6 mm (front) and 0.7 mm (rear) from the packs' end
-  faces (medians). The deepest overlap is 0.14 mm. The walls are hollow from the back, so a horizontal section through
+  the cover's innermost point in each) the gap is median 0.2 mm, 95th percentile 1.5-1.7 mm. The
+  larger values are the lettering block's hole (a hole, not a gap) and single cells that hold only
+  a sliver of a sloped edge (up to 9 mm; they differ between the two sides, which are the same
+  mesh). The wrap faces are 0.6 mm from the packs' front and rear end faces (medians; 95th
+  percentile 0.9 and 2.7 mm). The deepest overlap is 0.09 mm. The walls are hollow from the back, so a horizontal section through
   an arm shows only its outer wall; the arm's top and bottom walls stand on the pack.
 - **How far it stands out (INFERRED at that scale, +-20 %).** From the packs' outer faces: arms
-  16-18 mm, spine 25-35 mm, slotted block 45-47 mm, lettering block 49-52 mm, round block 56 mm, end
-  block 60 mm; outer faces up to |y| 162 mm, inside the deployed pedals (|y| 247 mm).
+  16-18 mm, spine 25-35 mm, slotted block 45-47 mm, lettering block 47-51 mm, round block 52 mm, end
+  block 60 mm; outer faces up to |y| 162 mm, inside the deployed pedals (|y| 247 mm). The rounding
+  takes 2-5 mm off the outline's corners (x -179 to +179 mm, z 56 to 352 mm, inside the photo's
+  +-6 mm).
 - **Calf contact faces (for a later leg-pad contact model).** The outer faces where the rider's
   legs can rest are listed in `geometry.toml` `[pad_covers] contact_faces` (from the element
   outlines above): the lettering block's top, the upper arm, the end block's top, the round
@@ -346,7 +350,7 @@ height does not change (same thickness and pin), so `pedal_below_axle_m` stays.
 ## The render model
 
 `app/public/models/begode-extreme/` holds three levels of detail (LOD0 350k triangles 2.9 MB, LOD1
-145k 1.4 MB, LOD2 54k 0.46 MB, meshopt compressed). Its README lists the nodes. How it is made from
+146k 1.4 MB, LOD2 54k 0.48 MB, meshopt compressed). Its README lists the nodes. How it is made from
 the scan (the tools live in the private research folder):
 
 1. **Parts.** Simple rules split the scan: tire (wheel pieces that reach the tread), hub, seat
@@ -411,7 +415,9 @@ the scan (the tools live in the private research folder):
    rises from the body and leans back to the crossbar; three pocketed windows (3 mm) with
    see-through centres (a rounded triangle and a long slot in the arm, a slot in the body), a small
    slot and a hole with a screw in the body. Faces from the scan: |y| 59.5-67.5 mm, the foot raised
-   to 74 mm. The crossbar stays the scan's 20 mm tube, black like the rear grip. How it differs
+   to 74 mm. The foot screws' heads are in the scan (10 mm across, 6.2-7.7 mm tall, places within
+   0.5 mm); they are redrawn there as steel socket heads and the scanned ones are removed. The
+   crossbar stays the scan's 20 mm tube, black like the rear grip. How it differs
    from the rear handle: one L-shaped plate per side bolted by a 2 x 2 foot (the rear arm: one
    frame bolt and the roller axis); 8 mm thick (the rear 6 mm); 119 mm between the plates' inner
    faces (the rear arms 105 mm); a triangle and two slots (the rear: two four-sided windows, a slot
@@ -442,8 +448,9 @@ the scan (the tools live in the private research folder):
 9. **Looks.** The scan has no colour. Materials follow the owner's photos: textured dark-grey shell
    (a tileable grain normal map on LOD0 and LOD1), black rubber tire, matte black motor covers, orange
    flange ring, textured matte black linkage plates, smoked grey tail-light sleeves (they glow with
-   the LEDs in the studio), orange front and rear handle arms with black 20 mm bars and stainless
-   socket-head screws, black anodised pedals with steel pins,
+   the LEDs in the studio), orange front and rear handle arms with black 20 mm bars and bright
+   brushed-steel socket-head screws (half metallic, so they read silver in the studio and in
+   daylight, as in the photos), black anodised pedals with steel pins,
    smoked display window. Ambient occlusion is baked into the vertex colours. The anodised orange
    is set from the owner's photo (mean sRGB 184, 91, 47 on the handle). Under the studio's lights
    (neutral tone mapping, neutral rim light) the handle, the chrome bolt heads and the shell render
