@@ -10,6 +10,14 @@
 # checks give the time the roll passed 40° (whichever side) so the delay from tip-over to cut can be
 # read off.
 #
+# BORDERLINE in the city (W2): every profile still cuts at all three quanta (stock 17.26 s), but how
+# the fall ends is chaotic. At quanta 4000 and 2000 the stock wheel ends on its nose (pitch about
+# 81°, roll near 0°) with the tire on the ground; after the cut its PWM decays slowly and it crawls
+# about 10 m, still rolling at 3.4 km/h at 22 s, so the end-speed check fails. At 3000 it stops
+# (0.22 km/h); compat fails that check at 2000 (5.70 km/h). On the flat floor it ended on its
+# side and stopped at all three. A check-later item, not a verified firmware fact:
+# docs/findings/stock-firmware.md, finding 9.
+#
 # Rider: the default rider, on the maintainer's settings, until it steps off at 15 s.
 schema = 1
 name = "rider-steps-off-15kmh"
@@ -20,6 +28,22 @@ release_s = 2.5
 speed_kmh = [[0, 0], [6, 0], [10, 15]]
 settings = "tarik-2026-10-15"
 step_off_s = 15.0
+
+# City world (docs/models/world.md): seed 42, from the spawn on the arterial (row 0) heading east,
+# on a straight line that stays within 2 m of the centreline, in the carriageway's level middle.
+# Ideal road (hills = 0, no potholes, manholes, cracks, rough or wet patches): this run tests the
+# firmware and the rider, not the road. Lane and crosswalk paint stays on the line.
+[world]
+seed = 42
+revision = 2
+
+[world.densities]
+hills = 0.0
+potholes = 0.0
+manholes = 0.0
+cracks = 0.0
+rough_patches = 0.0
+wet_patches = 0.0
 
 [[expect]]
 check = "cutoff"

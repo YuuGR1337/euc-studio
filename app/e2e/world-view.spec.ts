@@ -71,7 +71,7 @@ test.beforeAll(async () => {
               request.on("end", () => {
                 try {
                   const { spec, keys, lod } = JSON.parse(Buffer.concat(body).toString()) as {
-                    spec: { seed: number };
+                    spec: unknown;
                     keys: [number, number][];
                     lod: number;
                   };
@@ -80,7 +80,7 @@ test.beforeAll(async () => {
                   const bytes =
                     real && REAL_BIN
                       ? execFileSync(REAL_BIN, [
-                          String(spec.seed),
+                          JSON.stringify(spec),
                           String(lod),
                           ...keys.map(([cx, cy]) => `${cx},${cy}`),
                         ])
@@ -118,7 +118,10 @@ const q = new URLSearchParams(location.search);
 const outdoor = q.get("look") === "outdoor";
 const quality = q.get("quality") === "low" ? "low" : "high";
 const frame = {
-  spec: { seed: Number(q.get("seed") ?? 1), revision: 2, biome: "city", densities: DEFAULT_DENSITIES },
+  // ?spec= a whole WorldSpec as JSON (densities, incline); else a default city of ?seed=.
+  spec: q.get("spec")
+    ? JSON.parse(q.get("spec"))
+    : { seed: Number(q.get("seed") ?? 1), revision: 2, biome: "city", densities: DEFAULT_DENSITIES },
   start_xy_m: [Number(q.get("x") ?? 0), Number(q.get("y") ?? 0)],
   start_heading_rad: Number(q.get("heading") ?? 0),
   origin_z_m: Number(q.get("z") ?? 0),
@@ -432,11 +435,52 @@ test("the outdoor look on the low tier keeps the sky and the fog colour, without
 });
 
 /** Real chunks in the outdoor look, from a chase camera, for side-by-side review. */
-const OUTDOOR_VIEWS = [
+/** euc_world::Densities::default(), for specs written here (the page has DEFAULT_DENSITIES). */
+const DEFAULT_DENSITIES_FOR_SPEC = {
+  potholes: 1.5,
+  manholes: 0.6,
+  cracks: 12,
+  rough_patches: 0.8,
+  wet_patches: 1,
+  speed_bumps: 0.35,
+  crosswalks: 0.7,
+  driveways: 1.5,
+  plazas: 0.15,
+  props: 0.8,
+};
+const OUTDOOR_VIEWS: {
+  name: string;
+  x: number;
+  y: number;
+  heading: number;
+  spec?: unknown;
+}[] = [
   { name: "spawn-east", x: 0, y: 0, heading: 0 },
   { name: "pothole-street", x: 70, y: 3.05, heading: 0 },
   { name: "stairs-plaza", x: 124.4, y: -47.62, heading: -95.35 },
   { name: "ramp-plaza", x: 117.9, y: -55.75, heading: 8.86 },
+  // W2: the hill-climb scenario's city, graded 20 % east from 40 m, seen from 30 m out.
+  {
+    name: "hill-climb-20pct",
+    x: 0,
+    y: 0,
+    heading: 0,
+    spec: {
+      seed: 42,
+      revision: 2,
+      biome: "city",
+      densities: {
+        ...DEFAULT_DENSITIES_FOR_SPEC,
+        hills: 0,
+        potholes: 0,
+        manholes: 0,
+        cracks: 0,
+        rough_patches: 0,
+        wet_patches: 0,
+      },
+      incline: { origin: [0, 0], direction: [1, 0], slope_pct: 20, start_m: 40, ramp_m: 10 },
+    },
+  },
 ];
 for (const v of OUTDOOR_VIEWS) {
   test(`renders real chunks in the outdoor look: ${v.name}`, async ({ page }) => {
@@ -444,7 +488,8 @@ for (const v of OUTDOOR_VIEWS) {
     // Real chunks with shadows on a software renderer can take minutes on a busy machine.
     test.setTimeout(300_000);
     const heading = (v.heading * Math.PI) / 180;
-    const url = `${base}?look=outdoor&source=real&seed=42&x=${v.x}&y=${v.y}&heading=${heading}`;
+    const world = "spec" in v ? `spec=${encodeURIComponent(JSON.stringify(v.spec))}` : "seed=42";
+    const url = `${base}?look=outdoor&source=real&${world}&x=${v.x}&y=${v.y}&heading=${heading}`;
     // First the height under the start (the physics frame's z = 0), then the view on it.
     await page.goto(url);
     await expect.poll(() => drawn(page), { timeout: 60_000 }).not.toEqual([0, 0]);

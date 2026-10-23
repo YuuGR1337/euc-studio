@@ -122,6 +122,23 @@ describe("LiveCompare streams", () => {
     expect(compare.a.latest.t).toBe(0.06);
   });
 
+  it("takes the city both runs ride from the reset, and drops a frame that is not one", () => {
+    const compare = new LiveCompare();
+    const run = start(compare);
+    const world = {
+      spec: { seed: 42, revision: 2, biome: "city", densities: {} },
+      start_xy_m: [0, 0],
+      start_heading_rad: 0,
+      origin_z_m: 0.07,
+    };
+    run.messages({ ...reset, world });
+    expect(compare.world).toEqual(world);
+    run.messages({ ...reset, world: { ...world, start_xy_m: [Number.NaN, 0] } });
+    expect(compare.world).toBeNull();
+    run.messages(reset);
+    expect(compare.world).toBeNull();
+  });
+
   it("draws a run's first frame as soon as its reset comes", () => {
     const compare = new LiveCompare();
     const run = start(compare);

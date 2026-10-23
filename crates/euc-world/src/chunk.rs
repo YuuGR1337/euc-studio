@@ -8,6 +8,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+use crate::WorldSpec;
 use crate::det::{self, Digest, Rect, V2, hash};
 use crate::features::{self, CTX_REACH_M, Ctx, Feature, FeatureKind, GRID_REACH_M, Prop};
 use crate::fields::{self, CUT_LIP_M, SIDEWALK_SLOPE};
@@ -15,7 +16,6 @@ use crate::parcels::{self, Kept, Parcel, ParcelKind, TileKey};
 use crate::roads::{self, Edge, FIELD_REACH_M, RoadHit, StreetClass};
 use crate::solid::{Solid, SolidKind};
 use crate::surface::{Material, Surface};
-use crate::{Densities, WorldSpec};
 
 /// Chunk side, metres.
 pub const CHUNK_M: f64 = 16.0;
@@ -111,6 +111,7 @@ pub struct Chunk {
     key: ChunkKey,
     rect: Rect,
     seed: u64,
+    relief: fields::Relief,
     edges: Vec<Edge>,
     features: Vec<Feature>,
     parcels: Vec<Parcel>,
@@ -122,7 +123,7 @@ pub struct Chunk {
 impl Chunk {
     /// Generates a chunk. Depends only on the specification and the key.
     pub fn generate(spec: &WorldSpec, key: ChunkKey) -> Self {
-        Self::generate_with(spec, key, &|tile| std::sync::Arc::new(parcels::tile(spec.seed, &spec.densities, tile)))
+        Self::generate_with(spec, key, &|tile| std::sync::Arc::new(parcels::tile(spec, tile)))
     }
 
     /// Generates a chunk with resolved parcel tiles from `tiles` (a cache of [`parcels::tile`]).
@@ -135,8 +136,7 @@ impl Chunk {
         let seed = spec.seed;
         let ctx_rect = rect.grow(CTX_MARGIN_M);
         let ctx_edges = roads::edges_near(seed, ctx_rect, CTX_REACH_M);
-        let densities: &Densities = &spec.densities;
-        let ctx = Ctx::new(seed, densities, &ctx_edges, ctx_rect);
+        let ctx = Ctx::new(spec, &ctx_edges, ctx_rect);
 
         let mut features = Vec::new();
         let mut props = Vec::new();
@@ -158,8 +158,18 @@ impl Chunk {
         let edges: Vec<Edge> =
             ctx_edges.iter().filter(|e| rect.gap(&e.bounds) - e.half_width_m <= FIELD_REACH_M).cloned().collect();
 
-        let mut chunk =
-            Self { key, rect, seed, edges, features, parcels, props: Vec::new(), solids: Vec::new(), bins: Vec::new() };
+        let mut chunk = Self {
+            key,
+            rect,
+            seed,
+            relief: fields::Relief::of(spec),
+            edges,
+            features,
+            parcels,
+            props: Vec::new(),
+            solids: Vec::new(),
+            bins: Vec::new(),
+        };
         chunk.bin();
         // Props: the chunk owns those standing in it; solids also come from neighbours' props.
         props.sort_by_key(|p| p.id);
@@ -282,7 +292,7 @@ impl Chunk {
         let bin = self.bin_of(p);
         let hit = self.field(p);
         let f = hit.f;
-        let terrain = fields::terrain(seed, p);
+        let terrain = fields::terrain(&self.relief, p);
         let sidewalk = fields::sidewalk_width(seed, p);
         let mut height = if f < inset {
             terrain + fields::crown(f)
@@ -585,8 +595,8 @@ impl Chunk {
         };
         // Overlap neighbouring pieces by 1 cm so an angle between them leaves no slot.
         let (a2, b2) = (det::sub(a, det::scale(dir, 0.01)), det::add(b, det::scale(dir, 0.01)));
-        let za = fields::terrain(self.seed, a) + fa;
-        let zb = fields::terrain(self.seed, b) + fb;
+        let za = fields::terrain(&self.relief, a) + fa;
+        let zb = fields::terrain(&self.relief, b) + fb;
         let id = hash(self.seed, SALT_CURB, self.key.packed(), out.len() as i64);
         out.push(Solid::slab(
             id,

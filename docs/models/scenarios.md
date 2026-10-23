@@ -30,6 +30,11 @@ pedals; it can step off (`step_off_s`), steers to keep the line, feels the firmw
 tips the wheel past 20°, or after any fall past 45°. Our builds in these runs: clean `4054b4d0`,
 compat `00bb2466`.
 
+**City world (W2, 2026-10-23).** The shipped scenarios now ride the city world (`[world]`, at the spots
+of [world.md](world.md#shipped-scenarios-in-the-city-w2)); the table below is from the flat floor.
+`full-effort-70kmh-stop-soc100` rides the flat floor on purpose (`[world] flat`). What changed:
+[City world (W2)](#city-world-w2-2026-10-23).
+
 **Rider model (2026-10-22).** The default rider is now articulated, its feet welded to the pedals
 ([body.md](body.md#the-rider)). Seven scenarios pin the rigid rider on purpose, because their
 checks or the numbers below come from it: the three `full-effort-*` runs, the three `overlean-*`
@@ -186,6 +191,68 @@ The stops of the other two scenarios were not tested for it.
 | `balance-60s` | speed 0.585 km/h at 42.96 s | 0.056 km/h | 0.9 km/h |
 | `hard-braking-30kmh` | speed 0.545 km/h at 21.41 s | 0.260 km/h | 0.85 km/h |
 | `hill-climb-low-battery` | speed 0.521 km/h, pitch 6.65° at 34.5 s | 0.283 km/h, 2.12° | 0.8 km/h, 10° |
+
+## City world (W2, 2026-10-23)
+
+Every shipped scenario rode the flat floor (HEAD 398eed9) and the city (the same HEAD + W2), stock, at
+quanta 4000, 3000 and 2000. The speed and electrical runs ride the spawn arterial of seed 42 with an
+ideal road (no hills, potholes, manholes, cracks, rough or wet patches); the two potholes are real
+city potholes on level, clean approaches; the two slopes grade the whole city; the two standing runs
+stand on a plaza ([world.md](world.md#shipped-scenarios-in-the-city-w2)).
+
+**Verdicts.** 18 of 20 keep their verdict at all three quanta. Two changed:
+
+- `full-effort-70kmh-stop-soc100`: passes on the flat floor, falls in the city at all three quanta,
+  on stock and compat. The city's height field is not mirror-symmetric as the plane is, so the ride
+  gets a small roll; in the brake from 70 km/h, with the rigid rider leaning back 31°, it grows and
+  the wheel falls at 23.68 s at 15 km/h. That is the rider model's marginal roll stability under hard
+  braking, not the firmware, so the scenario rides the flat floor until the roll control holds
+  (open item). The roll in the city (stock, quantum 4000):
+
+  | t (s) | speed (km/h) | rider lean | roll |
+  |---|---|---|---|
+  | 22.00 | 50.6 | −30.9° | 0.46° |
+  | 22.50 | 42.2 | −31.2° | 1.08° |
+  | 23.00 | 34.2 | −31.2° | 2.67° |
+  | 23.25 | 30.3 | −31.3° | 4.91° |
+  | 23.50 | 25.4 | −32.6° | 9.65° |
+  | 23.68 | 14.9 | | falls |
+
+- `rider-steps-off-15kmh`: BORDERLINE. Every profile still cuts (stock at 17.26 s, 2.26 s after the
+  step-off), but how the fall ends is chaotic: at quanta 4000 and 2000 the wheel ends on its nose and
+  crawls about 10 m as the PWM decays, still rolling at 3.4 km/h at 22 s, so the end-speed check
+  fails; at 3000 it stops. A check-later item:
+  [finding 9](../findings/stock-firmware.md#9-a-riderless-wheel-keeps-driving).
+
+**Numbers (stock, quantum 4000, flat floor → city).**
+
+- Speed holds: `ride-20kmh-stop` top 20.45 → 20.43 km/h, `coasting-stop` 20.18 → 20.15 km/h,
+  `hard-braking-30kmh` 32.26 → 32.26 km/h (braking torque −166.9 → −165.4 N·m).
+- Overlean cutouts come about 0.7-1.0 s sooner and 1-2 km/h slower: `overlean-top-speed` cut at
+  27.23 → 26.49 s at 72.4 → 71.4 km/h; `overlean-top-speed-30pct` 26.87 → 25.88 s at 66.7 →
+  64.9 km/h; `overlean-no-pwm-tiltback` 28.33 → 27.54 s at 69.2 → 67.9 km/h.
+- Full effort at 20 % cuts at 16.81 → 16.86 s; at 50 % it reaches 69.1 km/h before the cut at
+  19.52 s (flat: 67.5 km/h at 18.56 s).
+- `hill-climb-low-battery` on the city's 20 % grade: battery tiltback past 2° at 20.40 s, 26.62° at
+  36 s (flat strip: 20.32 s and 26.71°).
+- `pothole-20kmh` (a city hole 2.0 cm deep, 0.49 m across): 20.1 → 18.5 km/h, suspension 39 mm,
+  Iq 95 A, pitch at most 1.3° nose down (about 35 °/s).
+- `pothole-5cm-20kmh` (4.9 cm deep, 0.60 m across): 20.1 → 15.6 km/h, suspension 68 mm (bottomed),
+  Iq 247 A, pitch 5.1° nose down at up to about 110 °/s, inside the stock gyro's ±500 °/s. The flat
+  strip's 5 cm hole, on the same model before W2, gave 3.8° and 88 °/s: neither dips past 40° any
+  more, so finding 7's numbers come from an earlier model and are to be measured again.
+
+**Compare (stock vs compat).** In the city every ride rolls a little, and firmware timing parts the
+roll: the largest difference over all scenarios and quanta is 0.1235° (`overlean-no-pwm-tiltback`,
+quantum 4000, at 17.75 s), so `roll_deg` is 0.25° (it was 0.01° on the plane, where roll stayed at
+10⁻¹⁷). It stays bounded: `balance-60s` differs by 0.00004° in its first tenth, 0.008° at most in its
+middle and 0.0002° in its last. Every other limit is the flat floor's; the judged firmware channels
+(speed, pitch, Iq, torque, battery current) stay within them, and alarm, cut and fault flags never
+differ. Three exceptions follow the ground: both potholes are judged until the city impact (19.36 s
+and 19.39 s), `full-effort-70kmh-stop-soc50` records its known SOC50 battery difference (0.77 V at
+quantum 3000, limit 1.6 V; 0.54 V on the flat floor already), and `rider-steps-off-15kmh` no longer
+compares verdicts (its end-speed check flips per quantum). The city makes the CI compares about 40 %
+longer (20 compares: 543 → 759 s on an M-series Mac).
 
 ## What the overlean runs show
 

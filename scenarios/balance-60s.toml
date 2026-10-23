@@ -13,6 +13,22 @@ push = [[10, 40, 0.5], [25, -40, 0.5], [40, 80, 0.3]]
 # Factory settings with level pedals (a blank journal would tilt them 4.8° nose down).
 settings = "neutral"
 
+# City world (docs/models/world.md): seed 42, on the level paver platform of the plaza at
+# (48.1, -108.0), 15.9 x 6.4 m, the wheel in its middle, at least 3 m from every edge. Ideal ground
+# (hills = 0, no road defects): a standstill test.
+[world]
+seed = 42
+revision = 2
+start = { x_m = 48.1, y_m = -108.01, heading_deg = 0.0 }
+
+[world.densities]
+hills = 0.0
+potholes = 0.0
+manholes = 0.0
+cracks = 0.0
+rough_patches = 0.0
+wet_patches = 0.0
+
 [[expect]]
 check = "upright"
 

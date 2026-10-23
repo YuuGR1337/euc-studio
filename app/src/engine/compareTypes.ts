@@ -6,6 +6,7 @@
 import type { RingBuffer } from "../lib/ring.ts";
 import type { BodyInfo } from "./telemetry.gen.ts";
 import type { ChannelId, Latest, ScenarioInfo, TerrainProfile } from "./types.ts";
+import type { WorldFrame } from "./world.ts";
 
 /** `ours-custom`: our firmware as the host SIL library, with the quirks its request names. */
 export type CompareFirmwareId = "stock" | "ours-compat" | "ours-clean" | "ours-custom" | "file";
@@ -154,6 +155,8 @@ export interface CompareClient {
   readonly summary: CompareSummary | null;
   /** The ground along the path (physics frame); null on flat ground. */
   readonly terrain: TerrainProfile | null;
+  /** The streaming world both runs ride (a `[world]` scenario); absent or null otherwise. */
+  readonly world?: WorldFrame | null;
   /** What runs now (or ran last). */
   readonly request: CompareRequest | null;
   /** The tolerance file the verdict uses, and its note for this scenario. */

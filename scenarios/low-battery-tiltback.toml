@@ -12,6 +12,22 @@ release_s = 2.5
 speed_kmh = [[0, 0], [6, 0], [10, 15]]
 # Factory settings with level pedals (a blank journal would tilt them 4.8° nose down).
 settings = "neutral"
+# City world (docs/models/world.md): seed 42, from the spawn on the arterial (row 0) heading east,
+# on a straight line that stays within 2 m of the centreline, in the carriageway's level middle.
+# Ideal road (hills = 0, no potholes, manholes, cracks, rough or wet patches): this run tests the
+# firmware and the rider, not the road. Lane and crosswalk paint stays on the line.
+[world]
+seed = 42
+revision = 2
+
+[world.densities]
+hills = 0.0
+potholes = 0.0
+manholes = 0.0
+cracks = 0.0
+rough_patches = 0.0
+wet_patches = 0.0
+
 # Rider: the rigid baseline with the default controls, who eases off when the pedals tip back: the
 # tiltback slows them, as it should. Pinned (model = "rigid_ankle_v1"): the 8° check describes that
 # rider, who rolls back a little at rest, which unwinds the stock battery tiltback (it ramps with the

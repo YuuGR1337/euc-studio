@@ -180,10 +180,14 @@ impl Scene {
         let scenario = header.scenario_toml.as_deref().and_then(|text| Scenario::from_toml(text).ok());
         // Scenario text is file input too. Bound optional reconstruction independently of
         // telemetry chunks, and distinguish a recorded flat surface from missing ground.
+        // A `[world]` scenario's ground comes from the recorded world (its context), never a strip.
         let terrain = scenario
             .as_ref()
             .filter(|s| {
-                s.terrain.length_m <= 10_000.0 && s.terrain.features.len() <= 128 && s.terrain.validate().is_ok()
+                s.world.is_none()
+                    && s.terrain.length_m <= 10_000.0
+                    && s.terrain.features.len() <= 128
+                    && s.terrain.validate().is_ok()
             })
             .map(|s| {
                 firmware::terrain_profile(s)
@@ -823,22 +827,26 @@ mod tests {
         })
     }
 
+    /// A scenario as recordings made before the city have it: no `[world]`, flat ground.
+    const FLAT_SCENARIO: &str = "schema = 1\nname = \"balance-60s\"\ndescription = \"balance\"\n\
+        wheel = \"begode-extreme\"\nseconds = 63.0\nrelease_s = 2.5\nspeed_kmh = [[0, 0]]\n";
+
     #[test]
     fn playback_restores_known_flat_ground_and_bounds_scenario_geometry() {
         let mut header = run(Vec::new()).header();
-        header.scenario_toml = Some(include_str!("../../../../scenarios/balance-60s.toml").into());
+        header.scenario_toml = Some(FLAT_SCENARIO.into());
         let scene = Scene::of(&header);
         let terrain = scene.terrain.expect("saved flat scenario has known ground");
         assert!(terrain.iter().all(|point| point[1] == 0.0));
+        // A city scenario draws its recorded world, not a strip.
+        header.scenario_toml = Some(include_str!("../../../../scenarios/balance-60s.toml").into());
+        assert!(Scene::of(&header).terrain.is_none(), "the world is the ground");
     }
 
     #[test]
     fn playback_bounds_optional_scenario_geometry() {
         let mut header = run(Vec::new()).header();
-        header.scenario_toml = Some(format!(
-            "{}\n[terrain]\nlength_m = 10001.0\nslope_pct = 2.0\n",
-            include_str!("../../../../scenarios/balance-60s.toml")
-        ));
+        header.scenario_toml = Some(format!("{FLAT_SCENARIO}\n[terrain]\nlength_m = 10001.0\nslope_pct = 2.0\n"));
         assert!(Scene::of(&header).terrain.is_none(), "unsupported geometry stays unavailable");
     }
 

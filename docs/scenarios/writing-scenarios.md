@@ -58,8 +58,8 @@ Record the timing settings with each result. See [CPU timing](../models/cpu-timi
 | `push` | no | Pushes on the rider, `[[start s, newtons forward, duration s], ...]`; overlapping pushes add up. |
 | `[rider]`, `[rider.control]` | no | The rider, below. |
 | `[assist]` | no | The roll aid, below. |
-| `[terrain]` | no | The ground, below; flat without it. |
-| `[world]` | no | A generated city instead of `[terrain]`, below. |
+| `[world]` | no | The ground: a generated city, below. Every shipped scenario has one; start new scenarios with it. |
+| `[terrain]` | no | A synthetic 1-D strip instead (below), for a test whose exact shape is the point. Without `[world]` or `[terrain]` the ground is an infinite plane. |
 | `[[timeline]]` | no | Faults, below. |
 | `[[inject]]` | no | BLE commands, below. |
 | `[[expect]]` | no | Checks, below. |
@@ -258,7 +258,10 @@ the shell holds it upright:
 `roll_stiffness` (5000 N·m/rad) and `roll_damping` (500 N·m·s/rad). Set `roll_stiffness = 0.0` to
 see the wheel fall over sideways.
 
-### The ground: `[terrain]` and `[[terrain.feature]]`
+### A synthetic ground: `[terrain]` and `[[terrain.feature]]`
+
+The shipped scenarios ride the city (`[world]`, below). A strip suits a test that needs an exact,
+synthetic shape: a rectangular pothole of a given length, a bump of a given profile.
 
 | Field | Default | Meaning |
 |---|---|---|
@@ -294,11 +297,25 @@ has either a non-flat `[terrain]` or `[world]`, never both.
 | `biome` | `"city"` | The only biome. |
 | `start` | the spawn | `{ x_m, y_m, heading_deg }`: the ground point under the wheel and its heading, world coordinates (heading 0 is world +x, left positive). |
 | `route` | none | Waypoints `[[x, y], ...]` in world metres, at most 256. After release the rider steers for the next one and moves on within 1 m of it; after the last it holds its heading. |
-| `[world.densities]` | the defaults | How often things occur (`potholes`, `manholes`, `cracks`, `rough_patches`, `wet_patches`, `speed_bumps`, `crosswalks`, `driveways`, `plazas`, `props`); see models/world.md. |
+| `slope_pct` | 0 | A grade over the whole city along the start heading, percent (within ±40; negative is downhill), for a slope test. Streets, buildings and features follow it; the ground behind its start is unchanged. |
+| `slope_start_m` | 0 | Where the grade starts, metres ahead of the start. |
+| `slope_ramp_m` | 10 | Over which it builds up (a parabola, no kink), as `[terrain]`'s. |
+| `[world.densities]` | the defaults | How often things occur (`potholes`, `manholes`, `cracks`, `rough_patches`, `wet_patches`, `speed_bumps`, `crosswalks`, `driveways`, `plazas`, `props`), and `hills`, the scale of the terrain's relief (1 by default, 0 a level city, up to 2); see models/world.md. |
+
+Where the road itself is not the test, use an ideal road: `hills = 0` and no `potholes`,
+`manholes`, `cracks`, `rough_patches` or `wet_patches`. The speed, braking and electrical runs in
+`scenarios/` do that on the spawn arterial, and say why in their notes. A level platform of a plaza
+suits a standstill; a real pothole, curb or stairs suits a terrain test.
+
+To ride the plain flat floor on purpose, write `[world]` with only `flat = "<reason>"`: the reason is
+required and no other `[world]` key goes with it. Use it only when the city exposes a model limit
+that is not the test; `full-effort-70kmh-stop-soc100` is the one shipped example.
 
 `euc-world-preview --seed <n> --print` (models/world.md, "Preview") draws a world and lists its
-plazas, which helps to pick a start and a route. The acceptance runs in `scenarios/world/` are
-examples: a curb up straight on and at 30°, a curb down, a pothole, stairs down and a ramp up.
+plazas, which helps to pick a start and a route. The shipped scenarios are examples (`scenarios/`:
+the spawn arterial, a plaza, two real potholes, a 2 % and a 20 % grade), and so are the acceptance
+runs in `scenarios/world/`: a curb up straight on and at 30°, a curb down, a pothole, stairs down and
+a ramp up.
 `sim compare` and the studio run them like any scenario; the studio draws the world around the
 wheel.
 
@@ -384,43 +401,37 @@ the run with an error before it starts.
 
 ## Two worked examples
 
-### A road with three potholes
+### A city pothole
 
-Potholes 1, 2 and 3 cm deep, 20 m apart, ridden at 20 km/h:
+A real 2 cm pothole of the city (seed 42), ridden at 20 km/h after a level, straight approach of
+50 m (`euc-world-preview` draws the area, so the approach can be checked by eye):
 
 ```toml
-# Three potholes of growing depth at 20 km/h, on the maintainer's settings.
+# A 2 cm city pothole at 20 km/h, on the maintainer's settings.
 #
 # Rider: the default rider.
 schema = 1
-name = "three-potholes-20kmh"
-description = "Ride over potholes 1, 2 and 3 cm deep at 20 km/h: does the wheel stay up?"
+name = "city-pothole-20kmh"
+description = "Ride into a 2 cm deep city pothole at 20 km/h: does the wheel stay up?"
 wheel = "begode-extreme"
-seconds = 30.0
+seconds = 25.0
 release_s = 2.5
 speed_kmh = [[0, 0], [6, 0], [11, 20]]
 settings = "tarik-2026-10-15"
 
-[terrain]
-length_m = 150.0
+# The pothole at (-31.13, -70.91), 50 m south of the start; a level city (hills = 0) with no other
+# defects on the approach. Potholes keep their density, so this one is there.
+[world]
+seed = 42
+revision = 2
+start = { x_m = -31.13, y_m = -20.91, heading_deg = -90.0 }
 
-[[terrain.feature]]
-kind = "pothole"
-at_m = 50.0
-depth_m = 0.01
-length_m = 0.5
-
-[[terrain.feature]]
-kind = "pothole"
-at_m = 70.0
-depth_m = 0.02
-length_m = 0.5
-
-[[terrain.feature]]
-kind = "pothole"
-at_m = 90.0
-depth_m = 0.03
-length_m = 0.5
+[world.densities]
+hills = 0.0
+manholes = 0.0
+cracks = 0.0
+rough_patches = 0.0
+wet_patches = 0.0
 
 # The safety verdict.
 [[expect]]
@@ -434,7 +445,7 @@ check = "no_cutoff"
 check = "record"
 signal = "distance_m"
 stat = "first_above"
-threshold = 90.0
+threshold = 50.0
 
 [[expect]]
 check = "record"
@@ -455,12 +466,13 @@ stat = "max"
 from_s = 15.0
 ```
 
-The `distance_m` record tells when the last pothole comes (at about 27 s), so a later check can start
+The `distance_m` record tells when the pothole comes (at about 17.5 s), so a later check can start
 just before it.
 
-### A bump, then a slope
+### A synthetic bump, then a slope
 
-A 6 cm speed bump at 15 km/h, then an 8 % climb that builds up from 60 m:
+When the shape is the test, a `[terrain]` strip gives it exactly: a 6 cm bump at 15 km/h, then an
+8 % climb that builds up from 60 m:
 
 ```toml
 # A 6 cm speed bump at 15 km/h, then an 8 % climb, on the maintainer's settings.

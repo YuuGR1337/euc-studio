@@ -96,12 +96,27 @@ function usePaintedSky(seed: number, gl: THREE.WebGLRenderer): PaintedSky | null
   return painted?.seed === seed ? painted : null;
 }
 
+/** Positions in three.js coordinates, or null while there is no pose. */
+export interface OutdoorSubject {
+  wheel: (out: THREE.Vector3) => THREE.Vector3 | null;
+  body: (out: THREE.Vector3) => THREE.Vector3 | null;
+}
+
 /**
  * World mode's daylight: the painted sky as background, its environment for reflections, fog in
  * the horizon colour, a hemisphere fill and one sun whose shadow box follows the wheel. The sky
  * and the sun turn with the world group (start heading), so the sun stays fixed in the world.
  */
-export function Outdoor({ world, quality }: { world: WorldView; quality: Quality }) {
+export function Outdoor({
+  world,
+  quality,
+  follow,
+}: {
+  world: WorldView;
+  quality: Quality;
+  /** The wheel and the body the shadows and contact pools follow (Compare's run A); the live run's by default. */
+  follow?: OutdoorSubject;
+}) {
   const gl = useThree((s) => s.gl);
   const get = useThree((s) => s.get);
   const heading = world.frame.start_heading_rad;
@@ -139,11 +154,15 @@ export function Outdoor({ world, quality }: { world: WorldView; quality: Quality
 
   const light = useRef<THREE.DirectionalLight>(null);
   useFrame(({ camera }) => {
-    const wheel = engine.kind !== "demo" ? visualWheelPosition(wheelAt) : wheelAt.set(0, 0, 0);
+    const wheel = follow
+      ? follow.wheel(wheelAt)
+      : engine.kind !== "demo"
+        ? visualWheelPosition(wheelAt)
+        : wheelAt.set(0, 0, 0);
     const key = light.current;
     if (wheel) {
       contactAo.wheel.value.set(wheel.x, wheel.z, 0.6, 0.55);
-      const body = bodyPosition(bodyAt);
+      const body = follow ? follow.body(bodyAt) : bodyPosition(bodyAt);
       // The body's pool lies a little down-shadow of the body, as its soft shadow would.
       if (body)
         contactAo.body.value.set(

@@ -78,6 +78,10 @@ pub struct Scenario {
     /// A streaming world instead of `[terrain]` (`docs/models/world.md`).
     #[serde(default)]
     pub world: Option<WorldScenario>,
+    /// Why the scenario rides the plain flat floor on purpose (`[world] flat = "<reason>"`; then
+    /// [`Scenario::world`] is `None`).
+    #[serde(skip)]
+    pub flat: Option<String>,
     /// When the rider steps off the pedals, seconds (the wheel goes on alone).
     #[serde(default)]
     pub step_off_s: Option<f64>,
@@ -106,8 +110,11 @@ pub struct Scenario {
 /// revision = 2                 # the generator's; a scenario written for another one is refused
 /// biome = "city"               # default
 /// start = { x_m = 0.0, y_m = 0.0, heading_deg = 0.0 }   # default: the world's spawn
+/// slope_pct = -2.0             # optional: the whole world graded along the start heading
+/// slope_start_m = 25.0         # where the grade starts, metres ahead of the start
+/// slope_ramp_m = 10.0          # over which it builds up (default 10)
 ///
-/// [world.densities]            # optional, per euc_world::Densities
+/// [world.densities]            # optional, per euc_world::Densities (hills = 0: a level city)
 /// potholes = 3.0
 /// ```
 #[derive(Debug, Clone, Deserialize)]
@@ -130,6 +137,20 @@ pub struct WorldScenario {
     /// heads for the next one and moves on within 1 m of it; after the last, it holds its heading.
     #[serde(default)]
     pub route: Vec<[f64; 2]>,
+    /// A grade over the whole world along the start heading, percent (negative: downhill), for a
+    /// slope test in the city ([`euc_world::Incline`]). The ground behind its start is unchanged.
+    #[serde(default)]
+    pub slope_pct: f64,
+    /// Distance ahead of the start where the grade begins, metres.
+    #[serde(default)]
+    pub slope_start_m: f64,
+    /// Distance over which the grade builds up, metres (as `[terrain]`'s `slope_ramp_m`).
+    #[serde(default = "slope_ramp")]
+    pub slope_ramp_m: f64,
+}
+
+const fn slope_ramp() -> f64 {
+    10.0
 }
 
 /// A start pose in world coordinates.
@@ -144,14 +165,67 @@ pub struct WorldStartToml {
     pub heading_deg: f64,
 }
 
+/// The unit vector of a heading, exact at whole quarter turns: the generator then sees the same
+/// bits on every platform (sine and cosine come from the platform's libm).
+fn unit(heading_deg: f64) -> [f64; 2] {
+    let quarter = heading_deg / 90.0;
+    #[allow(clippy::float_cmp)]
+    if quarter == quarter.round() {
+        return match (quarter.round() as i64).rem_euclid(4) {
+            0 => [1.0, 0.0],
+            1 => [0.0, 1.0],
+            2 => [-1.0, 0.0],
+            _ => [0.0, -1.0],
+        };
+    }
+    let rad = heading_deg.to_radians();
+    [rad.cos(), rad.sin()]
+}
+
 const fn city() -> euc_world::Biome {
     euc_world::Biome::City
+}
+
+/// `[world] flat = "<reason>"`: the scenario rides the plain flat floor on purpose, and says why.
+/// Returns the scenario's table without its `[world]`, and the reason; `None` for any other
+/// scenario.
+fn flat_floor(text: &str) -> Result<Option<(toml::Table, String)>, ScenarioError> {
+    let mut table: toml::Table = toml::from_str(text)?;
+    let Some(toml::Value::Table(world)) = table.get("world") else { return Ok(None) };
+    let Some(flat) = world.get("flat") else { return Ok(None) };
+    let invalid = |why: &str| ScenarioError::Invalid(why.into());
+    let reason = flat
+        .as_str()
+        .map(str::trim)
+        .filter(|reason| !reason.is_empty())
+        .ok_or_else(|| invalid("[world] flat takes the reason for the flat floor, as text"))?
+        .to_owned();
+    if world.len() > 1 {
+        return Err(invalid("[world] flat rides the plain flat floor: it takes no other [world] key"));
+    }
+    table.remove("world");
+    Ok(Some((table, reason)))
 }
 
 impl WorldScenario {
     /// The world's specification.
     pub fn spec(&self) -> euc_world::WorldSpec {
-        euc_world::WorldSpec { seed: self.seed, revision: self.revision, biome: self.biome, densities: self.densities }
+        // The spawn is the world's origin, heading +x (euc_world::World::spawn).
+        let (origin, heading_deg) = self.start.map_or(([0.0, 0.0], 0.0), |s| ([s.x_m, s.y_m], s.heading_deg));
+        let incline = (self.slope_pct != 0.0).then(|| euc_world::Incline {
+            origin,
+            direction: unit(heading_deg),
+            slope_pct: self.slope_pct,
+            start_m: self.slope_start_m,
+            ramp_m: self.slope_ramp_m,
+        });
+        euc_world::WorldSpec {
+            seed: self.seed,
+            revision: self.revision,
+            biome: self.biome,
+            densities: self.densities,
+            incline,
+        }
     }
 
     /// The ground for physics.
@@ -480,7 +554,10 @@ pub enum ScenarioError {
 impl Scenario {
     /// Parses and checks a scenario.
     pub fn from_toml(text: &str) -> Result<Self, ScenarioError> {
-        let mut scenario: Self = toml::from_str(text)?;
+        let mut scenario: Self = match flat_floor(text)? {
+            Some((table, reason)) => Self { flat: Some(reason), ..toml::Value::Table(table).try_into()? },
+            None => toml::from_str(text)?,
+        };
         let bad = |why: String| Err(ScenarioError::Invalid(why));
         if scenario.schema != 1 {
             return bad(format!("schema {} is not supported (expected 1)", scenario.schema));
@@ -554,6 +631,9 @@ impl Scenario {
             let fault =
                 timed_fault(table).map_err(|why| ScenarioError::Invalid(format!("timeline entry {}: {why}", i + 1)))?;
             scenario.faults.push(fault);
+        }
+        if scenario.flat.is_some() && !scenario.terrain.is_flat() {
+            return bad("[world] flat rides the plain flat floor: no [terrain] with it".into());
         }
         if let Some(world) = &scenario.world {
             if !scenario.terrain.is_flat() {
@@ -1496,6 +1576,19 @@ kmh = 19.0
             ("density out of range", "[world]\nseed = 1\nrevision = 2\n[world.densities]\npotholes = 99.0\n"),
         ] {
             assert!(with(table).is_err(), "{what} must fail");
+        }
+        // The plain flat floor on purpose: no world, and the reason kept.
+        let flat = with("[world]\nflat = \"a model limit the city exposes\"\n").unwrap();
+        assert!(flat.world.is_none() && flat.terrain.is_flat());
+        assert_eq!(flat.flat.as_deref(), Some("a model limit the city exposes"));
+        assert!(spawn.flat.is_none() && Scenario::from_toml(RIDE).unwrap().flat.is_none());
+        for (what, table) in [
+            ("no reason", "[world]\nflat = \" \"\n"),
+            ("not text", "[world]\nflat = true\n"),
+            ("a world as well", "[world]\nflat = \"why\"\nseed = 1\nrevision = 2\n"),
+            ("terrain as well", "[world]\nflat = \"why\"\n[terrain]\nslope_pct = 2.0\n"),
+        ] {
+            assert!(with(table).is_err(), "flat with {what} must fail");
         }
     }
 

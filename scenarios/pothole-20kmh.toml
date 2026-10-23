@@ -1,12 +1,12 @@
 # PRELIMINARY: the rear suspension is modelled (measured spring; stroke and linkage ratio are
 # estimates), but the rider has no knees and the tire is a soft contact. Do not tune this run to pass.
 #
-# A pothole at 20 km/h: 2 cm deep, 50 cm long, with steep edges, on the maintainer's settings.
-# The wheel drops in and hits the far edge; the impact takes about a tenth of the wheel's speed, the
-# suspension compresses about 35 of its 66 mm, the shell dips about 8° nose down, and the firmware
-# answers with near-full forward current. The shell turns at about 250 °/s, inside the stock gyro's
-# ±500 °/s, so the firmware's attitude follows the truth. Deeper holes (3 and 5 cm) turn it faster
-# than the gyro's range: docs/models/scenarios.md and docs/findings/stock-firmware.md (finding 7).
+# A pothole at 20 km/h: a city pothole 2.0 cm deep and 0.49 m across (below), on the maintainer's
+# settings. The wheel drops in and hits the far edge: the speed dips from 20.1 to 18.5 km/h, the
+# suspension compresses up to 39 of its 66 mm, the shell pitches at most 1.3° nose down (about
+# 35 °/s, well inside the stock gyro's ±500 °/s), and the firmware answers with up to 95 A of Iq
+# (stock, all three quanta; docs/models/scenarios.md, "City world (W2)"). A deeper hole:
+# pothole-5cm-20kmh.
 #
 # The outcome is decided by the mechanics within 0.1 s, faster than the firmware's balance loop can
 # change much, and it depends on the body model. The `record` checks always pass; `upright` and
@@ -21,14 +21,21 @@ speed_kmh = [[0, 0], [6, 0], [11, 20]]
 settings = "tarik-2026-10-15"
 # Rider: the default rider (it eases off when the pedals tip back).
 
-[terrain]
-length_m = 120.0
+# City world (docs/models/world.md): seed 42, a real pothole on a local street, 2.0 cm deep and
+# 0.49 m across, at (-31.13, -70.91), reached after 50 m heading south on a level, straight
+# approach with nothing else on it. Level city (hills = 0) with manholes, cracks, rough and wet
+# patches off so the approach stays clean; potholes keep their density (this one is among them).
+[world]
+seed = 42
+revision = 2
+start = { x_m = -31.13, y_m = -20.91, heading_deg = -90.0 }
 
-[[terrain.feature]]
-kind = "pothole"
-at_m = 50.0
-depth_m = 0.02
-length_m = 0.5
+[world.densities]
+hills = 0.0
+manholes = 0.0
+cracks = 0.0
+rough_patches = 0.0
+wet_patches = 0.0
 
 [[expect]]
 check = "record"

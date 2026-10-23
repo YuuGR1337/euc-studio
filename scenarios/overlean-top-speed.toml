@@ -18,6 +18,22 @@ release_s = 2.5
 speed_kmh = [[0, 0], [6, 0], [26, 100]]
 settings = "tarik-2026-10-15"
 
+# City world (docs/models/world.md): seed 42, from the spawn on the arterial (row 0) heading east,
+# on a straight line that stays within 2 m of the centreline, in the carriageway's level middle.
+# Ideal road (hills = 0, no potholes, manholes, cracks, rough or wet patches): this run tests the
+# firmware and the rider, not the road. Lane and crosswalk paint stays on the line.
+[world]
+seed = 42
+revision = 2
+
+[world.densities]
+hills = 0.0
+potholes = 0.0
+manholes = 0.0
+cracks = 0.0
+rough_patches = 0.0
+wet_patches = 0.0
+
 # The overleaning rider ignores the tiltback and keeps leaning: that is the danger this run shows.
 # With the rear suspension, a rider who leans at most 15° (the default) ends at the edge: the speed
 # and PWM tiltbacks hold the stock wheel near 71 km/h, and the outcome changes with the emulator's

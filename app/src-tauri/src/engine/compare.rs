@@ -159,6 +159,8 @@ pub struct Reset {
     bodies_a: Vec<BodyInfo>,
     bodies_b: Vec<BodyInfo>,
     terrain: Option<Vec<[f32; 3]>>,
+    /// The streaming world both runs ride (a `[world]` scenario), for the view; both see the same.
+    world: Option<super::world::WorldFrame>,
     tolerance_file: &'static str,
     /// Why the tolerance file treats this scenario specially, if it does.
     tolerance_note: Option<String>,
@@ -416,6 +418,12 @@ fn run(spec: &CompareSpec, outbox: &Mutex<Outbox>, stop: &AtomicBool) {
             bodies_a: a.session.bodies().to_vec(),
             bodies_b: b.session.bodies().to_vec(),
             terrain: firmware::terrain_profile(&scenario),
+            world: a
+                .session
+                .machine()
+                .plant()
+                .live_part()
+                .and_then(|live| live.physics().setup().world.as_ref().map(super::world::WorldFrame::of)),
             tolerance_file: TOLERANCE_FILE,
             tolerance_note: file.scenario.get(&scenario.name).and_then(|adj| adj.note.clone()),
         })));

@@ -2,6 +2,7 @@
 //! across a street. All are pure functions of the seed and the position.
 
 use crate::det::{self, V2, value_noise};
+use crate::{Incline, WorldSpec};
 
 /// Radius around the spawn inside which the terrain is level, metres.
 pub const SPAWN_FLAT_RADIUS_M: f64 = 12.0;
@@ -30,20 +31,42 @@ const SALT_HILL: [u64; 2] = [0x201, 0x202];
 const SALT_CURB: u64 = 0x203;
 const SALT_SIDEWALK: u64 = 0x204;
 
-fn relief(seed: u64, p: V2) -> f64 {
+/// What the terrain depends on: the seed, the scale of its hills and a whole-world grade.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Relief {
+    pub seed: u64,
+    pub hills: f64,
+    pub incline: Option<Incline>,
+}
+
+impl Relief {
+    pub fn of(spec: &WorldSpec) -> Self {
+        Self { seed: spec.seed, hills: spec.densities.hills, incline: spec.incline }
+    }
+}
+
+fn hills(seed: u64, p: V2) -> f64 {
     HILL_AMPLITUDE_M[0] * value_noise(seed, SALT_HILL[0], p, HILL_WAVELENGTH_M[0])
         + HILL_AMPLITUDE_M[1] * value_noise(seed, SALT_HILL[1], p, HILL_WAVELENGTH_M[1])
 }
 
-/// Terrain height before streets and features, metres: gentle hills, level around the spawn.
-pub fn terrain(seed: u64, p: V2) -> f64 {
-    let base = relief(seed, p);
+/// Terrain height before streets and features, metres: gentle hills, level around the spawn, and
+/// the incline if any.
+pub fn terrain(relief: &Relief, p: V2) -> f64 {
+    // At the default scale of 1 the products are exact, so a default world stays bit-identical.
+    let base = hills(relief.seed, p) * relief.hills;
     let r = det::len(p);
-    if r >= SPAWN_BLEND_RADIUS_M {
-        return base;
+    let h = if r >= SPAWN_BLEND_RADIUS_M {
+        base
+    } else {
+        let origin = hills(relief.seed, [0.0, 0.0]) * relief.hills;
+        origin + (base - origin) * det::smoothstep(SPAWN_FLAT_RADIUS_M, SPAWN_BLEND_RADIUS_M, r)
+    };
+    // Added only when there is one: + 0.0 would turn a −0.0 height into +0.0.
+    match &relief.incline {
+        Some(incline) => h + incline.height(p),
+        None => h,
     }
-    let origin = relief(seed, [0.0, 0.0]);
-    origin + (base - origin) * det::smoothstep(SPAWN_FLAT_RADIUS_M, SPAWN_BLEND_RADIUS_M, r)
 }
 
 /// Curb face height before curb cuts, metres.
@@ -64,6 +87,6 @@ pub fn crown(f: f64) -> f64 {
 }
 
 /// Height of the ground beyond the sidewalk (no parcel, no feature), metres.
-pub fn lot_height(seed: u64, p: V2) -> f64 {
-    terrain(seed, p) + curb_height(seed, p) + SIDEWALK_SLOPE * sidewalk_width(seed, p)
+pub fn lot_height(relief: &Relief, p: V2) -> f64 {
+    terrain(relief, p) + curb_height(relief.seed, p) + SIDEWALK_SLOPE * sidewalk_width(relief.seed, p)
 }

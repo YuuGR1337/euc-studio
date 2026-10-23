@@ -101,6 +101,12 @@ Guarantees (test `the_spawn_is_level_clear_and_on_a_straight_road`, 12 seeds): a
 `Densities` sets every rate: potholes 1.5, manholes 0.6, cracks 12, rough patches 0.8 and wet patches 1.0 per 1000 m² of their zone; 35 % of local edges with a bump; 70 % of intersection ends with a crosswalk; 1.5 driveways per 100 m of street side; plaza weight 0.15 among parcels; props 0.8 of their slots.
 Realised pothole density lands at 50–110 % of nominal (sites near the gutter and the spawn are refused) and doubles when the parameter doubles (test `densities_follow_their_parameters`).
 
+`hills` (W2) scales the terrain relief: 1 by default, 0 a level city, up to 2. At 1 the products are exact, so a default world is bit-identical to one without the field (golden digest unchanged); a spec that leaves it out reads 1. The street network, features and parcels do not depend on it, only the heights (test `hills_zero_levels_the_terrain_and_keeps_the_streets`).
+
+### Incline
+
+`WorldSpec::incline` (W2, optional) grades the whole world along one direction for a slope test: from `start_m` past `origin` along the unit `direction`, the terrain rises by `slope_pct` per 100 m, built up over `ramp_m` with a parabola (the profile of a scenario's `[terrain]` slope). Behind the start the terrain is unchanged. Streets, curbs, parcels, plazas and features follow it: on a 20 % grade buildings stand into the slope, never above it, and curbs keep their tops on the sidewalk edge (test `an_incline_grades_the_whole_world_along_its_direction`). A scenario gives the direction by its start heading; at whole quarter turns the unit vector is exact, so the generator sees the same bits on every platform.
+
 ## Physics (built in W1b)
 
 `crates/euc-physics/src/world.rs`. `Setup::world` takes a `WorldGround` (a shared `World` and a `WorldStart`); it excludes `height_map` and a non-flat `[terrain]`.
@@ -222,13 +228,30 @@ revision = 2               # must match the generator (euc_world::GENERATOR_REVI
 biome = "city"             # optional; the only biome
 start = { x_m = 70.0, y_m = 3.05, heading_deg = 0.0 }   # optional; the world's spawn without it
 route = [[127.59, -54.24], [133.01, -54.60]]            # optional waypoints, world metres
+slope_pct = -2.0           # optional: an incline along the start heading (± 40 %)
+slope_start_m = 25.0       # where it starts, metres ahead of the start
+slope_ramp_m = 10.0        # over which it builds up (default 10)
 
 [world.densities]          # optional; defaults as above
 potholes = 3.0
 plazas = 0.3
+hills = 0.0                # a level city
 ```
 
 A scenario has either a non-flat `[terrain]` (the 1-D strip) or `[world]`, never both. A route has at most 256 finite points. After release the rider heads for the next waypoint and moves on within 1 m of it; after the last one it holds its heading. [scenarios/writing-scenarios.md](../scenarios/writing-scenarios.md) has the field table.
+
+## Shipped scenarios in the city (W2)
+
+Every scenario in `scenarios/` has a `[world]` table (seed 42, revision 2); the parser's default is unchanged, so a file without one, and the scenario text inside recordings made before, still rides the plane. Each scenario's note says why its spot fits its test.
+The plain flat floor is allowed only on purpose, as `[world] flat = "<reason>"` (no other `[world]` key with it): `full-effort-70kmh-stop-soc100` rides it, because the city exposes the rigid rider's marginal roll stability in its hard brake ([scenarios.md](scenarios.md#city-world-w2-2026-10-23)).
+
+| Scenarios | Spot |
+| --- | --- |
+| ride, coasting, hard braking, hall loss (2), low battery, steps off (2), full effort (20 % and 50 %), overlean (3) | From the spawn east along the arterial (row 0) on a straight line that stays within 2 m of the centreline, in the carriageway's level middle, for up to 450 m. Ideal road: `hills = 0`, no potholes, manholes, cracks, rough or wet patches. Lane and crosswalk paint stays. |
+| balance-60s, ble-service-cut-standing | The middle of the level paver platform of the plaza at (48.1, −108.0), 15.9 × 6.4 m, at least 3 m from every edge; ideal ground. |
+| pothole-20kmh | A city pothole 2.0 cm deep and 0.49 m across at (−31.13, −70.91), 50 m south of the start on a level, clean, straight approach. |
+| pothole-5cm-20kmh | A city pothole 4.9 cm deep and 0.60 m across at (−28.33, 214.60), 50 m north of the start on a level, clean, straight approach. |
+| downhill-cruise-2pct, hill-climb-low-battery | The spawn arterial with an incline: −2 % from 25 m, +20 % from 40 m (10 m ramps); ideal road. |
 
 ## W1b acceptance
 
@@ -236,15 +259,17 @@ A scenario has either a non-flat `[terrain]` (the 1-D strip) or `[world]`, never
 
 | Scenario | What it rides | Result |
 | --- | --- | --- |
-| `world-curb-up-90deg` | a 13.5 cm curb up, straight on | falls at 11.32 s at all three quanta: the tire stops at a curb of 60 % of its radius |
-| `world-curb-up-30deg` | the same curb at 30° | falls at 11.86 s |
-| `world-curb-down-90deg` | a curb down, straight on | passes: pitch −2°, 87 A, suspension 76 mm |
-| `world-pothole-15kmh` | a 7.2 cm deep, 1.18 m wide generated pothole at 15 km/h | passes: pitch −1.7°, 36 A, suspension 54 mm |
-| `world-stairs-down-5kmh` | 5 steps of 16.7 cm down a plaza's stairs at walking speed | passes: suspension 94 mm, 151–168 A |
-| `world-ramp-up-7kmh` | a plaza ramp up, steered by a route | passes: pitch at most 2° |
+| `world-curb-up-90deg` | a 13.5 cm curb up, straight on | falls at 11.29 s at all three quanta: the tire stops at a curb of 60 % of its radius |
+| `world-curb-up-30deg` | the same curb at 30° | falls at 11.82 s |
+| `world-curb-down-90deg` | a curb down, straight on | passes: pitch −2.1°, 92–95 A, suspension 76 mm |
+| `world-pothole-15kmh` | a 7.2 cm deep, 1.18 m wide generated pothole at 15 km/h | passes: pitch −1.8°, 36 A, suspension 56 mm |
+| `world-stairs-down-5kmh` | 5 steps of 16.7 cm down a plaza's stairs at walking speed | passes: suspension 90–94 mm, 125–172 A |
+| `world-ramp-up-7kmh` | a plaza ramp up, steered by a route | passes: pitch at most 2.1° |
 
-Quanta 4000 and 2000 give identical results; 3000 differs slightly.
-The two curb-up runs fail their `upright` check: the wheel stops dead at the curb and the rider falls. A curb of 60 % of the tire's radius taken at 9 km/h without unweighting is expected to stop the wheel, so Claude reads this as the ground working, not a ground fault. PRELIMINARY: no measured ride over a curb backs these runs, and their `record` checks only report.
+Quanta 4000 and 2000 give identical results; 3000 differs slightly. The numbers are those after the moving-mass fix (a1951a4: the rider senses air drag in a world run too); before it the curb-up runs fell 0.04 s later.
+The two curb-up runs fail their `upright` check: the wheel stops dead at the curb and the rider falls. The ground works as built (the curb box stops the tire), but a real wheel climbs such a curb: see the open item below. PRELIMINARY: no measured ride over a curb backs these runs, and their `record` checks only report.
+
+**Open item (curbs).** The owner rides straight into curbs of about 15 cm without lifting the wheel; a higher curb needs a jump. So the result above is wrong: the sim throws the rider at a 13.5 cm curb at every quantum. The cause is in the tire and the rider, not the ground: the bundled physics update (tire envelopment and grip, and the rider's knees absorbing the hit) is to fix it. In that update's rerun the acceptance changes to: a 15 cm curb taken straight on at moderate speed is climbed; clearly higher curbs still need a jump. The curb scenarios stay as they are until then.
 
 ## Cross-platform determinism
 
@@ -306,5 +331,5 @@ W1b added, elsewhere:
 - Only the city biome exists.
 - One surface per tick: the tire's friction follows the surface under the shell, not under each contact point.
 - Rider limbs and the shell keep their own friction on every surface.
-- The studio's compare view still draws the 1-D strip only; a `[world]` scenario compares correctly but shows a flat floor there.
+- A 13.5 cm curb taken straight on throws the rider; the owner climbs about 15 cm curbs without lifting (see the open item under W1b acceptance).
 - Not built from the plan: an `euc world preview` wrapper (the `euc-world-preview` binary does the job), ring 2 and skirts, a facade shader, wet gloss, and a Free Ride minimap.

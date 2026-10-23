@@ -336,6 +336,7 @@ const CTX_BIN_M: f64 = 32.0;
 /// item decides the same way.
 pub(crate) struct Ctx<'a> {
     pub seed: u64,
+    pub relief: fields::Relief,
     pub densities: &'a Densities,
     rect: Rect,
     nx: usize,
@@ -346,7 +347,9 @@ pub(crate) struct Ctx<'a> {
 
 impl<'a> Ctx<'a> {
     /// `edges` must hold every street within [`CTX_REACH_M`] of `rect`, in [`EdgeId`] order.
-    pub fn new(seed: u64, densities: &'a Densities, edges: &'a [Edge], rect: Rect) -> Self {
+    pub fn new(spec: &'a crate::WorldSpec, edges: &'a [Edge], rect: Rect) -> Self {
+        let (seed, densities) = (spec.seed, &spec.densities);
+        let relief = fields::Relief::of(spec);
         let nx = ((rect.max[0] - rect.min[0]) / CTX_BIN_M).ceil().max(1.0) as usize;
         let ny = ((rect.max[1] - rect.min[1]) / CTX_BIN_M).ceil().max(1.0) as usize;
         let mut bins = Vec::with_capacity(nx * ny);
@@ -363,7 +366,7 @@ impl<'a> Ctx<'a> {
                 );
             }
         }
-        Self { seed, densities, rect, nx, ny, edges, bins }
+        Self { seed, relief, densities, rect, nx, ny, edges, bins }
     }
 
     /// The road field at `p`, which must lie inside the context's rectangle.

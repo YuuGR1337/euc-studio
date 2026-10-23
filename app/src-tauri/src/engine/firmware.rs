@@ -370,14 +370,28 @@ roll_damping = 45.0
 
     #[test]
     fn the_terrain_profile_keeps_the_ground_below_zero() {
-        assert_eq!(terrain_profile(&scenarios::load("ride-20kmh-stop").unwrap()), None, "flat: nothing to draw");
+        // The shipped scenarios ride the city now; synthetic strips as a user's file has them.
+        let strip = |terrain: &str| {
+            Scenario::from_toml(&format!(
+                "schema = 1\nname = \"strip\"\ndescription = \"strip\"\nwheel = \"begode-extreme\"\nseconds = 10.0\n\
+                 release_s = 2.5\nspeed_kmh = [[0, 0]]\n{terrain}"
+            ))
+            .unwrap()
+        };
+        assert_eq!(terrain_profile(&strip("")), None, "flat: nothing to draw");
         let at = |profile: &[[f32; 3]], x: f32| *profile.iter().find(|p| (p[0] - x).abs() < 0.01).unwrap();
         // 2 % down from 25 m (a 10 m ramp): at 100 m the ground is 1.4 m below the start.
-        let down = terrain_profile(&scenarios::load("downhill-cruise-2pct").unwrap()).unwrap();
+        let down =
+            terrain_profile(&strip("[terrain]\nslope_pct = -2.0\nslope_start_m = 25.0\nlength_m = 250.0\n")).unwrap();
         let [_, z, slope] = at(&down, 100.0);
         assert!((z + 1.4).abs() < 1e-4 && z == slope, "{z} {slope}");
         // The pothole is 2 cm below the slope; the slope itself stays at 0 there.
-        let hole = terrain_profile(&scenarios::load("pothole-20kmh").unwrap()).unwrap();
+        let hole = terrain_profile(&strip(
+            "[terrain]\nlength_m = 120.0\n[[terrain.feature]]\nkind = \"pothole\"\nat_m = 50.0\ndepth_m = 0.02\nlength_m = 0.5\n",
+        ))
+        .unwrap();
+        // A city scenario draws its world instead of a strip.
+        assert_eq!(terrain_profile(&scenarios::load("pothole-20kmh").unwrap()), None);
         let [_, z, slope] = at(&hole, 50.25);
         assert!((z + 0.02).abs() < 1e-4 && slope == 0.0, "{z} {slope}");
         assert_eq!(at(&hole, 49.0)[1..], [0.0, 0.0]);

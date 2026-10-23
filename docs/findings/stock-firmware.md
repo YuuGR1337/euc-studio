@@ -302,6 +302,16 @@ sizes.
 **Status.** CONFIRMED in sim that nothing but the tip-over ends the drive. How long a real riderless
 wheel stays up depends on how the rider steps off; in the model it is set by the sideways push.
 
+**Check later (city, W2; not a verified firmware fact).** Since the scenarios ride the city, the
+15 km/h step-off still cuts at all three quantum sizes (stock at 17.26 s, 2.26 s after the step-off,
+at 0.6 km/h; 5 km/h: 0.77 s after, at 7.1 km/h), but at sizes 4000 and 2000 the fall ends with the
+wheel on its nose (pitch about 81°, roll near 0°) and the tire on the ground. After the cut the stock
+PWM stays at 98-101 % for about 0.8 s, then decays slowly (77 % at 18.45 s, 17 % at 19.45 s, 9 % at
+21.45 s, Iq about 6 A), the wheel turns at up to 16 km/h and the machine crawls about 10 m on its nose;
+it still rolls at 3.4 km/h at 22 s. On the flat floor, and at size 3000, it ended on its side and
+stopped. Whether the stock cut leaves this drive on, and whether a real wheel can crawl like this, is
+to be checked.
+
 **Clean profile.** The same cut-offs, plus riderless detection (`RIDERLESS_UNDETECTED` off, a
 load-drop rule): 1.0 s after the 15 km/h step-off clean suspects a riderless wheel, beeps and applies
 its limp speed limit (2.9° of speed tiltback); the wheel still rolls on until the tip-over cut. With a
