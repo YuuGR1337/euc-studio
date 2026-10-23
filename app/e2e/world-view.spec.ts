@@ -372,6 +372,27 @@ test("keeps what it drew and reports the error when the engine refuses chunks", 
   );
 });
 
+/**
+ * Waits until the drawn chunks reach `want` for as long as they keep coming: it fails only when
+ * no chunk arrived for `stallMs`. The stream asks for the next batch on a frame, so a runner that
+ * draws WebGL on the CPU (CI) streams the outdoor look's far ring slowly, but steadily.
+ */
+async function drawnSettles(page: Page, want: [number, number], stallMs = 30_000) {
+  let last = await drawn(page);
+  let since = Date.now();
+  for (;;) {
+    const now = await drawn(page);
+    if (now[0] === want[0] && now[1] === want[1]) return;
+    if (now[0] !== last[0] || now[1] !== last[1]) {
+      last = now;
+      since = Date.now();
+    } else if (Date.now() - since > stallMs) {
+      expect(now, `no chunk arrived for ${stallMs / 1000} s`).toEqual(want);
+    }
+    await page.waitForTimeout(500);
+  }
+}
+
 /** One pixel of the canvas (rows from the top), display sRGB. */
 async function pixel(page: Page, x: number, yFromTop: number) {
   return page.evaluate(
@@ -389,8 +410,10 @@ async function pixel(page: Page, x: number, yFromTop: number) {
 test("the outdoor look: a blue sky, fog in the horizon colour and a pool under the wheel", async ({
   page,
 }) => {
+  // The high tier's shadows and far ring are slow on a CPU-drawn canvas: wait while they stream.
+  test.setTimeout(300_000);
   await page.goto(`${base}?look=outdoor`);
-  await expect.poll(() => drawn(page), { timeout: 30_000 }).toEqual(expected("high", 0, 0));
+  await drawnSettles(page, expected("high", 0, 0));
   await page.waitForTimeout(1500);
   const size = await page.evaluate(() => {
     const gl = window.worldPage.gl?.getContext();
