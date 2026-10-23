@@ -63,7 +63,7 @@ world ── floor (plane, or the scenario's terrain)
   └─ shell (free joint)     scanned solids (packs, seat, handle, roller, shock, pedals), IMU site;
        │                    origin at the axle at full extension
        ├─ carriage (slide "suspension")   stator, axle clamps, slider blocks; spring, damper, end stops
-       │    └─ wheel (hinge "axle", y)    tire: a torus, as a ring of 48 capsules
+       │    └─ wheel (hinge "axle", y)    tire: a torus, as one convex mesh
        └─ feet (hinge "lean", y)    rigid rider only: hinged at the ankles, ankle motor "ankle"
   └─ rider (free joint)     articulated (default): upper body
        ├─ left_thigh (hinge "left_hip") ── left_shank ("left_knee") ── left_foot ("left_ankle")
@@ -76,16 +76,47 @@ Without `[body.suspension]` the carriage is left out and the wheel hinges straig
 
 `Physics::mjcf()` returns the generated MJCF for inspection.
 
-- **Tire.** A torus around the axle with the scanned crown radius (tube 0.058 m, from
-  `geometry.toml` `[collision]`), built as a ring of 48 capsules (the radius ripples by 0.4 mm). The
-  ring is sized so the tire stands on its loaded rolling radius `radius_m` (0.2251 m): MuJoCo's contact
-  barely sinks in, so the 4.5 mm the real tire flattens under a rider is taken off the scanned free
-  radius (0.2296 m) up front. At speed it rolls on 0.223 m (MuJoCo's soft friction creeps about 1 %),
-  so the firmware reads speeds about 1 % high. Without measured shapes the tire is an ellipsoid with
-  semi-axes (r, half width, r). Contact `condim = 6` gives sliding, torsional and rolling friction.
-  Rolling resistance is MuJoCo's rolling friction, a length: `crr · r`, so the resisting torque is
-  `crr · N · r`, the classic `crr · N` force at the contact. The contact time constant (`solref`) is
-  the tire's softness.
+- **Tire.** A torus around the axle with the scanned crown radius (tube 0.058 m at 0.1716 m, so
+  0.2296 m outside: the free tire, from `geometry.toml` `[collision]`), built as one convex mesh: the
+  tube's outer half, 360 points around and 13 across, within 9 µm of the torus around and 0.5 mm
+  across. (Until 2026-10 it was a ring of 48 capsules. The ring sat 0.36 mm low between capsules and
+  handed its contact from capsule to capsule, so at 15 km/h the shell shook at 145 Hz, 48 times the
+  wheel's turn rate: IMU accel x 0.67 m/s² RMS, the pedal welds ±17 N, and ±250 N and accel z
+  9.8 m/s² RMS on a wheel without suspension. Holding 15 km/h on stock firmware took 9.5 A instead
+  of 5.8 A. On the mesh: accel x 0.07 and z 0.02 m/s², welds 0.6 N.) Without measured shapes the
+  tire is an ellipsoid with semi-axes (r, half width, r).
+  The tire is rubber at the owner's 25 psi. It meets each ground geom (the floor, each curb, the
+  streaming world's window and pool) through its own MuJoCo pair, soft along the normal and stiff
+  along the ground; nothing else touches it.
+  - Give: a 3.00-12 tire at 25 psi is about 125 kN/m (membrane estimate 2π · p · √(R · r_crown) =
+    2π · 172 kPa · √(0.2296 m · 0.058 m)). The pairs' constant impedance (0.5) with
+    `contact_time_s` 0.022 s gives that: the loaded Extreme sinks 9.5 mm and its axle rides at
+    0.2201 m. At speed it rolls on 0.2247 m (30 km/h on stock firmware), within 0.2 % of the
+    firmware's 0.2251 m. (Until 2026-10 the contact was near rigid, 0.4 mm under the loaded wheel,
+    about 3 MN/m, and the tire was built 4.5 mm small to stand on the loaded radius.)
+  - Grip: `friction` 1.1, the owner's report for dry asphalt (about 1.0-1.2). MuJoCo softens a
+    contact's friction with its normal: on the soft contact alone the tread crept 20-30 % under
+    drive and brake torque. The pairs' grip reference is stiff (`solreffriction` 0.002 s), which
+    needs elliptic friction cones (the model's, for every contact): a full-effort launch and
+    `hard-braking-30kmh` slip under 1 %. No brake of the stock firmware slides the tire: it caps the
+    brake at about −168 N·m (`hard-braking-30kmh`, and the same with a rider asking 10 m/s²), a
+    friction use of about 0.62 under the loaded wheel. The owner reports a rare slide in a very hard
+    brake; this firmware cannot reproduce it, and it stays an open item.
+  - Rolling resistance: a torque on the wheel against the ground, each tire contact's normal force
+    times its rolling coefficient `crr · r` (which the streaming world scales per surface), faded out
+    below 0.3 m/s so it never turns a wheel at rest. It is `crr · N · r` exactly: holding 5 km/h
+    takes 3.45 N·m against 3.23 N·m for `crr · N · r` (the rest is air). MuJoCo's own rolling
+    friction (`condim 6`, until 2026-10) delivered about a third of that near 5 km/h and 90-100 %
+    at cruising speeds. `crr` 0.014 is INFERRED from the owner's ride log 2026-10-17 (light rider):
+    its steady stretches above 15 km/h, with the slope (GPS altitude over distance) and the
+    acceleration taken out, against steady flat cruises of the model with the same rider, per
+    5 km/h band of battery power. A fit of `crr` alone gives 0.030-0.038 and a residual that changes
+    sign with speed (+50 to +180 W below 40 km/h, −160 W at 52-60 km/h), so it is rejected. `crr`
+    with a constant power fits within ±150 W: `crr` 0.014 (±0.01) and 270-400 W at every speed,
+    which rolling resistance cannot make (an open item, electrical.md "To measure").
+  - Curbs: with the sagittal rider on stock firmware the tire takes 5, 8 and 10 cm curbs at 5, 10
+    and 20 km/h, square on and at 30°. From 12 cm the rider falls at the impact: the legs do not
+    absorb it yet. 20 cm is not climbed.
 - **Wheel.** The spinning part of the hub motor (rotor, magnets, rim, tire). The stator rides on the
   suspension carriage (in the shell without a suspension). The spin inertia is set directly; the other
   two axes are half of it (a ring).
@@ -419,12 +450,14 @@ is a change in the pitch plane, planned for a later stage). He rides straight in
 - **Honest welded soles.** Both feet are welded to the pedals. A real sole rolls its pedal only as
   hard as its centre of pressure can move to the edge of the foot, so each ankle's roll motor is held
   to the sole's load times half its width (4.5 cm), within its strength. The load is the weld's
-  constraint force along the deck's normal, averaged over 20 ms. The tire's ring of 48 capsules
-  ripples the wheel at 48 times its turn rate (144 Hz at 15 km/h): on the suspension-less test
-  wheel each weld's load swings by up to ±250 N (sagittal rider) and ±40 N (lateral rider) about
-  half the rider's weight, on the Extreme's profile with its suspension by about ±17 N. (Stage 1
-  took the swing for a ringing of the welds; the tire's ripple explains it, and it vanishes on an
-  ellipsoid tire.) `Physics::sole_loads()` reports each sole's load
+  constraint force along the deck's normal, averaged over 20 ms, which keeps a step's or a bump's
+  load and drops the fast part. (Until 2026-10 the tire was a ring of 48 capsules that rippled the
+  wheel at 48 times its turn rate, 144 Hz at 15 km/h: on the suspension-less test wheel each weld's
+  load swung by up to ±250 N (sagittal rider) and ±40 N (lateral rider) about half the rider's
+  weight, on the Extreme's profile with its suspension by about ±17 N. Stage 1 took the swing for a
+  ringing of the welds. On the convex-mesh tire a weld's load varies by 0.6 N RMS with the
+  suspension and 41 N without one, most of it the mesh's ripple near 1 kHz.)
+  `Physics::sole_loads()` reports each sole's load
   (negative: the foot pulls its pedal, which only a weld can), its ankle roll moment and the limit
   it was held to; `Physics::sole_pulls()` says whether a foot pulls. Riding at 15 km/h the soles
   carry the rider's weight within 1 % and no foot pulls.
@@ -519,10 +552,10 @@ Wheel (`[body]` in `plant.toml`, Begode Extreme values):
 |---|---|---|
 | `tire.radius_m` | 0.2251 m | INFERRED: loaded rolling radius, 28 pole pairs × 0.0505 m (the firmware's distance per electrical turn) / 2π; the scanned 3.00-12 tire's free radius is 0.2296 m |
 | `tire.half_width_m` | 0.0407 m | MEASURED: 81.4 mm wide (used only without a torus) |
-| `geometry.toml` `tire_torus` | tube 0.058 m | MEASURED: crown lateral radius; the ring radius follows `radius_m` |
-| `tire.friction` | 0.9 | DEFAULT: rubber on dry asphalt |
-| `tire.crr` | 0.012 | DEFAULT: research sim.py |
-| `tire.contact_time_s` | 0.02 s | DEFAULT: about 200 kN/m |
+| `geometry.toml` `tire_torus` | tube 0.058 m at 0.1716 m | MEASURED: crown lateral radius; 0.2296 m outside, the free tire |
+| `tire.friction` | 1.1 | ESTIMATE: owner's report, dry asphalt about 1.0-1.2 |
+| `tire.crr` | 0.014 | INFERRED: owner's ride log 2026-10-17 (light rider), fit with a constant power term, ±0.01 |
+| `tire.contact_time_s` | 0.022 s | INFERRED: 25 psi (owner's report), about 125 kN/m with the pairs' impedance 0.5: 9.5 mm under the loaded wheel |
 | `wheel.mass_kg` | 16 kg | DEFAULT: rotor, rim and tire |
 | `wheel.spin_inertia_kgm2` | 0.487 kg·m² | DEFAULT: 0.6·m·r² |
 | `shell.mass_kg` | 20 kg | DEFAULT: 42 kg with the wheel and the carriage |
@@ -560,8 +593,7 @@ Rider and aids (scenario `[rider]`, `[rider.control]`, `[assist]`; these are the
 | `articulation.hip_adduction_max_nm`, `hip_rotation_max_nm`, `knee_rotation_max_nm`, `ankle_roll_max_nm` | 150, 50, 25, 35 N·m | ESTIMATE: per joint, from published strength of adults (`articulated_lateral_v1`; see the lateral rider) |
 | `articulation.pad_friction`, `pad_contact_time_s`, `pad_preload_n` | 0.3, 0.03 s, 20 N | DEFAULT: a leg on a side pad, and how hard it rests there (`articulated_lateral_v1` on a wheel with measured pads) |
 | `articulation.turn_crouch`, `turn_spread`, `turn_press_n_per_rad` | 0.5, 1.3, 100 N | ESTIMATE from the owner's report: per radian of a turn's lean, the knees' deeper bend (rad), the inside knee's spread from its pad (rad) and the outside leg's harder rest on its pad (`articulated_lateral_v1`) |
-| `cda_m2` | 0.6 m² | air drag, upright |
-| `tuck_cda_m2` | 0.42 m² | ESTIMATE: air drag at a full crouch, by hand only (Free Ride): the drag area falls linearly with the knees' bend from `cda_m2`. 30 % under upright: a forward standing posture lowers a cyclist's drag area by 23-26 % (11 riders, 2019) and a full aero position by about 38 % |
+| `cda_m2` | 0.6 m² | air drag |
 | `control.lean_kp`, `lean_kd` | 6000 N·m/rad, 900 N·m·s/rad | about 1.3 Hz, damping 0.6 about the ankles |
 | `control.ankle_max_nm` | 400 N·m | both legs |
 | `control.speed_kp`, `speed_ki` | 0.6 /s, 0.03 /s² | |
@@ -606,6 +638,8 @@ bodies with their shapes, channel schema), the telemetry batches of `euc-telemet
 - IMU position and mounting signs: open the shell; check the signs with the wheel tilted.
 - Shell inertia: swing the wheel as a pendulum from the handle.
 - Rolling resistance: coast-down from 10 km/h with the motor off (free-wheel), log the speed.
+- Tire stiffness: the axle's height above the floor at 25 psi with and without the rider, the
+  suspension's own sag taken out.
 - Suspension: the shock's make, spring rate (stamped on the coil), stroke and preload; the axle
   travel from top-out to bottom-out (zip tie on a rail); the sag with the rider on (pedal height
   above the floor with and without the rider).

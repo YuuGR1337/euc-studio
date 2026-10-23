@@ -261,8 +261,8 @@ above_axle_m = 0.15
 # half sizes; capsules: end points and radius.
 [collision]
 # Tire as a torus: tube 0.058 at 0.1716 from the axle matches the knob tips and the crown within
-# 1.5 mm up to +-37 mm off the centre plane (about 40 deg of lean). In MuJoCo: a ring of 48
-# capsules (0.37 mm ripple), or the sdf torus plugin.
+# 1.5 mm up to +-37 mm off the centre plane (about 40 deg of lean). In MuJoCo: one convex mesh of
+# the tube's outer half (crates/euc-physics/src/mjcf.rs), or the sdf torus plugin.
 tire_torus = { major_m = 0.1716, minor_m = 0.058 }
 # Same outer diameter, true width, sharper crown (if the side reach matters more than the crown).
 tire_torus_width = { major_m = 0.1889, minor_m = 0.0407 }

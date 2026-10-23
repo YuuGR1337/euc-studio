@@ -98,13 +98,14 @@ pub struct Tire {
     pub friction: f64,
     /// Rolling resistance coefficient: resisting force over normal load.
     pub crr: f64,
-    /// Contact time constant, seconds (MuJoCo `solref`): how soft the tire is.
+    /// Contact time constant, seconds (MuJoCo `solref` of the tire's ground pairs): how soft the
+    /// tire is. With the pairs' constant impedance, 0.022 s is about 125 kN/m on the Extreme.
     #[serde(default = "default_contact_time_s")]
     pub contact_time_s: f64,
 }
 
 const fn default_contact_time_s() -> f64 {
-    0.02
+    0.022
 }
 
 /// `[body.wheel]`.

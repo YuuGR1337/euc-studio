@@ -23,6 +23,7 @@ use euc_world::{Material, Rect, Solid, Surface, World, WorldSpec};
 use mujoco_rs::prelude::*;
 
 use crate::PhysicsError;
+use crate::mjcf::names;
 
 /// Samples along each side of the window.
 pub const WINDOW_SAMPLES: usize = 193;
@@ -208,6 +209,11 @@ impl WorldGround {
         );
         xml
     }
+
+    /// The ground geoms a tire can meet: the window's floor and every pool box.
+    pub(crate) fn geom_names() -> Vec<String> {
+        std::iter::once("floor".to_owned()).chain((0..POOL_SIZE).map(|k| format!("{BOX}{k}"))).collect()
+    }
 }
 
 /// One pool slot.
@@ -227,6 +233,7 @@ pub(crate) struct Window {
     z0: f64,
     heights: Vec<f64>,
     slots: Vec<Slot>,
+    /// The tire's ground pairs.
     tires: Vec<usize>,
     /// The tire's own contact friction on asphalt: sliding, spin, rolling (length).
     tire_friction: [f64; 3],
@@ -252,11 +259,7 @@ struct RiderWindow {
 
 impl Window {
     /// Resolves the model's world bodies and fills the window and pool around the origin.
-    pub(crate) fn new(
-        ground: WorldGround,
-        data: &mut MjData<Box<MjModel>>,
-        tire_friction: [f64; 3],
-    ) -> Result<Self, PhysicsError> {
+    pub(crate) fn new(ground: WorldGround, data: &mut MjData<Box<MjModel>>) -> Result<Self, PhysicsError> {
         let model = data.model();
         let missing = |what: &str| PhysicsError::Model(format!("no {what} in the world model"));
         let hfield = model.name_to_id(MjtObj::mjOBJ_HFIELD, WINDOW).ok_or_else(|| missing("window hfield"))?;
@@ -280,12 +283,17 @@ impl Window {
             centre: None,
             heights: Vec::new(),
         };
-        let tires: Vec<usize> = (0..model.geom_friction().len())
-            .filter(|&g| model.id_to_name(MjtObj::mjOBJ_GEOM, g).is_some_and(|n| n == "tire" || n.starts_with("tire_")))
-            .collect();
-        if tires.is_empty() {
-            return Err(missing("tire geom"));
-        }
+        // The tire meets the ground through its own pairs (mjcf.rs `tire_pairs`): their friction is
+        // what each surface scales.
+        let tire = model.name_to_id(MjtObj::mjOBJ_GEOM, names::TIRE).ok_or_else(|| missing("tire geom"))?;
+        let (first, second) = (model.pair_geom1(), model.pair_geom2());
+        let tires: Vec<usize> =
+            (0..first.len()).filter(|&p| first[p] as usize == tire || second[p] as usize == tire).collect();
+        // Every pair carries the tire's friction on asphalt (sliding, sliding, spin, rolling, rolling).
+        let Some(&[mu, _, spin, rolling, _]) = tires.first().map(|&p| &model.pair_friction()[p]) else {
+            return Err(missing("tire pairs"));
+        };
+        let tire_friction = [mu, spin, rolling];
         let (sender, receiver) = mpsc::channel::<[f64; 4]>();
         let world = Arc::clone(ground.world());
         let prefetch = std::thread::Builder::new()
@@ -526,8 +534,8 @@ impl Window {
             let [mu, spin, rolling] = self.tire_friction;
             // SAFETY: friction coefficients only.
             let model = unsafe { data.model_mut() };
-            for &g in &self.tires {
-                model.geom_friction_mut()[g] = [mu * grip, spin, rolling * roll];
+            for &p in &self.tires {
+                model.pair_friction_mut()[p] = [mu * grip, mu * grip, spin, rolling * roll, rolling * roll];
             }
         }
     }

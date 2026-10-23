@@ -141,10 +141,11 @@ const LEG_PAD_GAP_MAX_M: f64 = 0.2;
 /// pull, a real one cannot.
 const SOLE_PULL_N: f64 = 5.0;
 
-/// Time constant over which a welded sole's load is averaged, seconds. The tire's ring of 48
-/// capsules ripples the wheel at 48 times its turn rate (144 Hz at 15 km/h): on a wheel without
-/// suspension each weld's load then swings by up to ±250 N about its mean (±17 N on the Extreme's
-/// profile with its suspension). 20 ms takes the ripple out and keeps a step's or a bump's load.
+/// Time constant over which a welded sole's load is averaged, seconds: 20 ms keeps a step's or a
+/// bump's load and takes out the fast part (on a wheel without a suspension the tire's mesh still
+/// ripples the load near 1 kHz, 41 N RMS). Until 2026-10 the tire's ring of 48 capsules rippled the
+/// wheel at 48 times its turn rate (144 Hz at 15 km/h), swinging a weld's load by up to ±250 N
+/// without a suspension (±17 N on the Extreme's profile with its suspension).
 const SOLE_LOAD_TIME_S: f64 = 0.02;
 
 /// How the rider left the pedals.
@@ -297,7 +298,7 @@ pub struct SoleLoad {
     /// `left` or `right`.
     pub name: &'static str,
     /// How hard the pedal pushes the sole along the deck's normal, newtons, averaged over the
-    /// last 20 ms (the tire's ripple). Negative: the foot pulls the pedal, which only the weld can
+    /// last 20 ms (its fast part dropped). Negative: the foot pulls the pedal, which only the weld can
     /// do.
     pub normal_n: f64,
     /// The ankle's roll moment on the foot, N·m, inversion positive (zero without ankle roll).
@@ -498,6 +499,8 @@ pub struct FootState {
 struct Ids {
     shell: usize,
     wheel: usize,
+    /// The tire's geom.
+    tire: usize,
     rider: usize,
     root_qpos: usize,
     root_dof: usize,
@@ -567,6 +570,9 @@ pub struct Physics {
     /// Every body of wheel and rider with mass (the trees of the shell's and the rider's free
     /// joints): what the lateral rider's roll aid leans as one.
     machine: Vec<usize>,
+    /// The tire's rolling resistance from the last step's contacts, N·m against the spin
+    /// ([`Self::rolling_resistance_nm`]); the next step applies it.
+    rolling_nm: f64,
     /// Requested crouch, radians of knee flexion.
     crouch_target_rad: f64,
     /// The crouch the legs are moving to now: the request at [`CROUCH_RATE_RAD_S`].
@@ -661,6 +667,7 @@ impl Physics {
         let ids = Ids {
             shell,
             wheel,
+            tire: id(MjtObj::mjOBJ_GEOM, names::TIRE)?,
             rider,
             root_qpos: qpos(root),
             root_dof: dof(root),
@@ -680,11 +687,8 @@ impl Physics {
         };
         let (total_mass, machine) = (moving_mass(&model), machine_bodies(&model, [shell, rider]));
         let mut data = MjData::new(Box::new(model));
-        let tire = setup.wheel.tire;
-        // The tire's contact friction on asphalt; the world scales it by the surface under it.
-        let tire_friction = [tire.friction, 0.01, tire.crr * tire.radius_m];
-        let world =
-            setup.world.clone().map(|ground| world::Window::new(ground, &mut data, tire_friction)).transpose()?;
+        // The world scales the tire's ground pairs by the surface under it.
+        let world = setup.world.clone().map(|ground| world::Window::new(ground, &mut data)).transpose()?;
         let rider = RiderController::new(setup.rider.control);
         let half_weight = 0.5 * setup.rider.mass_kg * setup.gravity;
         let mut physics = Self {
@@ -695,6 +699,7 @@ impl Physics {
             total_mass,
             body_ids,
             machine,
+            rolling_nm: 0.0,
             crouch_target_rad: 0.0,
             crouch_rad: 0.0,
             stance_rad: 0.0,
@@ -796,7 +801,7 @@ impl Physics {
     /// What resists motion, as the rider senses it: rolling resistance and air drag.
     fn drag(&self) -> rider::Drag {
         let setup = &self.setup;
-        let drag_area = 0.5 * setup.air_density * self.drag_area_m2();
+        let drag_area = 0.5 * setup.air_density * setup.rider.cda_m2;
         rider::Drag { rolling: setup.wheel.tire.crr * setup.gravity, aero: drag_area / self.total_mass }
     }
 
@@ -1180,7 +1185,7 @@ impl Physics {
         };
         self.lean = lean;
         let setup = &self.setup;
-        let drag_area = 0.5 * setup.air_density * self.drag_area_m2();
+        let drag_area = 0.5 * setup.air_density * setup.rider.cda_m2;
         let aero = drag_area * att.speed * att.speed.abs();
         let drag = self.drag();
         let sense = rider::Sense {
@@ -1253,8 +1258,14 @@ impl Physics {
         if as_one {
             self.lean_as_one(att.heading, self.roll_aid_torque);
         }
+        // Rolling resistance turns the wheel against the ground about its axle.
+        let axis = self.data.xmat()[ids.wheel];
+        let rolling = self.rolling_nm;
+        self.data.xfrc_applied_mut()[ids.wheel] =
+            [0.0, 0.0, 0.0, -rolling * axis[1], -rolling * axis[4], -rolling * axis[7]];
         let before = self.position_m();
         self.data.step2();
+        self.rolling_nm = self.rolling_resistance_nm();
         let after = self.position_m();
         self.path_length_m += (after[0] - before[0]).hypot(after[1] - before[1]);
         self.distance_m += att.speed * TIMESTEP_S;
@@ -1390,6 +1401,25 @@ impl Physics {
             self.data.swap_model(engaged);
             self.stance.pads_on = true;
         }
+    }
+
+    /// The tire's rolling resistance, N·m against the wheel's spin: each tire contact's normal
+    /// force times its pair's rolling coefficient (`crr · r`, which the streaming world scales per
+    /// surface), faded out near standstill as the rider's drag is, so it never turns a wheel at
+    /// rest. Read after a step, when its contacts and forces belong together.
+    fn rolling_resistance_nm(&self) -> f64 {
+        let mut torque = 0.0;
+        for (index, contact) in self.data.contact().iter().enumerate() {
+            if contact.geom[0] as usize == self.ids.tire || contact.geom[1] as usize == self.ids.tire {
+                // A degenerate contact can come back without a finite force; it carries none.
+                let normal = self.data.contact_force(index)[0].abs();
+                if normal.is_finite() {
+                    torque += normal * contact.friction[3];
+                }
+            }
+        }
+        let speed = self.data.qvel()[self.ids.axle_dof] * self.setup.wheel.tire.radius_m;
+        torque * (speed / rider::Drag::ROLLING_FADE_MPS).tanh()
     }
 
     /// How hard the shell pushes each lateral leg, newtons (left, right): the normal forces of the
@@ -1538,18 +1568,6 @@ impl Physics {
     /// The crouch the legs hold now, radians of knee flexion (0 for the rigid rider).
     pub const fn crouch_rad(&self) -> f64 {
         self.crouch_rad
-    }
-
-    /// The drag area of rider and wheel now, m²: `cda_m2` upright; by hand
-    /// ([`RiderController::set_manual`]) it falls with the crouch to `tuck_cda_m2` at a full crouch.
-    /// Scripted riding keeps `cda_m2`.
-    pub fn drag_area_m2(&self) -> f64 {
-        let rider = &self.setup.rider;
-        if !self.rider.manual() {
-            return rider.cda_m2;
-        }
-        let share = (self.crouch_rad / CROUCH_MAX_RAD).clamp(0.0, 1.0);
-        rider.cda_m2 + (rider.tuck_cda_m2 - rider.cda_m2) * share
     }
 
     /// Lifts one articulated foot off its pedal by bending that leg: `lift_rad` more hip flexion,
@@ -1820,27 +1838,6 @@ fn cross(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
 #[cfg(test)]
 mod articulated_tests {
     use super::*;
-
-    #[test]
-    fn the_drag_area_follows_the_crouch_by_hand_only() {
-        let mut upright = setup();
-        upright.rider.cda_m2 = 0.6;
-        let mut physics = Physics::new(upright).unwrap();
-        assert_eq!(physics.drag_area_m2(), 0.6);
-        physics.set_crouch(1.2).unwrap();
-        for _ in 0..1000 {
-            physics.step(0.0);
-        }
-        assert!((physics.crouch_rad() - 1.2).abs() < 1e-12, "{}", physics.crouch_rad());
-        assert_eq!(physics.drag_area_m2(), 0.6, "scripted riding keeps the upright drag area");
-        physics.rider().set_manual(true);
-        assert!((physics.drag_area_m2() - 0.42).abs() < 1e-12, "a full tuck by hand");
-        physics.set_crouch(0.6).unwrap();
-        for _ in 0..1000 {
-            physics.step(0.0);
-        }
-        assert!((physics.drag_area_m2() - 0.51).abs() < 1e-12, "half way: {}", physics.drag_area_m2());
-    }
 
     fn setup() -> Setup {
         let plant: toml::Value = toml::from_str(include_str!("../../../profiles/begode-extreme/plant.toml")).unwrap();

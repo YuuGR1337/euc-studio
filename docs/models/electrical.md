@@ -322,3 +322,9 @@ What else the runs showed:
 4. Current sensor gain and sign: a known DC current through phase a and the frame 00 phase current.
 5. Hall offset: back-EMF zero crossings against hall edges while spinning.
 6. Battery: rest voltage against SOC, and the voltage step under a known load.
+7. Battery current while riding: the owner's ride log 2026-10-17 reads about -0.8 A at a standstill
+   (motor not driven), and above 15 km/h the wheel draws about 2 A (270-400 W) more than the model
+   at every speed, a gap that rolling resistance cannot make (models/body.md, "Tire"). Log a
+   standstill with the motor on and the rider aboard, and a coast-down or a known climb; a raw
+   capture with phase current (EUC Remote) separates a sensor offset or gain from an unmodelled
+   loss such as PWM current ripple.
