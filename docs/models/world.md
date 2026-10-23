@@ -121,6 +121,15 @@ The physics frame is the world moved so that the start lies at the origin, headi
 - Moving a box is `mocap_pos` and `mocap_quat`. Changing its size also needs `geom_size`, `geom_rbound` and `geom_aabb` written: with stale bounds MuJoCo misses contacts (spike B).
 - Window and boxes use `friction="0 0 0" condim="3" conaffinity="3"`, so wheel, shell and rider all touch them.
 
+### Rider's window
+
+A rider who has left the wheel (stepped off, let go after a cut or thrown) can end up farther from the wheel than the window reaches; without ground there it would fall through the world.
+- A second `hfield` of 129 × 129 samples at the same cells (a 4 m square) sits in its own mocap body, parked 1000 m below.
+- Every tick, once a rider off the wheel has its origin more than 4 m from the window's centre (per axis), the rider's window lies under it, centred on whole cells, and follows it when it drifts more than 0.5 m. It lets go when the rider is back within 3.5 m, or on the wheel.
+- It shows the ground only from the window's edge outwards: its samples inside the window sit at its floor, below the window's ground, so no contact is doubled. Its heights are the window's samples (same lattice, same quantum), so the two meet without a step.
+- No box pool follows the rider; the faces' step behind each box (above) still gives it curbs and steps.
+- Test (`world.rs`): with each rider model, a rider who stepped off stays above the ground for 3 s after the wheel goes 9 m away, and the rider's window takes over.
+
 ### Ground friction
 
 World geoms have no friction of their own. MuJoCo takes the larger friction of the two geoms in a contact, so the tire's friction decides on every surface.

@@ -1139,14 +1139,17 @@ impl Physics {
         self.data.eq_active()[self.ids.stand]
     }
 
-    /// Between steps, on a fixed cadence: the streaming world's ground follows the wheel.
+    /// Between steps, on a fixed cadence: the streaming world's ground follows the wheel, and a
+    /// rider who has left it.
     fn tick_world(&mut self) {
         let ids = self.ids;
+        let off = self.rider_off();
         if let Some(window) = &mut self.world {
             let (q, v) = (self.data.qpos(), self.data.qvel());
             let position = [q[ids.root_qpos], q[ids.root_qpos + 1]];
             let velocity = [v[ids.root_dof], v[ids.root_dof + 1]];
-            window.tick(&mut self.data, position, velocity);
+            let rider = off.then(|| [q[ids.rider_qpos], q[ids.rider_qpos + 1]]);
+            window.tick(&mut self.data, position, velocity, rider);
         }
     }
 
