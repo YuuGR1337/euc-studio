@@ -80,6 +80,11 @@ pub trait Host {
     fn ride_sound(&self, _snapshot: &Snapshot) -> Option<super::native_audio::Ride> {
         None
     }
+    /// What touched the ground since the last call (impact and scrape sounds); None for a host
+    /// without a live body.
+    fn take_contact_digest(&mut self) -> Option<euc_physics::ContactDigest> {
+        None
+    }
     /// Takes manual control of the rider (keyboard, gamepad), or gives it back (`None`). A host
     /// without a rider ignores it.
     fn set_manual(&mut self, _manual: Option<Manual>) {}

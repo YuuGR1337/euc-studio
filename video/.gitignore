@@ -1,0 +1,9 @@
+node_modules/
+.remotion/
+out/
+public/footage/
+public/fonts/
+public/runs/
+public/audio/music.mp3
+scripts/.music-source.mp3
+src/footage.gen.json

@@ -85,8 +85,10 @@ shortcuts (C, `.`, `[`, `]`, `?`) cannot be bound. Gamepad buttons are fixed.
 
 ## Sound
 
-Free Ride sounds like the ride (FR6): the native audio service that plays the firmware's buzzer
-also plays the ride bed, on simulated time (`src-tauri/src/engine/ride_sound.rs`). Every sound
+Free Ride plays the firmware's buzzer. The ride sound (FR6, experimental and off by default:
+"Ride sound (experimental)" in the panel) is a bed the same native audio service plays on
+simulated time (`src-tauri/src/engine/ride_sound.rs`); it needs work before it sounds like a
+wheel, and contributions are welcome. Every sound
 comes from a simulator signal, each sample: the motor from its electrical frequency (the plant's
 pole pairs × wheel revolutions per second) and phase current, low as on a real wheel; the tyre
 from the wheel speed and the world's material under the wheel (a band and grain per material,
@@ -94,10 +96,11 @@ joint ticks on pavers and setts, a hiss when wet, the hum of the tread's 15 knob
 wind from the speed. The ride ducks by 0.22 under each beep. Only a free ride sends the bed's
 samples; other runs keep the buzzer alone.
 
-The panel's Sound row sets the master volume (squared into the gain, kept in localStorage as
-`euc-studio.soundVolume`) and mutes (`euc-studio.soundMuted`); `useSoundMix` sends them with
-`engine_sound_mix {volume, bed}`. While the window is hidden the run goes on and the bed fades out
-over 0.3 s; the buzzer still sounds. The Display card's bell switches the wheel's sound off
+The panel's Sound section sets the master volume (squared into the gain, kept in localStorage
+as `euc-studio.soundVolume`), mutes (`euc-studio.soundMuted`) and turns the ride sound on
+(`euc-studio.rideSound`, off by default); `useSoundMix` sends them with
+`engine_sound_mix {volume, bed}`. The native side starts with the bed off. While the window is
+hidden the run goes on and the bed fades out over 0.3 s; the buzzer still sounds. The Display card's bell switches the wheel's sound off
 altogether. Nothing runs on the frame loop for sound.
 
 ## Drive and lean
@@ -148,11 +151,16 @@ their map.
 
 ## Native API
 
+Free Ride boots the stock firmware on the `neutral` settings preset (`DEFAULT_SETTINGS`): the
+factory record with level pedals (pedal trim 4), so the wheel rides close to level (a few degrees
+nose down while it pulls). `blank`, the factory-fresh record, stays available to
+`freeRideApi.start`; its pedals sit 4.8° nose down, and the wheel rides some 10° nose down.
+
 The frontend uses these exact command arguments:
 
 | Command              | Arguments                                                                                                          |
 | -------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| `free_ride_start`    | `{ spec: { wheel: 'begode-extreme', settings: 'blank', rider_model: 'articulated_sagittal_v1', world } }`          |
+| `free_ride_start`    | `{ spec: { wheel: 'begode-extreme', settings: 'neutral', rider_model: 'articulated_sagittal_v1', world } }`        |
 | `free_ride_restart`  | `{ epoch, toStart }` (`to_start` natively: false at the last clear spot, true at the world's start)                |
 | `free_ride_step_off` | `{ epoch }`                                                                                                        |
 | `free_ride_status`   | none                                                                                                               |

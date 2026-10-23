@@ -1,17 +1,27 @@
 # EUC Studio
 
+[![ci-engine](https://github.com/tarikbc/euc-studio/actions/workflows/ci-engine.yml/badge.svg?branch=main)](https://github.com/tarikbc/euc-studio/actions/workflows/ci-engine.yml)
+[![ci-firmware](https://github.com/tarikbc/euc-studio/actions/workflows/ci-firmware.yml/badge.svg?branch=main)](https://github.com/tarikbc/euc-studio/actions/workflows/ci-firmware.yml)
+[![app](https://github.com/tarikbc/euc-studio/actions/workflows/ci-app.yml/badge.svg?branch=main)](https://github.com/tarikbc/euc-studio/actions/workflows/ci-app.yml)
+[![vendor-guard](https://github.com/tarikbc/euc-studio/actions/workflows/vendor-guard.yml/badge.svg?branch=main)](https://github.com/tarikbc/euc-studio/actions/workflows/vendor-guard.yml)
+[![License: PolyForm Noncommercial 1.0.0](https://img.shields.io/badge/license-PolyForm_Noncommercial_1.0.0-blue)](LICENSE)
+
 **Run real electric-unicycle firmware in a 3D simulation with a physical rider. Inspect it, compare it, improve it.**
 
-<!-- showcase -->
+[![EUC Studio replaying real runs: a Free Ride through the city, a pothole, a cut-out at top speed, and stock against our firmware](docs/assets/video/showcase-loop.webp)](docs/assets/video/showcase.mp4)
+
+<sub>The studio itself, filmed headless, replaying real runs of the stock firmware (26 s). With sound:
+[showcase.mp4](docs/assets/video/showcase.mp4). How it is made: [video/](video/README.md).</sub>
 
 EUC Studio is a workbench for people who want better and safer EUC controller firmware. It runs the controller's
 actual firmware image on an emulated microcontroller. Motor, battery, wheel, rider and city models supply its inputs.
 The simulator helps you inspect behavior under stated conditions. It does not establish real riding safety.
 
-![EUC Studio, Ride workspace with the real engine](app/docs/screenshots/ride-live.png)
+![Free Ride in the generated city: the rider on the simulated Begode Extreme, seen from the Chase camera](app/docs/screenshots/free-ride-city.png)
 
-<sub>The Ride workspace with the real engine: the stock firmware at 20 km/h. The screenshot comes from an earlier
-build; the current rider figure, the city world and Free Ride are newer. Some physical parameters are estimates.</sub>
+<sub>Free Ride in the generated city (seed 42): the stock firmware (GW1825007) on the real engine carries the rider
+through a left turn at 20 km/h in drive mode, on the neutral pedal preset. Chase camera, with the HUD, the pitch
+gauge and the wheel's display replica; replayed from a recording. Some physical parameters are estimates.</sub>
 
 > [!WARNING]
 > Custom firmware can make a wheel cut out, injure its rider or destroy its power stage. Read [SAFETY.md](SAFETY.md)
@@ -28,6 +38,11 @@ build; the current rider figure, the city world and Free Ride are newer. Some ph
 - **Ride it yourself.** Free Ride puts you on the simulated wheel in an endless generated city, with the keyboard or a
   gamepad, while the real firmware balances it.
 - **Grow to other wheels.** Wheels, boards and processors are described as data, so new models and brands can follow.
+
+| Ride | Compare |
+| --- | --- |
+| ![Ride workspace: scopes show the spike of a pothole](app/docs/screenshots/ride-pothole.png) | ![Compare workspace: stock and our compat build ride the same pothole](app/docs/screenshots/compare-pothole.png) |
+| The stock firmware about 1 s after a 5 cm pothole at 20 km/h: the PWM, modulation and phase-current scopes show the spike. Recording playback. | Stock against our compat build on the 20 km/h pothole scenario: run B rides as a ghost, the charts are synced, and the comparison is within tolerance so far. |
 
 ## How it works
 
@@ -74,7 +89,7 @@ Current work:
 | Track | State | Open |
 | --- | --- | --- |
 | W2 Scenarios in the city | Done (2026-10-23) | The shipped scenarios ride the generated city ([world model](docs/models/world.md), [#11](https://github.com/tarikbc/euc-studio/issues/11)) |
-| P1 Physics realism bundle | In progress | Soft tyre, calibrated motor and rolling resistance, kerb absorb, roll stability, then one scenario rerun ([epic #57](https://github.com/tarikbc/euc-studio/issues/57)) |
+| P1 Physics realism bundle | Draft [PR #62](https://github.com/tarikbc/euc-studio/pull/62) | A rubber tyre at 25 psi with rolling resistance, a finer city grid, the motor fit, the roll fix, and kerb absorb and brace are in the draft ([epic #57](https://github.com/tarikbc/euc-studio/issues/57)). The open step is the re-baseline of every scenario, [#18](https://github.com/tarikbc/euc-studio/issues/18): a good task for a contributor |
 | Lateral rider L4-L6 | L1-L3 done | The rider balances and turns with its own body instead of external aids ([epic #58](https://github.com/tarikbc/euc-studio/issues/58)) |
 | Free Ride polish | Play mode, drive mode, Chase camera, daylight, sound and HUD done | Impact sounds, city look up close, buildings, trees, a minimap ([milestone](https://github.com/tarikbc/euc-studio/milestone/4)) |
 | Calibration | Open | Tools and measurements that tie the simulator to real wheels ([epic #59](https://github.com/tarikbc/euc-studio/issues/59)) |
@@ -151,6 +166,15 @@ Keys can be rebound in the panel. The full reference, including drive mode and l
 [app/src/workspaces/freeRide/README.md](app/src/workspaces/freeRide/README.md).
 Free Ride is a simulation for firmware work, not a riding trainer.
 
+## How work is organised
+
+Open work lives as issues on the public [roadmap board](https://github.com/users/tarikbc/projects/3), grouped into
+[milestones](https://github.com/tarikbc/euc-studio/milestones); a large topic has an epic issue that lists its parts. Comment on an issue before you
+start larger work, so the plan is agreed first. Every change goes in as a pull request: CI runs the checks of the
+areas it touches (engine, firmware, app, Python bindings, the stock-against-compat comparison and the vendor guard),
+every commit carries a DCO sign-off (`git commit -s`), and a safety-relevant change brings its scenario evidence.
+[CONTRIBUTING.md](CONTRIBUTING.md) has the details.
+
 ## Where to start
 
 - Look at the [roadmap board](https://github.com/users/tarikbc/projects/3) and the
@@ -163,6 +187,19 @@ Free Ride is a simulation for firmware work, not a riding trainer.
   Issues labelled [help wanted](https://github.com/tarikbc/euc-studio/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22)
   and [needs: data](https://github.com/tarikbc/euc-studio/issues?q=is%3Aissue+is%3Aopen+label%3A%22needs%3A+data%22)
   are open to anyone with the skills or a wheel to measure.
+
+Skills that help, and where they fit:
+
+| You know | Where it helps | Labels |
+| --- | --- | --- |
+| Rust, CPU emulation, microcontroller peripherals | The ARMv7-M core, STM32F1 peripherals, engine speed (`crates/euc-armv7m`, `crates/euc-stm32f1`, `crates/euc-sim`) | [`area: engine`](https://github.com/tarikbc/euc-studio/labels/area%3A%20engine) |
+| MuJoCo, rigid-body physics, biomechanics | Tyre, suspension, the rider models and their controllers (`crates/euc-physics`) | [`area: physics`](https://github.com/tarikbc/euc-studio/labels/area%3A%20physics), [`area: tyre`](https://github.com/tarikbc/euc-studio/labels/area%3A%20tyre), [`area: rider`](https://github.com/tarikbc/euc-studio/labels/area%3A%20rider) |
+| Motors, inverters, batteries | The electrical plant and its calibration (`crates/euc-plant`) | [`area: plant`](https://github.com/tarikbc/euc-studio/labels/area%3A%20plant), [`area: calibration`](https://github.com/tarikbc/euc-studio/labels/area%3A%20calibration) |
+| Embedded C, motor control | Our firmware's compat and clean profiles (`firmware/`) | [`area: firmware`](https://github.com/tarikbc/euc-studio/labels/area%3A%20firmware) |
+| three.js, React, TypeScript | The studio, Free Ride and the city's look (`app/`) | [`area: studio`](https://github.com/tarikbc/euc-studio/labels/area%3A%20studio), [`area: world`](https://github.com/tarikbc/euc-studio/labels/area%3A%20world), [`area: model`](https://github.com/tarikbc/euc-studio/labels/area%3A%20model) |
+| Audio synthesis | Free Ride's sound, made from the simulator's signals (`app/src-tauri/src/engine/ride_sound.rs`) | [`area: sound`](https://github.com/tarikbc/euc-studio/labels/area%3A%20sound) |
+| Python, data analysis | Comparing simulated runs with real ride logs (`python/`; the tool is [#35](https://github.com/tarikbc/euc-studio/issues/35)) | [`area: calibration`](https://github.com/tarikbc/euc-studio/labels/area%3A%20calibration) |
+| A Begode wheel (or another EUC) | Measurements and ride numbers that check the simulator | [`needs: data`](https://github.com/tarikbc/euc-studio/labels/needs%3A%20data) |
 - Read [CONTRIBUTING.md](CONTRIBUTING.md) for the ground rules, the area map and the checks per area.
 - Read [docs/architecture.md](docs/architecture.md), then the guide of the area you work on
   ([docs/README.md](docs/README.md) maps every document).

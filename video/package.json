@@ -1,0 +1,23 @@
+{
+  "name": "euc-studio-showcase",
+  "private": true,
+  "description": "EUC Studio's README showcase video: real runs of the studio, filmed headless and cut with Remotion.",
+  "scripts": {
+    "assets": "sh scripts/prepare-assets.sh",
+    "studio": "remotion studio src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "stills": "node scripts/stills.mjs",
+    "render": "sh scripts/render.sh",
+    "make": "sh scripts/make.sh"
+  },
+  "dependencies": {
+    "@remotion/cli": "4.0.529",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "remotion": "4.0.529"
+  },
+  "devDependencies": {
+    "@types/react": "19.3.0",
+    "typescript": "5.9.3"
+  }
+}

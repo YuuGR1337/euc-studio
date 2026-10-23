@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   DEFAULT_RIDER_MODEL,
+  DEFAULT_SETTINGS,
   flatMap,
   freeRideApi,
   limitsOf,
@@ -21,7 +22,7 @@ describe("world IPC", () => {
     expect(ipc.invoke).toHaveBeenCalledExactlyOnceWith("free_ride_start", {
       spec: {
         wheel: "begode-extreme",
-        settings: "blank",
+        settings: "neutral",
         rider_model: "articulated_sagittal_v1",
         world,
       },
@@ -37,11 +38,31 @@ describe("world IPC", () => {
     expect(ipc.invoke).not.toHaveBeenCalled();
   });
 });
+describe("settings preset IPC", () => {
+  it("boots on the neutral preset (level pedals) unless blank is asked", async () => {
+    expect(DEFAULT_SETTINGS).toBe("neutral");
+    await freeRideApi.start({ map: flatMap() }, DEFAULT_RIDER_MODEL, "blank");
+    expect(ipc.invoke).toHaveBeenCalledExactlyOnceWith("free_ride_start", {
+      spec: {
+        wheel: "begode-extreme",
+        settings: "blank",
+        rider_model: "articulated_sagittal_v1",
+        map: flatMap(),
+      },
+    });
+  });
+  it("refuses a preset it does not know before the engine sees it", async () => {
+    await expect(
+      freeRideApi.start({ map: flatMap() }, DEFAULT_RIDER_MODEL, "tiltback" as "blank"),
+    ).rejects.toThrow(/preset/);
+    expect(ipc.invoke).not.toHaveBeenCalled();
+  });
+});
 describe("rider model IPC", () => {
   it.each(RIDER_MODELS)("sends $value only with a new run", async ({ value }) => {
     await freeRideApi.start({ map: flatMap() }, value);
     expect(ipc.invoke).toHaveBeenCalledExactlyOnceWith("free_ride_start", {
-      spec: { wheel: "begode-extreme", settings: "blank", rider_model: value, map: flatMap() },
+      spec: { wheel: "begode-extreme", settings: "neutral", rider_model: value, map: flatMap() },
     });
   });
   it("starts the articulated rider unless another model is chosen", async () => {
@@ -51,7 +72,7 @@ describe("rider model IPC", () => {
     expect(ipc.invoke).toHaveBeenCalledExactlyOnceWith("free_ride_start", {
       spec: {
         wheel: "begode-extreme",
-        settings: "blank",
+        settings: "neutral",
         rider_model: "articulated_sagittal_v1",
         map: flatMap(),
       },

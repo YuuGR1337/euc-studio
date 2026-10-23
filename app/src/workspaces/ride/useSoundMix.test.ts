@@ -15,13 +15,13 @@ describe("sound mix", () => {
     expect(volumeGain(2)).toBe(1);
   });
 
-  it("sends the gain, silence when muted, and no ride sound while hidden", () => {
+  it("sends the gain, silence when muted, and the ride sound only when asked", () => {
     const { source, setSoundMix } = live();
-    sendMix(source, 0.8, false, false);
-    expect(setSoundMix).toHaveBeenLastCalledWith(expect.closeTo(0.64, 9), true);
-    sendMix(source, 0.8, true, false);
-    expect(setSoundMix).toHaveBeenLastCalledWith(0, true);
     sendMix(source, 0.8, false, true);
+    expect(setSoundMix).toHaveBeenLastCalledWith(expect.closeTo(0.64, 9), true);
+    sendMix(source, 0.8, true, true);
+    expect(setSoundMix).toHaveBeenLastCalledWith(0, true);
+    sendMix(source, 0.8, false, false);
     expect(setSoundMix).toHaveBeenLastCalledWith(expect.closeTo(0.64, 9), false);
   });
 

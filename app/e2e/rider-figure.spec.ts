@@ -198,12 +198,19 @@ test("draws the rider only as the figure on the physics bodies, never as their s
   await expect.poll(() => drawn(page)).toEqual({ figure: 26, shapes: 0 });
 });
 
-test("sends the sound mix: the stored volume, and no ride sound while the window is hidden", async ({
+test("sends the sound mix: the stored volume, the ride sound only when on, never while hidden", async ({
   page,
 }) => {
   await page.addInitScript(() => localStorage.setItem("euc-studio.soundVolume", "0.5"));
   await open(page);
   const mix = () => page.evaluate(() => window.liveWire.soundMix);
+  // The ride sound is experimental and off by default; the buzzer keeps the volume.
+  await expect.poll(mix).toEqual({ volume: 0.25, bed: false });
+  // "Ride sound (experimental)" in the Free Ride panel sets this.
+  await page.evaluate(async (url) => {
+    const ui = (await import(/* @vite-ignore */ url)) as typeof import("../src/state/ui.ts");
+    ui.useUi.getState().setRideSound(true);
+  }, "/src/state/ui.ts");
   await expect.poll(mix).toEqual({ volume: 0.25, bed: true });
   await page.evaluate(() => {
     Object.defineProperty(document, "hidden", { configurable: true, get: () => true });
