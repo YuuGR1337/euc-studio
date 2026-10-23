@@ -313,8 +313,9 @@ calf-pad contact. This is a study phase of its own, not a control setting.
 A rider's legs also move sideways: they lean the body into a turn, press a calf on a side pad
 and twist the wheel at walking pace. `articulated_lateral_v1` is the articulated rider with those
 joints. It is built in stages: stage 1 (2026-10-23) gave it its body and its posture, stage 2 the
-knees' rotation and the legs on the side pads; the external aids still steer. Later stages add the
-turn made by the body and the twist at walking pace, then take the aids away above walking pace.
+knees' rotation and the legs on the side pads, stage 3 the turn's posture and an external roll aid
+that leans wheel and rider as one; the external aids still steer. Later stages add the balance
+made by steering and the twist at walking pace, then take the aids away above walking pace.
 The model kept its id while it gained the knees' rotation in stage 2 (12 joints before, 14 now):
 its recordings name the joints they had (`context.rider_joints`).
 
@@ -328,7 +329,7 @@ wheel, both deeply bent; he puts more weight on the inside pedal and counterstee
 ankle sits about 3-6 cm behind the pedal's centre (the model keeps it over the centre; moving it
 is a change in the pitch plane, planned for a later stage). He rides straight into curbs of about
 15 cm without lifting the wheel, meeting them on soft knees that let the wheel come up under him
-(a knee-absorb response is planned for stages 3-5, with a 15 cm curb as its test).
+(a knee-absorb response is planned once the tire is rubber, with a 15 cm curb as its test).
 
 - **Segments: de Leva (1996), adult men (ESTIMATES for an average man, not anyone's body).**
   Thigh 14.16 %, shank 4.33 % and foot 1.37 % of the mass, the upper body the other 60.28 %; the
@@ -414,15 +415,59 @@ is a change in the pitch plane, planned for a later stage). He rides straight in
   (negative: the foot pulls its pedal, which only a weld can), its ankle roll moment and the limit
   it was held to; `Physics::sole_pulls()` says whether a foot pulls. Riding at 15 km/h the soles
   carry the rider's weight within 1 % and no foot pulls.
-- **The aids hold the upper body to the shell.** In stage 1 the external aids, not the legs, still
-  steer the wheel. Into a full manual turn the shell's roll spring rolls the wheel with up to about
-  1000 N·m, more than legs carry, and the twist aid turns the shell with up to 60 N·m. Through
-  person-strength legs alone the hip ab/adductors saturated at 150 N·m and the wheel spun round.
-  So the roll spring's law (5000 N·m/rad, 500 N·m·s/rad) also holds the upper body at the shell's
-  roll and roll rate, and the yaw aid's gains (2000 N·m/rad, 200 N·m·s/rad, at most 60 N·m) hold it
-  at the shell's heading and turn rate. Both are external torques on the upper body; their torque
-  and work add to the reported aids, and recordings carry them. In a 0.4 rad/s turn at 15 km/h
-  the lateral joints then carry under 3 N·m (stage 1).
+- **The roll aid leans wheel and rider as one** (stage 3). The external aids, not the legs, still
+  steer the wheel. Into a full manual turn the roll aid rolls the wheel with over 1000 N·m, more
+  than legs carry. On the shell alone it pulled the shell away from the body, and the legs had to
+  carry it: in stage 1 the hip ab/adductors saturated at 150 N·m and the wheel spun round, so the
+  same aids also held the upper body to the shell's roll and heading (external torques on the
+  upper body). In stage 2 a full manual turn still pressed the inside leg with 1.7 kN. Since stage
+  3 the roll aid acts on the whole machine: the shell's roll spring and the upper body's (the same
+  law, 5000 N·m/rad and 500 N·m·s/rad each, so 10000 and 1000 together, about the wheel's roll and
+  roll rate) give a torque about the heading through the tire's contact, and each body of wheel
+  and rider takes the force and moment of its own part of one rigid lean about that line (its
+  mass times its acceleration there, and its own inertia about the heading). The aid then loads no
+  joint, pad or pedal: in free flight without gravity, with the legs holding their stance, 2000 N·m
+  leans the machine 0.07 rad in 0.1 s and moves no joint by more than 0.001 rad beyond what the
+  stance alone moves it; the same torque on the shell alone rolls the shell 0.8 rad and bends a
+  joint by 2 rad. The upper body's yaw aid is gone: the hips turn the body with the shell, within
+  their strength. The torque and work of the lean add to the reported roll aid, as before.
+  (Every external wrench is set again each step: MuJoCo keeps an applied wrench until it is
+  set again, and a wrench on a leg would otherwise stay on it.)
+- **The turn's posture** (stage 3; the owner's report). In a turn the knees bend deeper, by
+  `turn_crouch` (0.5) radians per radian of the turn's lean: from 32° to 52° at 35° of lean. The
+  inside knee swings out from its pad by `turn_spread` (1.3) radians per radian of lean, as far as
+  the knee swings (0.45 rad, from about 20° of lean on), and the outside leg rests on its pad
+  harder: the stance loop aims at `pad_preload_n` plus `turn_press_n_per_rad` (100 N) per radian
+  of lean. All three are ESTIMATES: the owner's report says what the legs do, not how far or how
+  hard. At about 20° of lean the inside knee stands 8.4 cm off the shell, where the owner's photo
+  of a turn at roughly 15-20° shows about 10 cm. The inside sole then carries more of the rider, as
+  the owner's does: the body leans a little further than the wheel.
+- **Where the outside leg rests: a known difference.** In the owner's report the outside knee guard
+  rests on the shell's front-top corner by the front handle, riding straight and in a turn. The
+  model's knee comes within 2-3 cm of that corner (in a full manual turn 2.0 cm off the side of the
+  shell's front block, riding straight 2.3 cm above the side of its top), and its calf rests on the
+  cover's upper arm instead and takes the press. One centimetre at the calf decides it: with a
+  4 cm calf instead of 5 cm the knee comes within 0.2 cm of the corner, and with 3 cm the knee
+  takes the press. The calf's size (ESTIMATE) and the pads' depth (INFERRED to ±1 cm) both cover
+  that centimetre, so the model keeps them and records the difference. The stage that moves the
+  ankle 3-6 cm behind the pedal's centre revisits it (untested: that moves the shank too), best
+  with a measured depth of the cover's upper arm and a measured width of a guarded calf.
+- **What stage 3 measured** (test balance law, the Extreme's profile with its suspension). In a
+  0.4 rad/s turn at 15 km/h (10° of lean) the aids did 18.3 J of roll work and −3.3 J of yaw work
+  in 4 s (stage 2: 33.8 J and −2.8 J; the sagittal rider 23.3 J and −3.1 J). The outside leg
+  takes 61 N for a moment as the wheel rolls in (stage 2: 280 N), then rests on its pad with
+  40 N (aim 37 N); the inside leg stands 1.6 cm off its pad; the soles carry 407 N inside and
+  386 N outside. A full manual turn at 5 m/s (35° at 60°/s), where stage 2 could lose the rider,
+  holds within 0.4° of the turn's lean. Its aids did 222 J of roll work and −15.8 J of yaw work
+  in 4 s (the sagittal rider 190 J and −25.7 J; stage 2 275-295 J and −197 to −237 J before the
+  rider came off). The knees bend from 32° to 52°, the inside leg stands 4.2 cm off its pad, the
+  outside calf rests on the cover's upper arm with about 100 N, and the soles carry 544 N inside
+  and 380 N outside. Into the turn the heading turns at once and the wheel tips out by 0.2° for
+  0.1 s before the aid leans it in: the aids need no countersteer, where the owner countersteers
+  at speed. Stage 4 replaces the roll aid with balance by steering and tests for the
+  countersteer. On the stock firmware `ride-20kmh-stop` passes at 2.42 times real time (sagittal
+  2.57 in the same session) and `world-ramp-up-7kmh` at 1.86 (1.94); a slalom at 12 km/h on the
+  city world (seed 42) stays upright at 1.78 (1.87).
 - **It rides as the sagittal rider.** On the test balance law, without pads, it reaches 4.22 m/s in
   10 s towards 15 km/h and stops in 11.50 m (sagittal: 4.22 m/s, 11.45 m); a full manual turn at
   5 m/s settles at 34° of lean and 1.12 rad/s (sagittal: 34°, 1.13 rad/s); it rides 30 km/h
@@ -437,21 +482,19 @@ is a change in the pitch plane, planned for a later stage). He rides straight in
   It shows in recordings as a roll that stays at zero. Set `[assist] roll_stiffness = 0` in a
   scenario to see the wheel fall over sideways.
 - **Upper-body roll aid** (`articulated_contact_v1` and `articulated_lateral_v1`). The same law,
-  with the same gains, holds the articulated upper body: for contact feet at the wheel's roll
-  target, because contact feet do not hold the body to the shell and the legs cannot roll; for the
-  lateral rider at the shell's roll and roll rate, because its legs are only as strong as a
-  person's. It is an external torque, like the shell's roll spring and the yaw aid of the steering
-  (point 4 above); its torque and work add to the reported roll aid.
-- **Upper-body yaw aid** (`articulated_lateral_v1` only). The yaw aid's gains and cap hold the
-  lateral rider's upper body at the shell's heading and turn rate, because its hips twist. An
-  external torque; its torque and work add to the reported yaw aid.
+  with the same gains, holds the articulated upper body. For contact feet it holds the body at the
+  wheel's roll target, because contact feet do not hold the body to the shell and the legs cannot
+  roll: an external torque on the upper body, like the shell's roll spring and the yaw aid of the
+  steering (point 4 above). For the lateral rider it adds to the shell's spring, and the two lean
+  wheel and rider together as one machine (see the lateral rider), because its legs hold its body
+  but are only as strong as a person's. Its torque and work add to the reported roll aid.
 - **Recorded.** A recording's context (`model_aids`) carries every aid the run had: the shell's roll
-  stiffness and damping, the yaw aid's gains and cap, for `articulated_contact_v1` and
-  `articulated_lateral_v1` `upper_body_roll_stiffness` and `upper_body_roll_damping`, and for
-  `articulated_lateral_v1` `upper_body_steer_kp`, `upper_body_steer_kd` and
-  `upper_body_steer_max_nm` (each absent for the models without it). For `articulated_lateral_v1`
-  the context also names the rider's leg joints (`rider_joints`), because the model gained a joint
-  under the same id.
+  stiffness and damping, the yaw aid's gains and cap, and for `articulated_contact_v1` and
+  `articulated_lateral_v1` `upper_body_roll_stiffness` and `upper_body_roll_damping` (absent for
+  the models without them). Recordings of `articulated_lateral_v1` from before stage 3 also carry
+  `upper_body_steer_kp`, `upper_body_steer_kd` and `upper_body_steer_max_nm`: the yaw aid then held
+  its upper body at the shell's heading. For `articulated_lateral_v1` the context also names the
+  rider's leg joints (`rider_joints`), because the model gained a joint under the same id.
 - **Air drag** acts on the rider's centre of mass: `F = ½·ρ·CdA·v·|v|`, ρ = 1.2 kg/m³,
   CdA = 0.6 m² (sim.py's value, an upright adult).
 
@@ -503,6 +546,7 @@ Rider and aids (scenario `[rider]`, `[rider.control]`, `[assist]`; these are the
 | `articulation.foot_offset_m` | 0.015 m | DEFAULT: each foot this far outside its pedal's centre (`articulated_lateral_v1`) |
 | `articulation.hip_adduction_max_nm`, `hip_rotation_max_nm`, `knee_rotation_max_nm`, `ankle_roll_max_nm` | 150, 50, 25, 35 N·m | ESTIMATE: per joint, from published strength of adults (`articulated_lateral_v1`; see the lateral rider) |
 | `articulation.pad_friction`, `pad_contact_time_s`, `pad_preload_n` | 0.3, 0.03 s, 20 N | DEFAULT: a leg on a side pad, and how hard it rests there (`articulated_lateral_v1` on a wheel with measured pads) |
+| `articulation.turn_crouch`, `turn_spread`, `turn_press_n_per_rad` | 0.5, 1.3, 100 N | ESTIMATE from the owner's report: per radian of a turn's lean, the knees' deeper bend (rad), the inside knee's spread from its pad (rad) and the outside leg's harder rest on its pad (`articulated_lateral_v1`) |
 | `cda_m2` | 0.6 m² | air drag |
 | `control.lean_kp`, `lean_kd` | 6000 N·m/rad, 900 N·m·s/rad | about 1.3 Hz, damping 0.6 about the ankles |
 | `control.ankle_max_nm` | 400 N·m | both legs |

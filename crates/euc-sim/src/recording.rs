@@ -98,15 +98,16 @@ pub struct ModelAids {
     pub steer_max_nm: f64,
     /// External roll stiffness on the articulated upper body, N·m/rad: contact feet do not hold
     /// the body to the shell, and the lateral legs are only as strong as a person's
-    /// (`articulated_contact_v1` and `articulated_lateral_v1`; absent for the other models).
+    /// (`articulated_contact_v1` and `articulated_lateral_v1`; absent for the other models). The
+    /// lateral rider's upper-body and shell springs lean wheel and rider together, as one machine.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub upper_body_roll_stiffness: f64,
     /// External roll damping on the articulated upper body, N·m·s/rad (as above).
     #[serde(default, skip_serializing_if = "is_zero")]
     pub upper_body_roll_damping: f64,
-    /// External yaw stiffness on the articulated upper body, N·m/rad: the lateral legs twist, so
-    /// the yaw aid turns the upper body with the shell (`articulated_lateral_v1` only; absent
-    /// for the other models).
+    /// External yaw stiffness on the articulated upper body, N·m/rad: the yaw aid turned the
+    /// upper body with the shell (`articulated_lateral_v1` before its hips turned the body with
+    /// the shell; absent since, and for the other models).
     #[serde(default, skip_serializing_if = "is_zero")]
     pub upper_body_steer_kp: f64,
     /// External yaw damping on the articulated upper body, N·m·s/rad (as above).
@@ -124,11 +125,10 @@ fn is_zero(value: &f64) -> bool {
 
 impl ModelAids {
     /// The aids a rider and its assist settings run with: the shell's roll spring and the yaw
-    /// aid for every model, for contact feet and lateral legs the same roll spring on the upper
-    /// body, and for lateral legs the same yaw aid on the upper body.
+    /// aid for every model, and for contact feet and lateral legs the same roll spring on the
+    /// upper body.
     pub fn of(rider: &euc_physics::Rider, assist: &euc_physics::Assist) -> Self {
         let upper = rider.model.upper_body_aids();
-        let lateral = rider.model.has_lateral_legs();
         let c = rider.control;
         Self {
             roll_stiffness: assist.roll_stiffness,
@@ -138,9 +138,9 @@ impl ModelAids {
             steer_max_nm: c.steer_max_nm,
             upper_body_roll_stiffness: if upper { assist.roll_stiffness } else { 0.0 },
             upper_body_roll_damping: if upper { assist.roll_damping } else { 0.0 },
-            upper_body_steer_kp: if lateral { c.steer_kp } else { 0.0 },
-            upper_body_steer_kd: if lateral { c.steer_kd } else { 0.0 },
-            upper_body_steer_max_nm: if lateral { c.steer_max_nm } else { 0.0 },
+            upper_body_steer_kp: 0.0,
+            upper_body_steer_kd: 0.0,
+            upper_body_steer_max_nm: 0.0,
         }
     }
 }
@@ -605,12 +605,17 @@ mod tests {
             let json = serde_json::to_value(aids).unwrap();
             // Absent unless the model has the aid, so welded and rigid contexts stay as before.
             assert_eq!(json.get("upper_body_roll_stiffness").is_some(), upper > 0.0, "{model:?}: {json}");
-            // Only the lateral legs twist, so only they have the yaw aid on the upper body.
-            let lateral = model == euc_physics::RiderModel::ArticulatedLateralV1;
-            assert_eq!(aids.upper_body_steer_kp, if lateral { rider.control.steer_kp } else { 0.0 });
-            assert_eq!(json.get("upper_body_steer_kd").is_some(), lateral, "{model:?}: {json}");
+            // The lateral hips turn the body with the shell: no model has a yaw aid on the body.
+            assert_eq!(aids.upper_body_steer_kp, 0.0);
+            assert!(json.get("upper_body_steer_kd").is_none(), "{model:?}: {json}");
             assert_eq!(serde_json::from_value::<ModelAids>(json).unwrap(), aids);
         }
+        // A recording of the lateral rider before then still reads.
+        let mut older = aids();
+        older["upper_body_steer_kp"] = 2000.0.into();
+        let json =
+            serde_json::json!({ "run_mode": "scenario", "rider_model": "articulated_lateral_v1", "model_aids": older });
+        assert_eq!(RecordingContext::from_json(&json).unwrap().model_aids.upper_body_steer_kp, 2000.0);
         let mut bad = aids();
         bad["upper_body_roll_damping"] = (-1.0).into();
         let json =

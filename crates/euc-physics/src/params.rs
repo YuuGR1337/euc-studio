@@ -345,7 +345,8 @@ impl RiderModel {
     }
 
     /// The external roll aid holds the upper body as well as the shell: contact feet do not hold
-    /// the body to the shell, and the lateral legs are only as strong as a person's.
+    /// the body to the shell, and the lateral legs are only as strong as a person's. The lateral
+    /// rider's two springs lean wheel and rider together, as one machine.
     pub const fn upper_body_aids(self) -> bool {
         matches!(self, Self::ArticulatedContactV1 | Self::ArticulatedLateralV1)
     }
@@ -397,6 +398,16 @@ pub struct Articulation {
     /// How hard each leg rests on its pad when riding straight, newtons
     /// ([`RiderModel::ArticulatedLateralV1`]).
     pub pad_preload_n: f64,
+    /// How much deeper the knees bend in a turn, radians of knee flexion per radian of the
+    /// turn's lean ([`RiderModel::ArticulatedLateralV1`]; ESTIMATE from the owner's report).
+    pub turn_crouch: f64,
+    /// How far the inside knee swings out from its pad in a turn, radians per radian of the
+    /// turn's lean, as far as the knee swings ([`RiderModel::ArticulatedLateralV1`]; ESTIMATE
+    /// from the owner's report).
+    pub turn_spread: f64,
+    /// How much harder the outside leg rests on its pad in a turn, newtons per radian of the
+    /// turn's lean ([`RiderModel::ArticulatedLateralV1`]; ESTIMATE from the owner's report).
+    pub turn_press_n_per_rad: f64,
 }
 
 impl Default for Articulation {
@@ -416,6 +427,9 @@ impl Default for Articulation {
             pad_friction: 0.3,
             pad_contact_time_s: 0.03,
             pad_preload_n: 20.0,
+            turn_crouch: 0.5,
+            turn_spread: 1.3,
+            turn_press_n_per_rad: 100.0,
         }
     }
 }
@@ -436,17 +450,28 @@ impl Articulation {
             ("pad_preload_n", self.pad_preload_n),
         ] {
             if !value.is_finite() || value <= 0.0 {
-                return Err(ParamError(format!("rideself.{name} must be finite and positive")));
+                return Err(ParamError(format!("rider.articulation.{name} must be finite and positive")));
+            }
+        }
+        for (name, value) in [
+            ("turn_crouch", self.turn_crouch),
+            ("turn_spread", self.turn_spread),
+            ("turn_press_n_per_rad", self.turn_press_n_per_rad),
+        ] {
+            if !value.is_finite() || value < 0.0 {
+                return Err(ParamError(format!("rider.articulation.{name} must be finite and not negative")));
             }
         }
         let offset = self.foot_offset_m;
         if !offset.is_finite() || offset.abs() > MAX_FOOT_OFFSET_M {
-            return Err(ParamError(format!("rideself.foot_offset_m must be finite and within ±{MAX_FOOT_OFFSET_M} m")));
+            return Err(ParamError(format!(
+                "rider.articulation.foot_offset_m must be finite and within ±{MAX_FOOT_OFFSET_M} m"
+            )));
         }
         let soft_knee = self.soft_knee_rad;
         if !soft_knee.is_finite() || !(0.0..=crate::CROUCH_MAX_RAD).contains(&soft_knee) {
             return Err(ParamError(format!(
-                "rideself.soft_knee_rad must be finite and in [0, {}]",
+                "rider.articulation.soft_knee_rad must be finite and in [0, {}]",
                 crate::CROUCH_MAX_RAD
             )));
         }
@@ -455,7 +480,10 @@ impl Articulation {
             [("sole_contact_time_s", self.sole_contact_time_s), ("pad_contact_time_s", self.pad_contact_time_s)]
         {
             if !time.is_finite() || time < 2.0 * crate::TIMESTEP_S {
-                return Err(ParamError(format!("rideself.{name} must be at least {} s", 2.0 * crate::TIMESTEP_S)));
+                return Err(ParamError(format!(
+                    "rider.articulation.{name} must be at least {} s",
+                    2.0 * crate::TIMESTEP_S
+                )));
             }
         }
         Ok(())

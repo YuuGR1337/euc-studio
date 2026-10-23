@@ -98,6 +98,7 @@ header. `euc sim run --rider-model ...` overrides the scenario's model for one r
 | `articulation.foot_offset_m` | 0.015 | How far each foot stands outside its pedal's centre (m), for `articulated_lateral_v1`. |
 | `articulation.hip_adduction_max_nm`, `articulation.hip_rotation_max_nm`, `articulation.knee_rotation_max_nm`, `articulation.ankle_roll_max_nm` | 150, 50, 25, 35 | Strongest hip ab/adduction, hip rotation, tibial rotation and ankle roll per joint (N·m), for `articulated_lateral_v1`. |
 | `articulation.pad_friction`, `articulation.pad_contact_time_s`, `articulation.pad_preload_n` | 0.3, 0.03, 20 | A leg on a side pad: friction, contact softness (s), and how hard it rests there (N), for `articulated_lateral_v1`. |
+| `articulation.turn_crouch`, `articulation.turn_spread`, `articulation.turn_press_n_per_rad` | 0.5, 1.3, 100 | Per radian of a turn's lean: how much deeper the knees bend (rad), how far the inside knee swings out from its pad (rad) and how much harder the outside leg rests on its pad (N), for `articulated_lateral_v1`. |
 | `control.lean_kp`, `control.lean_kd` | 6000, 900 | Ankle stiffness (N·m/rad) and damping (N·m·s/rad) about the lean. |
 | `control.ankle_max_nm` | 400 | Strongest ankle torque, both legs. Contact feet carry less: about 70 N·m backward and 120 N·m forward for the default rider, while the centre of pressure stays under the soles. |
 | `control.speed_kp`, `control.speed_ki` | 0.6, 0.03 | Acceleration asked per m/s of speed error, and its integral. |
