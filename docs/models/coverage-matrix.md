@@ -4,6 +4,8 @@ Feature completion and physical validity are separate claims.
 A scenario verdict applies to its inputs, duration, firmware, timing, and model assumptions.
 Unknown behavior must remain visible. It must not become a successful hardware claim.
 
+Updated 2026-10-23 for the rows marked below; the other rows keep their 2026-10-21 state.
+
 ## Evidence states
 
 - **Implemented:** Source code supplies the behavior.
@@ -19,7 +21,7 @@ Build and lint success do not establish physical accuracy or runtime correctness
 
 | Area | Current implementation | Missing evidence or behavior | Required closure |
 |---|---|---|---|
-| Battery depletion | Equivalent circuit and charge integration; explicit model-validity boundary in completion branch | Real near-empty discharge curve and pack protection behavior | Verify charge bounds and compare measured loaded voltage/current over charge and temperature |
+| Battery depletion | Equivalent circuit and charge integration; a model-validity boundary halts the run ([battery validity](battery-validity.md)) | Real near-empty discharge curve and pack protection behavior | Verify charge bounds and compare measured loaded voltage/current over charge and temperature |
 | Battery limits | Per-pack imbalance, weak-cell and resistance faults | Cell resistance versus charge, temperature and age; actual pack switching | Establish cell/pack data before introducing calibrated limits |
 | Charge indication | Model charge telemetry | Agreement with the wheel app's charge estimate | Keep model charge distinct and compare both against measured discharge |
 | Energy balance | Electrical motor/inverter energy equations and source checks | Battery usable-energy limits and coupled long-run energy audit | Account for electrical input, mechanical work, heat and stored energy under stated tolerances |
@@ -28,17 +30,17 @@ Build and lint success do not establish physical accuracy or runtime correctness
 | Temperature | Lumped thermal nodes | Measured cooling, temperature-dependent winding resistance and magnet flux | Compare measured temperature response and model parameter sensitivity |
 | Inverter and supply | Averaged PWM, dead time, diode and conduction losses | DC-link capacitor, switching transients, gate-driver failure and shorted MOSFET behavior | Implement required fault families or label them outside supported claims |
 | BMS communication | Pack telemetry and silent/garbled reply faults | Independent failures of individual BMS boards and power isolation | Separate communication correctness from actual pack power availability |
-| Tire and terrain | Contact, friction, rolling resistance and heightfield | Measured traction, wet/loose surfaces and impact/contact calibration | Check geometric agreement and load-dependent traction against measurements |
+| Tire and terrain | A 48-capsule tyre ring; contact, friction, rolling resistance; terrain strip (slope, bump, pothole, curb) and the city's height field and solids (2026-10-23) | Measured traction, wet/loose surfaces and impact/contact calibration | Check geometric agreement and load-dependent traction against measurements |
 | Suspension | Spring/damper, travel and optional ratio curve | Actual rocker curve, stroke, preload, damping and bump-stop behavior | Obtain geometry and sag/travel measurements; preserve estimate labels |
-| Rider | Rigid and articulated bodies, ankle control, lean-to-turn, fall release, and bounded command/feedback delays | Independent foot contact, calibrated reaction delays, and behavior diversity | Run a documented rider parameter range; avoid one ideal controller as the only evidence |
+| Rider | Rigid and articulated bodies (articulated by default), ankle control, lean-to-turn, fall release, bounded command/feedback delays; opt-in contact feet and lateral rider with legs on the side pads (2026-10-23) | Balance without external aids, contact feet by default, calibrated reaction delays, and behavior diversity | Run a documented rider parameter range; avoid one ideal controller as the only evidence |
 | Hill behavior | Gravity and grade with loaded electrical plant | Independent torque/power balance across slope, speed, charge and mass | Compare required wheel force with actual torque and acceleration; report model validity throughout |
 | Cut-offs | Compat behavior and intentional clean changes | Borderline pothole/overlean cases and unmeasured motor sensitivity | Identify the first detector; preserve protections until controlled evidence supports a change |
-| CPU timing | Fixed CPI and exception overhead with own/reference core support | Instruction-level flash/bus timing and hardware interrupt-load measurement | Preserve timing configuration and distinguish simulated cycle estimates from hardware measurements |
+| CPU timing | Fixed CPI and exception overhead with own/reference core support; a selectable per-instruction flash timing model (2026-10-23) | Bus contention and hardware interrupt-load measurement | Preserve timing configuration and distinguish simulated cycle estimates from hardware measurements |
 | Peripheral completeness | Modeled MCU/device interfaces plus fallback behavior | Full behavior of unmapped registers and unsupported devices | Review all nonfatal blockers and read-back fallbacks before making support claims |
 | Numerical robustness | Deterministic clock, finite steps and parameter validation | Systematic extreme/nonfinite inputs and integration-step convergence | Use explicit validity failures and record time-step sensitivity |
 | Scenario coverage | Shipped scenario library and expected-result checks | Boundary combinations, longer durations and unsupported failure families | Define coverage by parameter/fault dimensions, not scenario count alone |
-| Scenario duration | Completion branch stops and marks the declared end | Runtime confirmation after integration | Check final time, event/result delivery and replay behavior without judging later untested time |
-| Workflow completeness | Ride, Tune, Compare, recordings, manual controls, and generated maps in the completion branch | Integrated desktop runtime checks, error/cancel/restart paths | Trace each visible control to real backend behavior and record unsupported features |
+| Scenario duration | The run stops and marks the declared end | Runtime confirmation after integration | Check final time, event/result delivery and replay behavior without judging later untested time |
+| Workflow completeness | Ride, Tune, Compare, Recordings, manual controls, and Free Ride in the city (2026-10-23) | Integrated desktop runtime checks, error/cancel/restart paths | Trace each visible control to real backend behavior and record unsupported features |
 | Recording integrity | .eucrec format, bounded capture/import, and recorded telemetry, body, event, BLE, and output tracks | Full lifecycle and malformed-file runtime evidence | Identify full versus partial capture; preserve data, limits and source identity |
 | Long runs and load | Bounded queues, histories and recording limits | Sustained connected-radio use, cancellation under load and memory trends | Record drops, latency, memory and recovery under declared conditions |
 | Distribution | Local Mac package work bundles the physics runtime | Integrated launch, clean-machine installation, public signing/notarization | Verify the selected artifact and keep local signing separate from public-release status |
@@ -64,8 +66,9 @@ Executable verification must cover the matrix before a broader completion or har
 ## Human model and free ride
 
 The [detailed plan](human-and-free-ride.md) separates manual controls, generated terrain, and human model upgrades.
-The completion branch implements keyboard, slider, and standard gamepad controls on a finite generated map.
-The native engine controls the map and rider. Input watchdogs and explicit arming guard manual control.
-Recordings can preserve the authoritative map and external aid parameters.
-These are source implementation claims. Integrated runtime checks remain pending.
-Articulated knees exist. Independent foot contact and measured human response remain open.
+Update, 2026-10-23: Free Ride is a play mode in the generated city, with keyboard and standard gamepad controls
+([Free Ride README](../../app/src/workspaces/freeRide/README.md)). The native engine controls the world and the
+rider. An input watchdog makes input older than 250 ms neutral; there is no arming step.
+Recordings preserve the world and the external aid parameters.
+Articulated knees exist; contact feet and the lateral rider are opt-in. Balance without external aids and measured
+human response remain open.

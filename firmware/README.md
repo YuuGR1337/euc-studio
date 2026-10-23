@@ -7,7 +7,9 @@ A clean C11 rewrite of the Begode Extreme controller firmware. One CMake tree bu
 - **host**: unit tests, and a software-in-the-loop (SIL) shared library that the simulator loads in place
   of the emulated image.
 
-Status: milestone M1, steps F1 to F5. Core has the BLE protocol (`core/protocol/`, described in
+Status (2026-10-23): milestone M5. Both profiles boot and run every shipped scenario in the simulator, as an
+image on the emulated MCU and as the SIL library; open items are in [project status](../docs/project-status.md).
+Core has the BLE protocol (`core/protocol/`, described in
 [docs/protocol/begode.md](../docs/protocol/begode.md), tested against a real capture), the balance task:
 attitude estimation (`core/attitude/`), balance law, tiltbacks, cut-offs and recovery (`core/balance/`), with
 our own fdlibm-derived math (`core/math/`) so host and target compute the same bits, the motor drive
@@ -19,8 +21,8 @@ and the services around them: settings and odometer with the flash journal and i
 their formulas at build time (`tools/gen_motor_tables.py`). `ports/stm32f1/` drives the MCU at register level
 and `apps/begode-extreme/` wires everything into the stock execution contexts, so the image boots in the
 simulator: it sets the power latch, answers `V` and `N`, sends telemetry and handles `!@`, `cy` and `+-`
-(`euc sim run begode-extreme --firmware build/target-compat/euc-fw-begode-extreme.bin`). The LED strip driver
-runs, but the stock strip patterns are not reproduced yet: the strip stays dark. It is not meant for a wheel:
+(`euc sim run begode-extreme --firmware build/target-compat/euc-fw-begode-extreme.bin`). The LED strip shows the
+stock patterns (`core/lights/strip.c`), rendered in the main loop as stock does. It is not meant for a wheel:
 nothing in this tree is flashed before the gates in the project plan (sim dry-run, stock-first flash, SWD
 backup) are in place.
 
@@ -63,7 +65,16 @@ cmake --workflow --preset host-sil        # build/host-sil/libeuc_sil.{dylib,so}
 | `host-sil` | SIL shared library + tests | RelWithDebInfo, runtime quirk profile; the app and core built for the host, the storage pages aliased to host arrays |
 
 Every build uses `-ffp-contract=off` (no fused multiply-add), so host and target round floats the same way,
-and `-Wall -Wextra -Wpedantic -Wconversion -Wshadow -Wdouble-promotion -Werror` plus a few more.
+and `-Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion -Wshadow -Wdouble-promotion -Werror` plus a few more
+(`cmake/compile_options.cmake`).
+
+Linux CI builds the host presets with GCC, which reports `-Wsign-conversion` cases that Apple clang accepts. On
+macOS, build the host tests with GCC as well before a pull request (Homebrew's `gcc` formula installs `gcc-16`):
+
+```sh
+cmake --preset host-debug -B build/host-gcc -DCMAKE_C_COMPILER=gcc-16
+cmake --build build/host-gcc && ctest --test-dir build/host-gcc
+```
 
 Target presets enable link-time optimization to reduce interrupt cost at 72 MHz.
 Without it, the CPI 2.0 model exposes missed RTC ticks and main-loop starvation in the 12 kHz mode.

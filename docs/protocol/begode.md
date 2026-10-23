@@ -20,7 +20,8 @@ Facts without a tag are confirmed.
 
 > **Safety.** Three two-byte sequences stop the motor and change the wheel: `+` `-`, `c` `y` and `!` `@`
 > (see [Safety classes](#safety-classes)). An app must never send them, and a rider must never be on the wheel
-> when they are sent. EUC Studio's BLE layer refuses to send these bytes at all.
+> when they are sent. EUC Studio's BLE layer refuses to send these bytes, except `!` `@` from the gated flasher
+> ([flasher](../spec/flasher.md)), which only ever runs against a simulated wheel today.
 >
 > **No authentication.** The BLE module accepts any central without pairing, and the firmware trusts every
 > byte. Anyone in radio range can send commands, also while someone rides. The stock firmware applies several
@@ -378,7 +379,8 @@ reply instead of waiting.
 **Debug text.** Our firmware sends no debug text in either profile: no power-on messages, no Chinese
 speed-alarm messages, no `k` dump (quirk `DEBUG_PRINTF`, compat 0). The parser still reports these events to the
 rest of the firmware (for example to beep), but they put no bytes on the UART. The only text our firmware sends is
-the `V` and `N` identity replies. When our image runs in lock-step with the stock one, the comparator checks the
+the `V` and `N` identity replies, and in the clean profile the `SERVICE:CONFIRM`, `SERVICE:OK` and
+`SERVICE:DENIED` replies to the service sequences. When our image runs in lock-step with the stock one, the comparator checks the
 frames and the `V` / `N` replies byte for byte, and marks any other stock text as "debug text, ignored".
 
 ## Open questions

@@ -1,0 +1,84 @@
+name: Real-wheel data
+description: Share measurements or numbers from a real wheel, so the simulator can be checked against it.
+labels: ["area: calibration"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Real measurements make the simulator honest. Thank you for sharing them.
+
+        **Privacy first.** This issue is public and stays public. Share derived numbers (a speed, a current, a
+        voltage, a period, a distance, a temperature), not raw files that show where or when you ride.
+        - Never attach GPS tracks, map screenshots, raw app exports or ride logs that contain coordinates.
+        - Never attach photos or videos that show people, faces, number plates, house numbers or street signs,
+          unless everyone in them agreed to share them.
+        - Remove device serial numbers and account names you do not want to publish.
+
+        Do not attach vendor firmware images, decompiled code or analysis databases. Never flash firmware from this
+        repository to produce data, and read [SAFETY.md](https://github.com/tarikbc/euc-studio/blob/main/SAFETY.md)
+        before any bench work.
+  - type: input
+    id: wheel
+    attributes:
+      label: Wheel
+      description: Brand and model.
+      placeholder: Begode Extreme
+    validations:
+      required: true
+  - type: input
+    id: firmware
+    attributes:
+      label: Firmware version
+      description: As the app or the wheel reports it, if you know it.
+      placeholder: GW1825007
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Kind of data
+      multiple: true
+      options:
+        - Numbers derived from a ride log (speeds, currents, voltages, PWM, temperatures)
+        - Bench measurement (resistance, inductance, pack voltage under load)
+        - Geometry or mass of a part
+        - Timing from a video (light patterns, beeps, display)
+        - BLE capture without location data
+        - Riding report (how the wheel behaves in a situation)
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: numbers
+    attributes:
+      label: The numbers
+      description: The values with their units, and what each one means. A small table is ideal.
+      placeholder: |
+        | Situation | Speed | Battery voltage | Battery current | PWM shown by the app |
+        | --- | --- | --- | --- | --- |
+        | Steady on a level road | 30 km/h | ... V | ... A | ... % |
+    validations:
+      required: true
+  - type: textarea
+    id: method
+    attributes:
+      label: How you measured
+      description: The app or instrument, the sample rate, and how you derived each number.
+    validations:
+      required: true
+  - type: textarea
+    id: conditions
+    attributes:
+      label: Conditions
+      description: |
+        Charge level, temperature, tyre pressure, road (level, slope in %), settings (pedal mode, tiltback speed).
+        A rounded total load (rider and gear) helps the physics; share it only if you want it public.
+  - type: checkboxes
+    id: consent
+    attributes:
+      label: Privacy and consent
+      options:
+        - label: Nothing I share here contains GPS coordinates, map tracks or addresses, or shows where I or others ride or live.
+          required: true
+        - label: Everyone who appears in, or whose data is in, what I share agreed to its publication.
+          required: true
+        - label: I share this under the repository's license, and it contains no vendor firmware or decompiled code.
+          required: true

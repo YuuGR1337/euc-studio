@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a safety problem privately
+    url: https://github.com/tarikbc/euc-studio/security/advisories/new
+    about: A behavior of the firmware, the simulator or the flasher that could hurt a rider. Read SAFETY.md first.
+  - name: Safety rules (SAFETY.md)
+    url: https://github.com/tarikbc/euc-studio/blob/main/SAFETY.md
+    about: Read this before you build, flash or ride anything from this repository.
+  - name: Roadmap board
+    url: https://github.com/users/tarikbc/projects/3
+    about: Open work by milestone. Comment on an existing issue before you open a new one.

@@ -119,3 +119,12 @@ begode-extreme
   `ble_led` have their own materials, so the app can make them
   emissive. `profiles/begode-extreme/lights.toml` places the LED rings inside the sleeves.
 - **Colours.** Each part has its own PBR material; ambient occlusion is baked into the vertex colours.
+
+## Changing the model
+
+No script in this repository builds these files: they are edited as glTF and committed as they are.
+To change a part, edit all three levels of detail with a glTF editor, keep the node names and axes
+above, keep the measurements in `profiles/begode-extreme/geometry.toml` in step, and mark a value
+nobody measured as an ESTIMATE in `docs/hardware/geometry.md`. The local macOS package refuses
+untracked model files and checks the model hashes against the frontend build. The open model
+follow-ups are on the [roadmap board](https://github.com/users/tarikbc/projects/3).

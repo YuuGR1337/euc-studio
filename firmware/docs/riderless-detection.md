@@ -57,6 +57,9 @@ the rule checks the speed drop over the hold instead.
 
 ## Results (clean 4054b4d0, every shipped scenario, quantum sizes 4000, 3000 and 2000)
 
+These runs date from 2026-10-16: the rigid rider on the flat floor, before the later clean cut-off changes, the
+articulated default rider and the scenarios on the city world.
+
 | Scenario | Triggers | Speed tiltback max | Notes |
 |---|---|---|---|
 | rider-steps-off-15kmh | 1 in each run, at 16.00 s (1.0 s after the step-off) | 2.9 deg | falls at 17.72 s at 10.7-11.6 km/h |

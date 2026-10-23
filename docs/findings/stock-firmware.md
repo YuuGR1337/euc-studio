@@ -10,7 +10,7 @@ Neither a short comparison window nor the older measurements establish complete 
 
 **Timing version.** The detailed measurements below use the former CPI 1.25 model, without exception overhead.
 The current default is CPI 2.0 with exception costs.
-See [current timing results](../models/cpu-timing.md#scenario-validation) for the new scenario checks.
+See [current timing results](../models/cpu-timing.md#previous-scenario-validation) for the new scenario checks.
 To reproduce the older timing, add `--cpi 1.25 --no-exception-timing` with the firmware builds listed below.
 
 What the simulator shows about the stock Begode Extreme controller firmware (build GW1825007), for
@@ -99,7 +99,7 @@ fault and alert 0x40.
 
 **Current timing check.** Clean's full-battery outcome is now borderline across quantum sizes.
 The 30% and PWM-disabled cases still hold on clean at all three sizes.
-See [CPU timing results](../models/cpu-timing.md#scenario-validation). The detailed numbers below use the historical timing.
+See [CPU timing results](../models/cpu-timing.md#previous-scenario-validation). The detailed numbers below use the historical timing.
 
 **Behaviour.** A rider who keeps accelerating past what the motor can give, and ignores the tiltback,
 meets the voltage limit. The back-EMF and the winding's reactance use up the headroom, the q-current
@@ -245,7 +245,7 @@ before the suspension, the 2 cm pothole turned the shell at up to 1360 °/s and 
 
 **Status.** PRELIMINARY. The gyro range and the slow recovery are the firmware's own. How fast a real
 pothole turns the shell depends on the suspension's stroke and linkage (estimates) and the rider's
-knees (not modelled).
+knees (the rigid rider has none; the articulated default has knees, but no impact study used it yet).
 
 **Clean profile.** Runs the gyro at ±2000 °/s and re-anchors faster after a saturated sample
 (`GYRO_500DPS_CLIP` off): its attitude error is 0.7° (3 cm) and 0.5° (5 cm). In the 5 cm pothole it

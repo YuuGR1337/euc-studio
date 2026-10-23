@@ -1,5 +1,10 @@
 # Human model and free ride: design and implementation plan
 
+> **Historical plan (2026-10-16).** Kept for its decisions and evidence. Free Ride has since become a play mode in
+> the generated city, without arming, sliders, a rider choice or the map editor, and the opt-in lateral rider adds
+> lateral leg joints. The current behavior is in the [Free Ride README](../../app/src/workspaces/freeRide/README.md),
+> [Free Ride design](../design/free-ride.md), [body physics](body.md) and [project status](../project-status.md).
+
 Status: implementation audit, 2026-10-16, completion worktree.
 Update 2026-10-22: `articulated_sagittal_v1` is now the default rider for scenarios and the Ride workspace.
 Independent foot contact (the first H4 step) is the opt-in model `articulated_contact_v1`; `articulated_sagittal_v1` keeps welded feet. Free Ride starts on `articulated_sagittal_v1` too. The rigid baseline stays selectable.

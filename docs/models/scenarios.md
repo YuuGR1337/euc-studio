@@ -2,7 +2,7 @@
 
 **Timing version.** The detailed measurements below use the former CPI 1.25 model, without exception overhead.
 The current default is CPI 2.0 with exception costs. Clean's full-battery overlean result is now borderline.
-See [current timing results](cpu-timing.md#scenario-validation) for the new scenario checks.
+See [current timing results](cpu-timing.md#previous-scenario-validation) for the new scenario checks.
 To reproduce the older timing, add `--cpi 1.25 --no-exception-timing` with the firmware builds listed below.
 
 The situations EUC riders fear most, ridden in the simulator on the stock Begode Extreme firmware
@@ -46,7 +46,8 @@ the default and the opt-in contact-feet model on every scenario.
 (`--max-quantum` 4000, 3000 and 2000). Near a limit, a fall can depend on the emulator's timing; a
 verdict that changes between the three sizes is marked **borderline**. Every shipped scenario keeps its
 verdict at all three sizes on all three firmwares; the one borderline result is clean on a 5 cm
-pothole (below).
+pothole (below). This held on the flat floor; on the city, `rider-steps-off-15kmh` is borderline too
+([City world](#city-world-w2-2026-10-23)).
 
 | Scenario | Settings | Stock outcome | Key numbers |
 |---|---|---|---|
@@ -324,7 +325,8 @@ cut-offs should treat a deep, recovering dip is an open item in
 
 ## Preliminary: impacts
 
-The body has the rear suspension, but the rider has no knees, the suspension's stroke and linkage are
+The body has the rear suspension, but the rigid rider has no knees (the articulated default bends its knees, but
+no impact study used it yet), the suspension's stroke and linkage are
 estimates, and the tire is a soft contact rather than a carcass. Impact results stay PRELIMINARY.
 Depths at 20 km/h with steep edges, on stock: 2 cm dips the shell to −8°, 3 cm to −27°, 5 cm to −42°,
 with the suspension compressed 35.5, 42.5 and 43.1 mm of its 66 mm; all three ride through, without a
@@ -359,9 +361,11 @@ cut. On the rigid body, before the suspension, 2 cm dipped past 45° and 3 and 5
 Scenarios can ride on terrain (`crates/euc-physics/src/terrain.rs`): a `[terrain]` table with a
 constant grade (`slope_pct`, from `slope_start_m`, built up over `slope_ramp_m`, 10 m by default, so
 the wheel meets no kink) and `[[terrain.feature]]` bumps (a smooth hump) and potholes (steep walls),
-each with `at_m`, `length_m` and `height_m` or `depth_m`. Flat ground is the infinite floor plane;
+each with `at_m`, `length_m` and `height_m` or `depth_m`, and curbs (a box with a sharp edge at `at_m`,
+`height_m`, at any `yaw_deg`). Flat ground is the infinite floor plane;
 anything else is a heightfield strip sampled every 2 cm along the path, from 5 m behind the start to
-`length_m`.
+`length_m`. A `[world]` table rides the generated city instead ([City world](#city-world-w2-2026-10-23),
+[writing scenarios](../scenarios/writing-scenarios.md)).
 
 ## Not modeled yet
 

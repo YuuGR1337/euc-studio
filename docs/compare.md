@@ -6,7 +6,7 @@ every difference comes from the firmware. It reports where the runs first part w
 they get.
 
 ```sh
-cargo run --release -p euc-cli --features unicorn -- sim compare \
+cargo run --release -p euc-cli -- sim compare \
     --scenario scenarios/ride-20kmh-stop.toml --a stock --b compat \
     [--settings neutral] [--tolerance scenarios/compare/compat-vs-stock.toml] [--out report.json]
 ```
@@ -20,7 +20,8 @@ scenario checks that read firmware variables work on our builds too.
 switched at run time: `--a compat --b ours-sil:compat`, or `--a ours-sil:clean --b ours-sil:clean-NO_WATCHDOG`
 for two quirk sets. `--quirks` gives the quirks of every SIL side that does not name its own.
 `--settings` overrides the scenario's preset for both runs. `--json` prints the report as JSON; `--out`
-writes the same JSON to a file and still prints the table.
+writes the same JSON to a file and still prints the table. `--cpu`, `--timing`, `--rider-model`, `--sample-hz` and
+`--max-quantum` set the same options for both runs as in `euc sim run`; `euc sim compare --help` lists them.
 
 In the studio, the Compare workspace (⌘3) runs the same comparison: both runs on one thread at
 100 samples per simulated second, the same module (`euc_sim::compare`) and
@@ -32,9 +33,10 @@ run takes them.
 
 ## What is compared
 
-- **Telemetry channels**: the 17 channels of `euc-telemetry` (speed, wheel speed, phase currents, q
-  current, torque, battery, charge, pitch, roll, temperatures, distance), every sample (100 per
-  simulated second by default). Samples of the two runs sit at the same simulated instants within a
+- **Telemetry channels**: the 22 channels of `euc-telemetry` (speed, wheel speed, PWM and modulation, phase
+  currents, q current, torque, battery voltage and current, charge, pitch, roll, temperatures, distance, ISR load,
+  the rider's lean, the target speed, suspension and shock travel), every sample (100 per simulated second by
+  default). A channel that a run states it does not measure is left out. Samples of the two runs sit at the same simulated instants within a
   few cycles (a sample ends at the first quantum boundary after its period; at most 1 ms is accepted).
 - **Firmware variables** by name. The stock build's names come from `profiles/<wheel>/stockmap.toml`;
   our builds' names come from `profiles/<wheel>/probes.toml` (ELF symbol and offset, resolved against the

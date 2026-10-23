@@ -259,11 +259,13 @@ of the battery case.
   block 60 mm; outer faces up to |y| 162 mm, inside the deployed pedals (|y| 247 mm). The rounding
   takes 2-5 mm off the outline's corners (x -179 to +179 mm, z 56 to 352 mm, inside the photo's
   +-6 mm).
-- **Calf contact faces (for a later leg-pad contact model).** The outer faces where the rider's
+- **Calf contact faces (leg-pad contact).** The outer faces where the rider's
   legs can rest are listed in `geometry.toml` `[pad_covers] contact_faces` (from the element
   outlines above): the lettering block's top, the upper arm, the end block's top, the round
   block's top and the lower arm.
-- **Not physics.** The covers have no collision solid and no mass in `plant.toml`.
+- **Physics.** The drawn covers have no mass in `plant.toml`. Since 2026-10-22 the physics builds one contact box
+  per contact face, from the packs out to the face (`pad_<face>_<side>`); only the lateral rider's legs
+  (`articulated_lateral_v1`) touch them ([body.md](../models/body.md)).
 
 ## Rolling radius and the electrical model
 
@@ -332,13 +334,13 @@ height does not change (same thickness and pin), so `pedal_below_axle_m` stays.
 
 ## Collision shapes
 
-`[collision]` proposes primitives in the MJCF frame:
+`[collision]` gives primitives in the MJCF frame; the physics uses them:
 
 - **Tire.** A torus with a 58 mm tube at 171.6 mm from the axle has the right outer radius and the
   real crown curvature; it stays within 1.5 mm of the tread envelope up to +-37 mm off the centre
   plane, about 40 degrees of lean. MuJoCo has no torus geom: a ring of 48 capsules (0.37 mm ripple per
-  segment) or the `mujoco.sdf.torus` plugin. The current ellipsoid has the right outer radius but a
-  7 mm crown radius instead of 58 mm, which matters only once the model leans in turns. A second
+  segment) or the `mujoco.sdf.torus` plugin. The physics uses the ring of 48 capsules (`tire_torus`);
+  an earlier ellipsoid had the right outer radius but a 7 mm crown radius instead of 58 mm. A second
   torus (40.7 mm tube) keeps the true width with a sharper crown.
 - **Packs.** One box per side over both packs and the slider channel, bottom at the lip (-41.5 mm).
 - **Top and front.** A box over the seat and the top frame; a box over the handle, headlight and

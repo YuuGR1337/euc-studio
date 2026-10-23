@@ -1,6 +1,9 @@
 # Generated map implementation
 
 Status: implemented and integrated, 2026-10-16.
+Update, 2026-10-23: the city world ([world.md](world.md)) replaced this 32 m map as Free Ride's ground. The studio no
+longer offers the test pad; recordings made on it still play back on their saved map. The "Parent integration"
+section below records the plan of its date.
 Scope: native height-grid generation, collision geometry, view sampling, and recording integration.
 Simulation geometry acceptance is recorded below. It does not establish measured terrain or rider behavior.
 

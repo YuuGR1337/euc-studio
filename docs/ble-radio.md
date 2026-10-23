@@ -6,7 +6,7 @@ capture, exactly as it connects to a real wheel. No app change, no emulator in b
 
 ```sh
 # The simulated wheel (stock firmware on the emulated MCU), live:
-cargo run --release -p euc-cli --features unicorn -- sim serve begode-extreme --ble [--name GotWay_71105]
+cargo run --release -p euc-cli -- sim serve begode-extreme --ble [--name GotWay_71105]
 
 # A capture played back as a wheel, with the firmware's answers to writes:
 cargo run --release -p euc-cli -- replay tests/data/begode-extreme/idle-2026-10-15.hex --ble [--loop] [--from 5]
@@ -263,11 +263,11 @@ Bluetooth usage text, so macOS also accepts it when `euc` itself is the app that
 
 ## Device test checklist
 
-For the over-the-air test with EUC Remote on an Apple Watch. Use a capture with known values, e.g. EUC Remote's
-`corpus/begode/extreme/idle-87pct.hex` (129.7 V, 0 km/h, odometer 1,468,670 m).
+For the over-the-air test with EUC Remote on an Apple Watch. Use a capture with known values, e.g.
+`tests/data/begode-extreme/idle-2026-10-15.hex` (129.7 V, 0 km/h, odometer 1,468,670 m).
 
 1. Start the replay and keep the log:
-   `cargo run --release -p euc-cli -- replay idle-87pct.hex --ble --loop | tee radio.log`.
+   `cargo run --release -p euc-cli -- replay tests/data/begode-extreme/idle-2026-10-15.hex --ble --loop | tee radio.log`.
    Wait for `ble ready`.
 2. On the watch, scan: `GotWay_EMU` appears. Connect. Expect `ble subscribe ... char=FFE1 centrals=1`.
 3. Right after it, expect `ble write ... char=FFE1 len=1 data=N`, then

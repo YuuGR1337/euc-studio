@@ -7,8 +7,8 @@ to its BLE module comes out as notifications; everything a client writes goes in
 BLE UART, as the module would deliver it.
 
 ```sh
-cargo run --release -p euc-cli --features unicorn -- sim serve begode-extreme --ble-bridge tcp://127.0.0.1:7720
-cargo run --release -p euc-cli --features unicorn -- sim bridge-test          # in another terminal
+cargo run --release -p euc-cli -- sim serve begode-extreme --ble-bridge tcp://127.0.0.1:7720
+cargo run --release -p euc-cli -- sim bridge-test          # in another terminal
 ```
 
 The simulated wheel is the full engine: the stock firmware on the emulated MCU, the motor and battery,

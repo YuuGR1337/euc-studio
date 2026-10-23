@@ -108,7 +108,8 @@ Details:
   passes fit in a tick, and a mode-1 pass costs about 1.8 times a mode-0 pass. On the owner's wheel,
   in LED mode 1, it is about 2.1 s (video). The simulator uses CPI 2.0 and exception overhead.
   Before the RTC divider reload correction, mode 1 gave a mean period of 2.235 s over nine measured cycles.
-  That measurement describes the previous RTC model. The corrected model needs a new cadence measurement.
+  That measurement describes the previous RTC model. The corrected model gives 2.234 s at CPI 2.0 (fixed timing)
+  and 2.515 s with the flash timing ([CPU timing](../models/cpu-timing.md#validation-against-the-owners-wheel)).
   The earlier CPI 1.25 model gave 0.49 s in mode 0 and 0.92 s in mode 1.
   A separate flash-model prototype gave about 2.3 s in mode 1 and 1.1 s in mode 0.
   The first 0.49 s comparison used mode 0 with blank settings. See

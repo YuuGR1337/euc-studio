@@ -19,7 +19,7 @@ cargo run --release -p euc-cli -- sim run --scenario scenarios/ride-20kmh-stop.t
 `--record` needs `--scenario` (a run without one has no live plant to sample). `--sample-hz` sets the
 samples per simulated second (100 by default). The studio captures each new run automatically when no unsaved capture exists.
 Use the Recordings button to save or open a file (see [the studio](#in-the-studio)). In Python, `Session.save(path)` writes the
-run so far ([python/README.md](../python/README.md)).
+run so far ([Python API](python.md)).
 
 Before this format, `--record` wrote an `.eucr` file (a JSON header, then raw telemetry batches and the
 events at the end). Nothing read that format, so it was replaced, not kept: `--record` now writes
@@ -67,7 +67,8 @@ Open **Recordings** from the side rail or command palette.
   Play, pause, step, seek, and speed operate on the saved samples.
   **Return to simulation** restores the paused live run.
 - The reader restores body poses, events, phone frames, and board outputs.
-  A saved Free Ride map supplies playback ground.
+  A run on the city world rebuilds the same city from its recorded world specification for playback.
+  A saved Free Ride test-pad map (older recordings) supplies playback ground.
   Missing tracks stay unavailable.
   Buzzer frequency changes are stored; precise audio playback is not implemented.
 
@@ -99,11 +100,14 @@ trailer : u64 offset of the index chunk, 8 bytes "EUCREND\n"
 ```
 
 **Header** (JSON): `schema` (channel schema version), `producer` (`euc 0.1.0`, `EUC Studio 0.1.0`,
-`eucsim 0.1.0`), `started_unix_ms`, `git_rev` (the engine's commit), `wheel` and `profile_sha256` (of
+`euc-studio python 0.1.0`), `started_unix_ms`, `git_rev` (the engine's commit), `wheel` and `profile_sha256` (of
 the profile files the engine reads), `firmware` and `firmware_sha256`, `cpu` and `cpi`, `seed` (of the
 simulated sensor noise), `scenario` and `scenario_toml` (the file as it ran), `settings` (the preset
 the wheel booted with; null for a blank journal), `sample_hz`, `channels` (id, key, label, unit, rate:
-the sample columns in order) and `bodies` (name, role and shapes: the poses in order).
+the sample columns in order), `bodies` (name, role and shapes: the poses in order), `timing` (`fixed`, `flash`
+or `flash-wN`; absent in recordings made before the flash model) and `context` (the run mode, the rider model and
+its external aids, and the ground: a city run's `world` specification or an old Free Ride test pad's `height_map`;
+the lateral rider also names its joints in `rider_joints`).
 
 **Chunk header** (40 bytes): `u8 kind`, `u8 codec` (0 stored, 1 zstd), `u16` 0, `u32 count` (samples,
 items or index entries), `u32 stored` (payload bytes in the file), `u32 raw` (after decompression),

@@ -49,10 +49,12 @@ Choices where the ARM ARM leaves the behaviour to the implementation follow the 
 | `tests/lockstep.rs` | the stock Begode Extreme image boots on Unicorn while our core shadows every quantum on a copy of memory, with Unicorn's bus traffic replayed; registers, memory and bus traffic compared after each quantum. A third test times the machine by the shadow core's flash model. | 30 s simulated: 704,013 quanta, 1.66 G instructions, 11.2 M bus calls, 1.19 M exception returns, **0 divergences**; flash-timed 6 s: 455,103 quanta, 173 M instructions, **0 divergences** |
 | `tests/flash_timing.rs` | the flash timing model: zero wait states equal the TRM costs, buffered loops, branch misses, D-Code reads, fetch-bound 32-bit code, cycle limits, and a clock independent of how runs are split | 8 tests |
 | `tests/stock_cadence.rs` | the stock image idle with the owner's settings under both timings: tail-light breathing and BLE frame-group periods against the owner's video and capture | fixed 2.234 s / 307.45 ms, flash 2.515 s / 307.45 ms (real 2.1 ± 0.2 s / 309.6 ms) |
+| `tests/stock_ride.rs` | the stock image rides `ride-20kmh-stop` on our core with the live plant; the session reports the firmware's own PWM figure next to the plant's modulation | 2 tests (the Unicorn one skips without `--features euc-sim/unicorn`) |
 | `tests/stock_boot.rs` | the stock image on our core alone: the Unicorn backend's boot assertions (`main` at 0.069 ms, first frame at 2.00 s, `V` and `N` replies, 40 frames in 6 s), and 30 s with no blocker | pass |
 
 ```text
 cargo test  -p euc-armv7m                                            # unit, encodings, stock boot
+cargo test  -p euc-armv7m --release --test stock_ride -- --nocapture # stock firmware rides with the live plant
 cargo test  -p euc-armv7m --features unicorn --release --test fuzz_unicorn -- --nocapture
 EUC_FUZZ_CASES=10000000 EUC_FUZZ_SEED=0x5EED2026 cargo test ...      # more cases, a fixed seed
 cargo test  -p euc-armv7m --features unicorn --release --test lockstep -- --nocapture

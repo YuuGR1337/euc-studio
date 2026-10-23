@@ -31,7 +31,8 @@ The final CLI retains yaw-rate damping at speed in the rigid rider.
 An earlier rebuild exposed a steering instability before firmware cutoff.
 That instability also reproduced without firmware.
 The final evidence excludes those rejected runs.
-The public scenarios retain their default `rigid_ankle_v1` rider.
+The public scenarios retained their default `rigid_ankle_v1` rider. (Since 2026-10-22 the articulated rider is the
+default; seven scenarios pin the rigid rider.)
 
 The final input manifest and JSON reports are under `target/fw-scratch/resume-accepted/`.
 The [full-effort report](full-effort-acceptance.md#identity-and-reproduction) records current image and CLI hashes.
@@ -147,6 +148,8 @@ Its raw scenario verdicts are 43 passes and 17 failures.
 
 The 50% SOC comparison also fails within its launch window at quantum 3000.
 The sampled battery-voltage difference reaches 0.53842 V against the unchanged 0.5 V limit.
+(Since the city world, W2 on 2026-10-23, that run's limit is 1.6 V; see
+[project status](../project-status.md#city-world-w2-2026-10-23).)
 Quanta 4000 and 2000 pass that window only.
 The [full-effort report](full-effort-acceptance.md#comparison-limits) records this limit separately from the later phase failures.
 
@@ -192,7 +195,7 @@ These prefixes identify earlier evidence; this task did not hash or run those im
 [Scenario results](scenarios.md) contain earlier CPI 1.25 results without exception costs.
 Their lean sweep does not establish current margins.
 Their 5 cm description names a pitch cutoff, but the first detector remains unconfirmed.
-[Cutoff notes](../../firmware/docs/cutoffs.md#open-questions) explicitly record that uncertainty.
+[Cutoff notes](../../firmware/docs/cutoffs.md#decisions-and-open-questions) explicitly record that uncertainty.
 
 Earlier 2x-inductance runs reported only 0.09 seconds of warning, or saturation before tiltback.
 Those runs used an earlier suspension tree and historical timing.

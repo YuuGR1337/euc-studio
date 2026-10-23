@@ -22,9 +22,10 @@ cargo build                                      # finds it through .cargo/confi
   Outside GitHub Actions (no `GITHUB_ENV`) it stops with an error before downloading.
 - Running again does nothing when the pinned release is already unpacked.
 
-The version must match the `+mj-` suffix of the `mujoco-rs` version in the workspace `Cargo.toml`
-(`5.0.0+mj-3.9.0` today); `test_fetch.py` checks both pins. To move to a new MuJoCo, bump both, and
-copy the new sha256 values from the `.sha256` files DeepMind publishes next to each asset.
+The version must match the `+mj-` suffix of the resolved `mujoco-rs` version (`5.0.0+mj-3.9.0` in
+`Cargo.lock` today; the workspace `Cargo.toml` pins `=5.0.0`). `test_fetch.py` checks the `Cargo.toml` pin and the
+library path in `.cargo/config.toml`. To move to a new MuJoCo, bump the binding and `VERSION` together, and copy the
+new sha256 values from the `.sha256` files DeepMind publishes next to each asset.
 
 ```sh
 python3 -m unittest discover -s tools/fetch-mujoco -p 'test_*.py'
