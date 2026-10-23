@@ -18,7 +18,8 @@ cargo build                                      # finds it through .cargo/confi
 
 - `--dest DIR` puts the cache elsewhere; then set `MUJOCO_DYNAMIC_LINK_DIR` to its `lib/` folder
   (`--print-env` prints the line). An environment variable always wins over `.cargo/config.toml`.
-- `--github` (CI) exports `MUJOCO_DYNAMIC_LINK_DIR` and, on Windows, adds the DLL folder to `PATH`.
+- `--github` (CI only) exports `MUJOCO_DYNAMIC_LINK_DIR` and, on Windows, adds the DLL folder to `PATH`.
+  Outside GitHub Actions (no `GITHUB_ENV`) it stops with an error before downloading.
 - Running again does nothing when the pinned release is already unpacked.
 
 The version must match the `+mj-` suffix of the `mujoco-rs` version in the workspace `Cargo.toml`

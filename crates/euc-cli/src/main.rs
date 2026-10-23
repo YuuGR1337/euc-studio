@@ -21,7 +21,11 @@ use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
 
-/// EUC Studio engine: fetch, verify and inspect electric unicycle firmware.
+/// EUC Studio engine: firmware, simulator, recordings and flashing for electric unicycles.
+///
+/// Fetch and cache a wheel's official firmware (`fetch`, `firmware`), check images (`image`), run
+/// firmware in the simulator (`sim run`, `sim serve`, `sim compare`), read its recordings (`rec`),
+/// play a BLE capture back as a wheel (`replay`) and flash through the gated flasher (`flash`).
 #[derive(Debug, Parser)]
 #[command(name = "euc", version, propagate_version = true)]
 struct Cli {

@@ -9,6 +9,7 @@ default-members = [
     "crates/euc-cli",
     "crates/euc-core",
     "crates/euc-devices",
+    "crates/euc-display",
     "crates/euc-flash-sim",
     "crates/euc-flasher",
     "crates/euc-fwsource",
@@ -19,6 +20,7 @@ default-members = [
     "crates/euc-proto-begode",
     "crates/euc-sim",
     "crates/euc-stm32f1",
+    "crates/euc-telemetry",
     "crates/euc-world",
     "crates/euc-ymodem",
 ]
