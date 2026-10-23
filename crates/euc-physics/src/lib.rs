@@ -941,10 +941,10 @@ impl Physics {
         torque
     }
 
-    /// The lateral rider's roll aid: `torque`, N·m about the heading through the tire's contact,
-    /// leans wheel and rider as one rigid machine. Each body takes the force and the moment of
-    /// its own part of that lean (its mass times its acceleration about the line, its own inertia
-    /// about the heading), so the aid loads no joint, pad or pedal, and the legs hold only the
+    /// The roll aid of every rider but contact feet: `torque`, N·m about the heading through the
+    /// tire's contact, leans wheel and rider as one rigid machine. Each body takes the force and
+    /// the moment of its own part of that lean (its mass times its acceleration about the line,
+    /// its inertia times its turn), so the aid loads no joint, pad or pedal, and the legs hold only the
     /// posture.
     fn lean_as_one(&mut self, heading: [f64; 2], torque: f64) {
         let axis = [heading[0], heading[1], 0.0];
@@ -952,7 +952,7 @@ impl Physics {
         let mut inertia = 0.0;
         for index in 0..self.machine.len() {
             let (mass, lever, spin) = self.lean_part(self.machine[index], axis, contact);
-            inertia += mass * dot(lever, lever) + spin;
+            inertia += mass * dot(lever, lever) + dot(spin, axis);
         }
         let acceleration = torque / inertia;
         for index in 0..self.machine.len() {
@@ -961,21 +961,24 @@ impl Physics {
             let applied = &mut self.data.xfrc_applied_mut()[body];
             for i in 0..3 {
                 applied[i] += mass * acceleration * lever[i];
-                applied[3 + i] += spin * acceleration * axis[i];
+                applied[3 + i] += acceleration * spin[i];
             }
         }
     }
 
     /// One body's part in a lean about `axis` through `contact`: its mass, the direction and
-    /// length of its centre's path per radian (`axis` × arm, metres) and its own moment of
-    /// inertia about `axis`, kg·m² (its principal moments, weighted by how far each principal
-    /// axis lies along `axis`).
-    fn lean_part(&self, body: usize, axis: [f64; 3], contact: [f64; 3]) -> (f64, [f64; 3], f64) {
+    /// length of its centre's path per radian (`axis` × arm, metres) and its own inertia applied
+    /// to `axis` in the world, `I·axis`, kg·m²: the moment its own turn about `axis` takes per
+    /// rad/s². A body tilted in that turn (a rider leaning back) needs a moment off the axis too;
+    /// without it the lean also yawed such a body.
+    fn lean_part(&self, body: usize, axis: [f64; 3], contact: [f64; 3]) -> (f64, [f64; 3], [f64; 3]) {
         let model = self.data.model();
         let at = self.data.xipos()[body];
         let lever = cross(axis, [at[0] - contact[0], at[1] - contact[1], at[2] - contact[2]]);
         let (principal, frame) = (model.body_inertia()[body], self.data.ximat()[body]);
-        let spin = (0..3).map(|k| principal[k] * dot([frame[k], frame[3 + k], frame[6 + k]], axis).powi(2)).sum();
+        // The axis in the body's principal frame, scaled by the principal moments, back in the world.
+        let local: [f64; 3] = std::array::from_fn(|k| principal[k] * dot([frame[k], frame[3 + k], frame[6 + k]], axis));
+        let spin = std::array::from_fn(|i| (0..3).map(|k| frame[3 * i + k] * local[k]).sum());
         (model.body_mass()[body], lever, spin)
     }
 
@@ -1214,10 +1217,16 @@ impl Physics {
         // The rigid rider's stepping foot is an external roll torque on the shell; the articulated
         // rider's right foot presses its own pedal (an internal force pair, below).
         let kick = if pushing_off && ids.articulated.is_none() { STEP_OFF_KICK_NM } else { 0.0 };
-        // The lateral rider's upper body has the shell's roll spring too (`upper_body_aids`), and
-        // the two lean wheel and rider together (`lean_as_one`, below): the aid does not pull the
-        // shell away from the body the legs hold.
-        let as_one = self.setup.rider.model.has_lateral_legs();
+        // The roll aid leans wheel and rider together about the tire's contact (`lean_as_one`,
+        // below) for every rider held to the wheel by a weld or by its legs. As a bare torque on
+        // the shell it also yawed a machine whose mass lies far behind the contact (a rider leaning
+        // back in a hard brake), and the heading loop answered that yaw with more lean until the
+        // wheel fell. Leaned as one, the aid turns the whole machine about the contact, so it is twice
+        // as stiff (for the lateral rider: the shell's spring and the upper body's, `upper_body_aids`):
+        // with the single gains a rigid rider's full manual turn rolled in too slowly, overleaned and
+        // the firmware cut out. Contact feet hold no body to the shell: their aid stays a torque on
+        // the shell, with the upper body's own.
+        let as_one = !self.setup.rider.model.has_contact_feet();
         let springs = if as_one { 2.0 } else { 1.0 };
         self.roll_aid_torque =
             -springs * (assist.roll_stiffness * (att.roll - steer.roll) + assist.roll_damping * att.roll_rate);
@@ -2102,5 +2111,55 @@ mod articulated_tests {
         assert!(roll > 0.05, "{roll} rad");
         assert!(as_one - stance < 0.002, "{moved:?}");
         assert!(shell > 0.2, "{moved:?}");
+    }
+
+    #[test]
+    fn the_roll_aid_leans_a_rider_far_back_without_yawing_the_wheel() {
+        // A hard brake: the rigid rider leans far back (about 29° here, 31° in the full-effort stop),
+        // so the machine's mass lies behind and above the tire's contact. In free flight without
+        // gravity, 2000 N·m of roll aid leaned as one about the contact rolls the machine and turns
+        // it by almost nothing; the same torque on the shell alone also yaws it.
+        let mut turned = Vec::new();
+        for as_one in [true, false] {
+            let mut setup = setup();
+            setup.rider.model = RiderModel::RigidAnkleV1;
+            setup.rider.control.lean_max_deg = 35.0;
+            setup.rider.control.lean_rate_deg_s = 60.0;
+            let mut p = Physics::new(setup).unwrap();
+            p.rider().set_intent(Intent::Lean(-0.45));
+            for _ in 0..(2.0 / TIMESTEP_S).round() as usize {
+                p.step(0.0);
+            }
+            assert!(p.lean < -0.4, "on the stand the rider leans back: {}", p.lean);
+            let mut weightless = Box::new(MjModel::clone(p.data.model()));
+            weightless.opt_mut().gravity = [0.0; 3];
+            p.data.swap_model(weightless);
+            p.set_held(false);
+            for root in [p.ids.root_qpos, p.ids.rider_qpos] {
+                p.data.qpos_mut()[root + 2] += 3.0;
+            }
+            p.data.forward();
+            let lean = p.data.qpos()[p.ids.lean_qpos];
+            for _ in 0..200 {
+                p.data.step1();
+                let (q, v) = (p.data.qpos()[p.ids.lean_qpos], p.data.qvel()[p.ids.lean_dof]);
+                p.data.ctrl_mut()[p.ids.ankle] = 6000.0 * (lean - q) - 900.0 * v;
+                p.data.xfrc_applied_mut().fill([0.0; 6]);
+                let [hx, hy] = p.attitude().heading;
+                if as_one {
+                    p.lean_as_one([hx, hy], 2000.0);
+                } else {
+                    p.data.xfrc_applied_mut()[p.ids.shell] = [0.0, 0.0, 0.0, 2000.0 * hx, 2000.0 * hy, 0.0];
+                }
+                p.data.step2();
+            }
+            let att = p.attitude();
+            println!("as one {as_one}: roll {:.4} rad, yaw rate {:.4} rad/s", att.roll, att.yaw_rate);
+            turned.push((att.roll, att.yaw_rate));
+        }
+        let [(roll, yaw), (_, shell_yaw)] = turned[..] else { unreachable!() };
+        assert!(roll > 0.05, "the machine rolls: {roll} rad");
+        assert!(shell_yaw.abs() > 0.1, "a bare torque on the shell yaws it: {shell_yaw} rad/s");
+        assert!(yaw.abs() < 0.01 * shell_yaw.abs(), "leaned as one it barely yaws: {yaw} rad/s against {shell_yaw}");
     }
 }

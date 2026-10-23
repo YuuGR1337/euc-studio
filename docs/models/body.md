@@ -471,7 +471,7 @@ is a change in the pitch plane, planned for a later stage). He rides straight in
   law, 5000 N·m/rad and 500 N·m·s/rad each, so 10000 and 1000 together, about the wheel's roll and
   roll rate) give a torque about the heading through the tire's contact, and each body of wheel
   and rider takes the force and moment of its own part of one rigid lean about that line (its
-  mass times its acceleration there, and its own inertia about the heading). The aid then loads no
+  mass times its acceleration there, and its inertia times its turn). The aid then loads no
   joint, pad or pedal: in free flight without gravity, with the legs holding their stance, 2000 N·m
   leans the machine 0.07 rad in 0.1 s and moves no joint by more than 0.001 rad beyond what the
   stance alone moves it; the same torque on the shell alone rolls the shell 0.8 rad and bends a
@@ -526,7 +526,21 @@ is a change in the pitch plane, planned for a later stage). He rides straight in
   torque about the heading holds the shell upright: `τ = −k·roll − c·roll_rate`, k = 5000 N·m/rad,
   c = 500 N·m·s/rad, far stiffer than the toppling moment of wheel and rider (about 1200 N·m/rad).
   It shows in recordings as a roll that stays at zero. Set `[assist] roll_stiffness = 0` in a
-  scenario to see the wheel fall over sideways.
+  scenario to see the wheel fall over sideways. Since 2026-10-23 the spring's torque leans wheel and
+  rider as one about the heading through the tire's contact for the rigid and welded riders too, as
+  for the lateral rider (each body takes its part of one rigid lean; contact feet keep a torque on
+  the shell). As a bare torque on the shell it also yawed the machine when the rider's mass lay far
+  behind the contact. In the hard brake of `full-effort-70kmh-stop-soc100` in the city (rider 31°
+  back, a small roll from the height field) that yaw made the heading loop ask for more lean: the
+  roll grew from 0.5° at 22.0 s to 9.7° at 23.5 s and the wheel fell at 15 km/h. Leaned as one, the
+  roll stays under 0.5° (rigid and sagittal riders). On the flat plane the roll stays at zero either
+  way. Leaned as one the aid turns the whole machine about the contact, so its gains are doubled
+  (10000 N·m/rad and 1000 N·m·s/rad, as the lateral rider's two springs together): with the single
+  gains the rigid rider's full manual turn at 3 m/s rolled in too slowly, overleaned and the
+  firmware cut out. Each body also takes the part of its own turning moment that lies off the heading: a body
+  tilted in the lean (a rider leaning back) needs it. With the part along the heading only, 2000 N·m
+  on a rigid rider leaning 29° back, in free flight without gravity, still yawed the machine at
+  1.5 rad/s after 0.1 s; with the whole moment at 0.003 rad/s (a bare torque on the shell: 17 rad/s).
 - **Upper-body roll aid** (`articulated_contact_v1` and `articulated_lateral_v1`). The same law,
   with the same gains, holds the articulated upper body. For contact feet it holds the body at the
   wheel's roll target, because contact feet do not hold the body to the shell and the legs cannot
