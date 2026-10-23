@@ -11,10 +11,10 @@ import {
   POSE_FLOATS,
 } from "../src/engine/telemetry.gen.ts";
 
-// The rider figure (EUC Thrills' Cool Rider, src/workspaces/ride/riderFigure) in the whole studio,
-// posed on body lists and frames from real engine recordings (fixtures/rider-poses.json). Only
-// the engine transport is the controlled fixture of the live pose checks. Screenshots of every
-// frame, figure and physics bodies, Side and Chase cameras, go to test-results/rider-figure/.
+// The rider figure (the street kit, src/workspaces/ride/riderFigure) in the whole studio, posed
+// on body lists and frames from real engine recordings (fixtures/rider-poses.json). Only the
+// engine transport is the controlled fixture of the live pose checks. Screenshots of every frame,
+// Side and Chase cameras, go to test-results/rider-figure/.
 const root = fileURLToPath(new URL("..", import.meta.url));
 const fixture = fileURLToPath(new URL("./fixtures/live-wire.ts", import.meta.url));
 const screens = fileURLToPath(new URL("../test-results/rider-figure/screens/", import.meta.url));
@@ -175,37 +175,30 @@ async function open(page: Page) {
   await expect.poll(() => page.evaluate(() => !!window.liveWire.messages)).toBe(true);
 }
 
-const toggle = (page: Page) => page.getByRole("button", { name: /^Physics bodies/ });
 const camera = (page: Page, name: string) => page.getByRole("radio", { name, exact: true });
 
-test("draws the rider figure on the physics bodies, and the shapes with Physics bodies on", async ({
+test("draws the rider only as the figure on the physics bodies, never as their shapes", async ({
   page,
 }) => {
   await open(page);
   await show(page, riders.articulated, "cruise", 1);
   await expect.poll(() => drawn(page)).toEqual({ figure: 26, shapes: 0 });
-  await expect(toggle(page)).toHaveAttribute("aria-pressed", "false");
-
-  await toggle(page).click();
-  // The articulated rider's shapes: trunk, head, two arms, and a thigh, shank and sole a side.
-  await expect.poll(() => drawn(page)).toEqual({ figure: 0, shapes: 10 });
-  await page.reload();
-  await expect(page.getByTestId("viewport")).toHaveAttribute("data-scene", "ready", {
-    timeout: 60_000,
-  });
-  await expect.poll(() => page.evaluate(() => !!window.liveWire.messages)).toBe(true);
-  await show(page, riders.articulated, "cruise", 2);
-  await expect(toggle(page)).toHaveAttribute("aria-pressed", "true");
-  await expect.poll(() => drawn(page)).toEqual({ figure: 0, shapes: 10 });
-  await toggle(page).click();
-  await expect.poll(() => drawn(page)).toEqual({ figure: 26, shapes: 0 });
+  // No view of the simulated shapes is left, in the viewport or the palette.
+  await expect(page.getByRole("button", { name: /^Physics bodies/ })).toHaveCount(0);
+  await page.keyboard.press("ControlOrMeta+k");
+  const search = page.getByPlaceholder("Type a command or search");
+  await search.fill("camera");
+  await expect(page.getByRole("option").first()).toBeVisible();
+  await search.fill("physics bodies");
+  await expect(page.getByRole("option", { name: /physics bodies/i })).toHaveCount(0);
+  await page.keyboard.press("Escape");
 
   // The rigid rider (one body) wears the same figure.
-  await show(page, riders.rigid, "accelerate", 3);
+  await show(page, riders.rigid, "accelerate", 2);
   await expect.poll(() => drawn(page)).toEqual({ figure: 26, shapes: 0 });
 });
 
-test("captures every frame: figure and physics bodies, Side and Chase", async ({ page }) => {
+test("captures every frame, Side and Chase", async ({ page }) => {
   test.setTimeout(240_000);
   await open(page);
   const viewport = page.getByTestId("viewport");
@@ -214,21 +207,17 @@ test("captures every frame: figure and physics bodies, Side and Chase", async ({
     const rider = riders[model];
     for (const frame of Object.keys(rider.frames)) {
       await show(page, rider, frame, ++epoch);
-      for (const physics of [false, true]) {
-        if ((await toggle(page).getAttribute("aria-pressed")) !== String(physics))
-          await toggle(page).click();
-        await expect.poll(async () => (await drawn(page)).figure > 0).toBe(!physics);
-        for (const view of ["Side", "Chase"]) {
-          await camera(page, view).click();
-          // The cameras ease over about a second; the paused scene draws when a batch comes.
-          for (let i = 1; i <= 40; i++) {
-            await sendFrame(page, rider, frame, 1 + i / 1000);
-            await page.waitForTimeout(40);
-          }
-          await viewport.screenshot({
-            path: `${screens}${model}-${frame}-${view.toLowerCase()}-${physics ? "physics" : "figure"}.png`,
-          });
+      await expect.poll(async () => (await drawn(page)).figure).toBe(26);
+      for (const view of ["Side", "Chase"]) {
+        await camera(page, view).click();
+        // The cameras ease over about a second; the paused scene draws when a batch comes.
+        for (let i = 1; i <= 40; i++) {
+          await sendFrame(page, rider, frame, 1 + i / 1000);
+          await page.waitForTimeout(40);
         }
+        await viewport.screenshot({
+          path: `${screens}${model}-${frame}-${view.toLowerCase()}.png`,
+        });
       }
     }
   }

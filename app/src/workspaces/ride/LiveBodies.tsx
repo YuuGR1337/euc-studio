@@ -1,9 +1,7 @@
 import { useFrame, useThree } from "@react-three/fiber";
 import { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
-import { surface, text } from "../../design/tokens.ts";
 import { engine, useEngineVersion } from "../../engine/index.ts";
-import { useUi } from "../../state/ui.ts";
 import { type BodyInfo, type Geom } from "../../engine/telemetry.gen.ts";
 import { BodyPart, ShellVisual, WheelPart } from "./EucModel.tsx";
 import { Ghost } from "./Ghost.tsx";
@@ -15,10 +13,10 @@ import { bindRider } from "./riderFigure/skeleton.ts";
 // The live engine's bodies, posed every frame from the latest snapshot. Everything sits inside
 // one group that turns the physics world (MuJoCo: z up) into three.js (y up), so body poses go
 // in unchanged. The wheel and the shell get the scanned model (else the stylized one). The rider
-// (one body or many) is drawn as the EUC Thrills figure posed on its bodies (riderFigure/), or,
-// with "Physics bodies" on or for a body list the figure cannot bind, from its MJCF geoms like
-// any other body. A body without a pose of its list is hidden (placeBodies), never drawn at the
-// origin.
+// (one body or many) is drawn only as the rider figure posed on its bodies (riderFigure/), never
+// as its MJCF shapes; a body list the figure cannot bind draws no rider. Any other body is drawn
+// from its MJCF geoms. A body without a pose of its list is hidden (placeBodies), never drawn at
+// the origin.
 //
 // The Ride workspace draws the ride engine; the Compare workspace draws each of its two runs
 // (`source`), run B as a ghost. A compare run shows the plain shell: the display and tail light
@@ -27,29 +25,12 @@ import { bindRider } from "./riderFigure/skeleton.ts";
 /** Visuals are modelled y up with the axle on z; a body frame has z up with the axle on y. */
 const TO_BODY_FRAME: [number, number, number] = [Math.PI / 2, 0, 0];
 
-const riderMaterial = new THREE.MeshStandardMaterial({
+/** A body that is neither the wheel, the shell nor the rider: plain grey shapes. */
+const plainMaterial = new THREE.MeshStandardMaterial({
   color: "#C7C7CC",
   roughness: 0.62,
   metalness: 0,
 });
-
-const shade = (color: string) =>
-  new THREE.MeshStandardMaterial({ color, roughness: 0.62, metalness: 0 });
-
-/**
- * The articulated rider (torso, head, upper_arm_*, forearm_*, thigh_*, shank_*, foot_*) as a
- * mannequin in greys: a lighter head, darker legs, dark shoes, so the limbs read against each
- * other. Any other rider body (the rigid rider is one body, "rider") keeps the plain grey.
- */
-const SEGMENTS: [prefix: string, material: THREE.Material][] = [
-  ["head", shade(text.fg)],
-  ["thigh", shade(surface.lift)],
-  ["shank", shade(surface.lift)],
-  ["foot", shade(surface.track)],
-];
-
-const materialFor = (body: string) =>
-  SEGMENTS.find(([prefix]) => body.startsWith(prefix))?.[1] ?? riderMaterial;
 
 /** Where the poses come from: the ride engine, or one run of a comparison. */
 export interface PoseSource {
@@ -112,11 +93,7 @@ export function LiveBodies({
   const nodes = useRef<(THREE.Group | null)[]>([]);
   const placed = useRef<{ bodies: readonly BodyInfo[] | null }>({ bodies: null });
   const own = source === engine;
-  const physicsBodies = useUi((s) => s.physicsBodies);
-  const binding = useMemo(
-    () => (physicsBodies ? null : bindRider(bodies)),
-    [bodies, physicsBodies],
-  );
+  const binding = useMemo(() => bindRider(bodies), [bodies]);
 
   useFrame(() => {
     // The visual frame is of the engine's bodies now; this render may still hold the last list.
@@ -151,8 +128,8 @@ export function LiveBodies({
             <PlainBody model={model} accent={accent} />
           )}
         </group>
-      ) : b.role === "rider" && binding ? null : (
-        b.geoms.map((g, j) => <GeomMesh key={j} geom={g} material={materialFor(b.name)} />)
+      ) : b.role === "rider" ? null : (
+        b.geoms.map((g, j) => <GeomMesh key={j} geom={g} material={plainMaterial} />)
       )}
     </group>
   ));

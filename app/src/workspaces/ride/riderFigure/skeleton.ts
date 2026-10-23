@@ -8,10 +8,16 @@ import { RIDER_BLOCKOUT } from "../../../vendor/euc-thrills/tuning.ts";
 //   <side>_thigh, <side>_shank, <side>_foot, each origin on its joint (hip, knee, ankle);
 // - rigid: one "rider" body, its origin between the ankles, with the legs, torso and head as
 //   fixed shapes. Its knees are placed by two-link IK, softly bent.
-// Any other body list (old recordings) has no binding, and the scene draws the shapes instead.
+// Any other body list (old recordings) has no binding, and the scene draws no rider.
 
-/** The figure's hip joints sit inside its jacket, narrower than the physics hips (on the pedals). */
+/**
+ * The figure's hip joints, from the midline, m: inside the hips of its clothes. The sagittal
+ * rider's thighs hang from its pedals' width; a model whose thighs sit nearer the midline (the
+ * lateral rider's, at its hip joints) gives its own.
+ */
 export const FIGURE_HIP_HALF_WIDTH = RIDER_BLOCKOUT.torsoWidth * 0.26;
+/** A thigh body this near the midline is on a real hip joint: the figure's hip goes there. */
+const HIP_FROM_THIGH_M = 0.12;
 /** How far a rigid rider's legs are extended: a soft knee, about 20 degrees of bend. */
 const RIGID_LEG_EXTENSION = 0.985;
 const SIDES = [-1, 1] as const;
@@ -133,6 +139,7 @@ export function skeletonPose(): SkeletonPose {
 
 const X = new THREE.Vector3(1, 0, 0);
 const local = new THREE.Vector3();
+const inverse = new THREE.Quaternion();
 const reach = new THREE.Vector3();
 
 /** A body's group, when it is placed (visible) this frame. */
@@ -159,10 +166,13 @@ export function poseSkeleton(binding: RiderBinding, nodes: Nodes, out: SkeletonP
       const foot = placed(nodes, binding.foot[i] as number);
       const leg = out.legs[i] as LegPose;
       if (!thigh || !shank || !foot) return false;
-      leg.hip
-        .set(0, leg.side * FIGURE_HIP_HALF_WIDTH, 0)
-        .applyQuaternion(q)
-        .add(rider.position);
+      local.copy(thigh.position).sub(rider.position).applyQuaternion(inverse.copy(q).invert());
+      if (Math.abs(local.y) <= HIP_FROM_THIGH_M) leg.hip.copy(thigh.position);
+      else
+        leg.hip
+          .set(0, leg.side * FIGURE_HIP_HALF_WIDTH, 0)
+          .applyQuaternion(q)
+          .add(rider.position);
       leg.knee.copy(shank.position);
       leg.ankle.copy(foot.position);
       leg.foot.copy(foot.quaternion);

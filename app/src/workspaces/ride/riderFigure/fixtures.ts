@@ -78,12 +78,13 @@ export function nodesFor(bodies: readonly BodyInfo[]): THREE.Object3D[] {
 /**
  * Poses the articulated bodies standing on the pedals: pelvis `pitch` rad forward about the hip
  * axis, legs straight down from the hips (knees and ankles on the physics' own frames), the
- * whole rider at `at` with heading 0.
+ * whole rider at `at` with heading 0. `hipY` puts the thighs' origins nearer the midline (the
+ * lateral rider's hips); the sagittal rider's hang from the pedals.
  */
 export function standArticulated(
   bodies: readonly BodyInfo[],
   nodes: THREE.Object3D[],
-  { pitch = 0, at = new THREE.Vector3(0, 0, 1.2), kneeBend = 0 } = {},
+  { pitch = 0, at = new THREE.Vector3(0, 0, 1.2), kneeBend = 0, hipY = PEDAL_Y } = {},
 ) {
   const index = (name: string) => bodies.findIndex((b) => b.name === name);
   const trunk = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), pitch);
@@ -99,8 +100,8 @@ export function standArticulated(
   const thighQ = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), -kneeBend / 2);
   const shankQ = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), kneeBend / 2);
   for (const [side, y] of [
-    ["left", PEDAL_Y],
-    ["right", -PEDAL_Y],
+    ["left", hipY],
+    ["right", -hipY],
   ] as const) {
     const hip = new THREE.Vector3(0, y, 0).add(at);
     const knee = new THREE.Vector3(0, 0, -SEGMENT).applyQuaternion(thighQ).add(hip);

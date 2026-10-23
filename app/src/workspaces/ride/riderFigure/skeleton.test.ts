@@ -30,7 +30,7 @@ describe("rider binding", () => {
     expect(binding.headTop).toBeCloseTo(0.4 * RIDER_HEIGHT + 0.1, 6);
   });
 
-  it("leaves other body lists to the shapes", () => {
+  it("binds no other body list (the scene then draws no rider)", () => {
     const old = articulatedBodies().map((b) => (b.name === "rider" ? { ...b, name: "torso" } : b));
     expect(bindRider(old)).toBeNull();
     expect(bindRider(articulatedBodies().filter((b) => b.name !== "left_foot"))).toBeNull();
@@ -56,6 +56,23 @@ describe("skeleton pose", () => {
     expect(left.knee.toArray()).toEqual(leftShank.position.toArray());
     expect(left.knee.x).toBeGreaterThan(at.x);
     expect(left.ankle.distanceTo(left.knee)).toBeCloseTo(SEGMENT, 9);
+  });
+
+  it("puts the hips on the thighs' origins when they sit near the midline (the lateral rider)", () => {
+    const bodies = articulatedBodies();
+    const binding = bindRider(bodies);
+    if (!binding) throw new Error("unbound");
+    const nodes = nodesFor(bodies);
+    const at = new THREE.Vector3(3, -2, 1.2);
+    standArticulated(bodies, nodes, { at, hipY: 0.09, pitch: 0.2 });
+    const pose = skeletonPose();
+    expect(poseSkeleton(binding, nodes, pose)).toBe(true);
+    const [right, left] = pose.legs;
+    const thigh = (side: string) =>
+      (nodes[bodies.findIndex((b) => b.name === `${side}_thigh`)] as THREE.Object3D).position;
+    expect(left.hip.toArray()).toEqual(thigh("left").toArray());
+    expect(right.hip.toArray()).toEqual(thigh("right").toArray());
+    expect(left.hip.y - at.y).toBeCloseTo(0.09, 9);
   });
 
   it("is not posed while a body it needs has no pose", () => {

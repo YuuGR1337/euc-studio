@@ -5,7 +5,7 @@ import { RiderFigure } from "./figure.ts";
 import { type RiderBinding, poseSkeleton, skeletonPose } from "./skeleton.ts";
 
 /**
- * The rider drawn as the EUC Thrills figure, posed every frame on the live body groups (placed
+ * The rider drawn as the rider figure (the street kit), posed every frame on the live body groups (placed
  * by LiveBodies at priority -50; this runs right after). Physics frame, like the bodies. Hidden
  * on any frame a body it needs has no pose.
  */

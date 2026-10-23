@@ -1,9 +1,9 @@
 /*! EUC Thrills — (c) 2026 VibezZzCoder — MIT — https://github.com/VibezZzCoder/EUC-thrills */
-// EUC Studio: the look types only (render/riderLook.ts lines 99-710). The looks themselves are not
-// copied, except Cool Rider's (coolRiderLook.ts). `id` is a plain string here: the game's
-// character roster (data/riders.ts) is not part of this copy. The types are unchanged; the
-// comments are shortened, and the game's comments that name or describe its other riders are
-// removed.
+// EUC Studio: the look types only (render/riderLook.ts lines 99-710). None of the game's looks is
+// copied: EUC Studio's own look, the street kit, is src/workspaces/ride/riderFigure/streetKit.ts.
+// `id` is a plain string here: the game's character roster (data/riders.ts) is not part of this
+// copy. The types are unchanged; the comments are shortened, and the game's comments that name or
+// describe its other riders are removed.
 import type * as THREE from 'three';
 import type { LoftProfile, UvRect } from './blockoutKit.ts';
 

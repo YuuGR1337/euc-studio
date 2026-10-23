@@ -70,17 +70,18 @@ Checked on 2026-10-16:
 
 ## Vendored source
 
-| Source                                                            | Where                                                                        | License                    |
-| ----------------------------------------------------------------- | ---------------------------------------------------------------------------- | -------------------------- |
-| [EUC Thrills](https://github.com/VibezZzCoder/EUC-thrills) code   | `src/vendor/euc-thrills`, `src/workspaces/ride/riderFigure/rig.ts` (adapted) | MIT, (c) 2026 VibezZzCoder |
-| EUC Thrills' Cool Rider look (geometry, colours, tailoring sheet) | The same files                                                               | CC BY 4.0                  |
+| Source                                                          | Where                                                                        | License                    |
+| --------------------------------------------------------------- | ---------------------------------------------------------------------------- | -------------------------- |
+| [EUC Thrills](https://github.com/VibezZzCoder/EUC-thrills) code | `src/vendor/euc-thrills`, `src/workspaces/ride/riderFigure/rig.ts` (adapted) | MIT, (c) 2026 VibezZzCoder |
 
-The CC BY 4.0 attribution, and the changes made, are in `src/vendor/euc-thrills/README.md` and the
-repository's `NOTICE`.
+What is copied, and the changes made, are in `src/vendor/euc-thrills/README.md` and the
+repository's `NOTICE`. No asset of the game (its CC BY 4.0 geometry, colours or painted sheets)
+is used.
 
 ## Assets
 
 - Icons: Lucide (ISC) for the general set; the Ride, Compare, Flash and app glyphs are original.
 - The 3D wheel is built from primitives in code; lighting uses in-scene light formers. No model,
-  texture or HDR file from a third party ships with the app. The rider figure is EUC Thrills'
-  Cool Rider, built in code from its own data (above).
+  texture or HDR file from a third party ships with the app. The rider figure wears EUC Studio's
+  own street kit (`src/workspaces/ride/riderFigure/streetKit.ts`), built in code with EUC
+  Thrills' loft kit and rider construction (MIT, above).

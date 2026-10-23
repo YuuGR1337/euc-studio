@@ -195,12 +195,26 @@ The physics drives it (`riderFigure/skeleton.ts`, `figure.ts`):
   game's `armEaseForSpeed`, from a speed filtered off the pelvis motion), the hands turn toward
   the thighs as they ease, and the head keeps 0.65 of the trunk's pitch off the eyes (at most
   0.55 rad). No counter-roll and no rest pitch: the trunk's attitude is the physics'.
-- The cube button in the viewport, Physics bodies (also in the palette), draws the simulated
-  shapes instead, and is kept per user. A body list the figure does not know (an old recording)
-  draws its shapes.
+- (Removed 2026-10-23.) A Physics bodies button drew the simulated shapes instead; the street
+  kit below replaced it.
 
 The articulated physics stands with nearly straight knees at a cruise, so the figure does too;
 their rider rests with soft knees. A softer-knee posture would be a physics change.
+
+**Built (2026-10-23): the street kit, the only rider.** Tarik (Human) asked: "make the model use
+clothes like i used on the photo i sent you. Make it resemble me", then "make it the default
+rider. you can delete the other models like that white body and that one that we copied from the
+OS repo". Claude wrote an original look, the street kit (`riderFigure/streetKit.ts`), from the
+riding outfit (photos kept private, outside the repository): a black full-face helmet with a
+mirrored visor, a chin bar, a small round rear-view mirror on the left and a chin strap with a
+red tab; a loose black tee with bare forearms; orange gloves with black cuffs and knuckles; loose
+light-blue jeans whose hems rest on the shoes; black hard knee guards with raised hexagon cells
+and shin plates, strapped over the jeans; chunky white sneakers with laces. No logo or brand mark
+anywhere. It is built with the game's loft kit and rig (MIT); none of its assets remain, so its
+CC BY attribution went with Cool Rider's look. The Physics bodies view went too: rider bodies
+draw only as the figure, and a body list the figure cannot bind draws no rider. The figure's hip
+joints sit at a thigh body's origin when it is within 0.12 m of the midline (the lateral rider's
+hips), else at the figure's own hip width (the sagittal rider's thighs hang from the pedals).
 
 ### Navigation targets (intent level)
 
@@ -348,7 +362,8 @@ them.
 Later the same day Tarik (Human) asked to copy the game's body and navigation ("theirs are spot
 on"). This replaces decision 7: the rider is EUC Thrills' fictional Cool Rider, with its MIT and
 CC BY 4.0 notices, driven by the physics, with a Physics bodies toggle. It goes ahead of the other
-phases.
+phases. (Replaced on 2026-10-23 by the street kit, the owner's outfit, and no toggle: see Rider
+body.)
 
 Then Tarik asked for a play mode: "freeride experience is really poor. I have to click many
 things, play, etc to test the wheel. And if i crash, it halts mid crash and i have to re-do

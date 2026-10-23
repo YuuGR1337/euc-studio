@@ -26,25 +26,19 @@ atan2 from fdlibm, under this notice (kept in the file):
 
 EUC Thrills
 -----------
-The rider figure of the app's 3D view comes from EUC Thrills by VibezZzCoder
-(https://github.com/VibezZzCoder/EUC-thrills, commit a66dabd). The copied files are in
-app/src/vendor/euc-thrills (see its README.md); app/src/workspaces/ride/riderFigure/rig.ts adapts the game's
-rider construction.
+The rider figure of the app's 3D view is built with code from EUC Thrills by VibezZzCoder
+(https://github.com/VibezZzCoder/EUC-thrills, commit a66dabd): its loft kit for lofted parts, its rider look
+types, the rider's skeleton and arm-carriage values, and its rider construction with two-link IK. The copied
+files are in app/src/vendor/euc-thrills (see its README.md); app/src/workspaces/ride/riderFigure/rig.ts adapts
+the game's rider construction.
 
 - Code: MIT License, Copyright (c) 2026 VibezZzCoder. The full text is in app/src/vendor/euc-thrills/LICENSE,
   and each copied or adapted file keeps the game's notice.
-- The rider's look (its procedural geometry, colours and painted tailoring sheet) is an original asset of the
-  game under the Creative Commons Attribution 4.0 International license
-  (https://creativecommons.org/licenses/by/4.0/):
 
-  Assets from EUC Thrills by VibezZzCoder — CC BY 4.0 — https://github.com/VibezZzCoder/EUC-thrills
-
-  Changes: the figure is posed on EUC Studio's physics bodies, its legs stretched along the bone to the
-  physics' leg lengths and its upper body scaled to the physics' head height. Comments that name the game's
-  real riders removed.
-
-Only the game's fictional rider (Cool Rider) is used. The game's licenses do not cover the real people among
-its other riders, and nothing of theirs is copied.
+The look the figure wears, the street kit (app/src/workspaces/ride/riderFigure/streetKit.ts), is EUC Studio's
+own. No asset of the game (its CC BY 4.0 geometry, colours or painted sheets) is part of EUC Studio. Earlier
+versions used the game's fictional Cool Rider look under CC BY 4.0, with its attribution; it has been removed.
+None of the game's riders is used.
 
 Binary releases include the full license texts of everything they bundle.
 

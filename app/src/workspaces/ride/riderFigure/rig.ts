@@ -1,11 +1,12 @@
 /*! EUC Thrills — (c) 2026 VibezZzCoder — MIT — https://github.com/VibezZzCoder/EUC-thrills */
 // Adapted for EUC Studio from EUC Thrills' src/render/rider.ts (createPlaceholderRider,
-// solveChain, easedHandTarget, armEaseForSpeed). The parts, materials, panels and joint frames
-// are theirs; what changed:
+// solveChain, easedHandTarget, armEaseForSpeed). The construction of a rider from a look (its
+// parts, materials, panels and joint frames) is theirs; the look it builds by default is EUC
+// Studio's own street kit (streetKit.ts). What changed:
 // - no stance solve: EUC Studio poses the joints from the physics bodies (figure.ts);
 // - the legs are three free groups (thigh, shin, foot), not one hip-knee-ankle chain, because
 //   each follows its own physics body;
-// - no hair sway, cloth drape or joint-surface bands (the Cool Rider look uses none of them);
+// - no hair sway, cloth drape or joint-surface bands (the street kit uses none of them);
 // - no rest pitch on the pelvis: the trunk's pitch is the physics'.
 // Joint frames are the game's: +x is the rider's left, +y up, +z forward; limbs hang along -y.
 import * as THREE from "three";
@@ -17,7 +18,6 @@ import {
   patchGeometry,
   vAtHeight,
 } from "../../../vendor/euc-thrills/blockoutKit.ts";
-import { COOL_RIDER_LOOK } from "../../../vendor/euc-thrills/coolRiderLook.ts";
 import type {
   LoftPage,
   RiderLook,
@@ -27,6 +27,7 @@ import type {
   RiderPatch,
 } from "../../../vendor/euc-thrills/riderLook.ts";
 import { RIDER_BLOCKOUT as B } from "../../../vendor/euc-thrills/tuning.ts";
+import { STREET_KIT } from "./streetKit.ts";
 
 const clamp01 = (value: number) => Math.min(1, Math.max(0, value));
 
@@ -169,8 +170,8 @@ export interface RiderRig {
   dispose(): void;
 }
 
-/** Build a rider in a look (Cool Rider by default), in its rest pose. */
-export function buildRiderRig(look: RiderLook = COOL_RIDER_LOOK): RiderRig {
+/** Build a rider in a look (the street kit by default), in its rest pose. */
+export function buildRiderRig(look: RiderLook = STREET_KIT): RiderRig {
   const root = new THREE.Group();
   root.name = "rider-figure-rig";
   const geometries: THREE.BufferGeometry[] = [];
@@ -596,7 +597,7 @@ export function buildRiderRig(look: RiderLook = COOL_RIDER_LOOK): RiderRig {
     headParts.push(paged(patchOn(profiles.head, patch, 1), "head", patch.art));
   neck.add(shadowed(new THREE.Mesh(track(mergeGeometries(headParts)), headMaterial)));
   if (panels.face) neck.add(panelMesh("rider-face", panels.face, profiles.head, null));
-  // What the look adds that the rig has no slot for: Cool Rider's face and his clear visor.
+  // What the look adds that the rig has no slot for: the street kit's mirror and chin strap.
   for (const extra of look.extras) {
     const mesh = new THREE.Mesh(
       track(extra.material ? extra.build() : paged(extra.build(), extra.role, extra.art)),

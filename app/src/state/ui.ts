@@ -62,8 +62,6 @@ interface UiState {
   layoutEpoch: number;
   /** Play the wheel's buzzer through the speakers (on by default). */
   buzzerSound: boolean;
-  /** Draw the rider as its physics shapes instead of the rider figure (off by default). */
-  physicsBodies: boolean;
 
   navigate: (route: Route) => void;
   setAccent: (accent: AccentName) => void;
@@ -78,7 +76,6 @@ interface UiState {
   setShortcutsOpen: (open: boolean) => void;
   setRecordingsOpen: (open: boolean) => void;
   setBuzzerSound: (on: boolean) => void;
-  setPhysicsBodies: (on: boolean) => void;
 }
 
 const DEFAULT_DOCKS: DockState = { right: true, bottom: true };
@@ -121,7 +118,6 @@ export const useUi = create<UiState>((set, get) => ({
   recordingsOpen: false,
   layoutEpoch: 0,
   buzzerSound: readStored<boolean>("buzzerSound", true) !== false,
-  physicsBodies: readStored<boolean>("physicsBodies", false) === true,
 
   navigate: (route) => {
     if (get().route === route) return;
@@ -166,10 +162,6 @@ export const useUi = create<UiState>((set, get) => ({
   setBuzzerSound: (buzzerSound) => {
     writeStored("buzzerSound", buzzerSound);
     set({ buzzerSound });
-  },
-  setPhysicsBodies: (physicsBodies) => {
-    writeStored("physicsBodies", physicsBodies);
-    set({ physicsBodies });
   },
 }));
 

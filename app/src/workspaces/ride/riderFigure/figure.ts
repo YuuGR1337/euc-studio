@@ -1,11 +1,12 @@
 import * as THREE from "three";
-import { COOL_RIDER_LOOK } from "../../../vendor/euc-thrills/coolRiderLook.ts";
 import type { RiderLook } from "../../../vendor/euc-thrills/riderLook.ts";
 import { RIDER_BLOCKOUT as B } from "../../../vendor/euc-thrills/tuning.ts";
 import { type RiderRig, armEaseForSpeed, buildRiderRig, solveChain } from "./rig.ts";
+import { STREET_KIT } from "./streetKit.ts";
 import type { RiderBinding, SkeletonPose } from "./skeleton.ts";
 
-// The EUC Thrills rider (rig.ts) posed on the physics skeleton (skeleton.ts). The physics owns
+// The rider figure (rig.ts, in the street kit) posed on the physics skeleton (skeleton.ts). The
+// rig's construction and arm carriage are EUC Thrills' (MIT). The physics owns
 // the trunk, thighs, shanks and feet: each part of the figure follows its body. Arms, hands and
 // the head move cosmetically, the game's way: the arms hang in its carriage and ease at low
 // speed (armEaseForSpeed), and the head keeps part of the trunk's pitch off the eyes
@@ -59,7 +60,7 @@ export class RiderFigure {
   private readonly last = new THREE.Vector3();
   private hasLast = false;
 
-  constructor(look: RiderLook = COOL_RIDER_LOOK) {
+  constructor(look: RiderLook = STREET_KIT) {
     this.rig = buildRiderRig(look);
     this.lookHeadTop = B.torsoLength + (look.profiles.head.at(-1)?.y ?? 0.34);
   }

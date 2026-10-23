@@ -16,7 +16,6 @@ import { Wait } from "../../ui/Wait.tsx";
 import { FreeRideOverlay } from "../freeRide/FreeRideOverlay.tsx";
 import { PitchProtractor } from "./PitchProtractor.tsx";
 import { ManualButton, ManualHud } from "./ManualHud.tsx";
-import { PhysicsBodiesButton } from "./riderFigure/PhysicsBodiesButton.tsx";
 import { useManualRiding } from "./manual.ts";
 import { LOW_FPS, type Quality } from "./quality.ts";
 import { Scene } from "./Scene.tsx";
@@ -332,7 +331,6 @@ export function Viewport({
                 },
               ]}
             />
-            <PhysicsBodiesButton />
             <ManualButton />
             {onFreeControls && (
               <Button size="sm" onClick={onFreeControls}>

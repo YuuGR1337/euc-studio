@@ -1,12 +1,10 @@
-import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import * as THREE from "three";
-import { paintCoolAtlas } from "../../../vendor/euc-thrills/coolRiderAtlas.ts";
-import { COOL_SHEET_LAYOUT } from "../../../vendor/euc-thrills/coolRiderLook.ts";
 import { RIDER_BLOCKOUT as B } from "../../../vendor/euc-thrills/tuning.ts";
 import { GAME_TO_BODY, RiderFigure } from "./figure.ts";
 import { ANKLE_ABOVE_PEDAL, articulatedBodies, nodesFor, standArticulated } from "./fixtures.ts";
 import { armEaseForSpeed, buildRiderRig } from "./rig.ts";
+import { STREET_KIT } from "./streetKit.ts";
 import { type RiderBinding, bindRider, poseSkeleton, skeletonPose } from "./skeleton.ts";
 
 const world = (object: THREE.Object3D, local: THREE.Vector3) => {
@@ -28,14 +26,6 @@ function posed(options: Parameters<typeof standArticulated>[2] = {}) {
 }
 
 describe("rider figure", () => {
-  it("paints the game's tailoring sheet byte for byte", () => {
-    // The hash of the bytes EUC Thrills' own modules paint (commit a66dabd).
-    const bytes = paintCoolAtlas(COOL_SHEET_LAYOUT);
-    expect(createHash("sha256").update(bytes).digest("hex")).toBe(
-      "49b253cbe935aed826eeea96f69cb0f19b24b5871096d658fac0c53b2d7fefe3",
-    );
-  });
-
   it("builds every part with vertex colours and normals, and frees it all", () => {
     const rig = buildRiderRig();
     const meshes: THREE.Mesh[] = [];
@@ -52,6 +42,31 @@ describe("rider figure", () => {
     for (const mesh of meshes) mesh.geometry.addEventListener("dispose", () => freed++);
     rig.dispose();
     expect(freed).toBe(meshes.length);
+  });
+
+  it("wears the street kit: a mirrored visor, a mirror on the left, no printed sheet", () => {
+    expect(STREET_KIT.atlas).toBeUndefined();
+    const rig = buildRiderRig();
+    const named = (name: string) => {
+      const mesh = rig.root.getObjectByName(name);
+      if (!(mesh instanceof THREE.Mesh)) throw new Error(`no ${name}`);
+      return mesh;
+    };
+    const visor = named("rider-face").material as THREE.MeshStandardMaterial;
+    expect(visor.metalness).toBe(1);
+    expect(visor.roughness).toBeLessThan(0.1);
+    // The mirror's glass is the visor's material, out on the rider's left (+x) of the helmet.
+    expect(named("rider-mirror-glass").material).toBe(visor);
+    rig.root.updateMatrixWorld(true);
+    const mirror = new THREE.Box3().setFromObject(named("rider-mirror"));
+    const helmet = new THREE.Box3().setFromObject(named("rider-face").parent as THREE.Object3D);
+    expect(mirror.getCenter(new THREE.Vector3()).x).toBeGreaterThan(0.15);
+    expect(helmet.max.x).toBeGreaterThan(mirror.max.x - 1e-9);
+    rig.root.traverse((o) => {
+      if (o instanceof THREE.Mesh)
+        expect((o.material as THREE.MeshStandardMaterial).map).toBeNull();
+    });
+    rig.dispose();
   });
 
   it("turns the game's joint frame into the physics body frame", () => {
