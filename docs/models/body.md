@@ -69,6 +69,8 @@ world ── floor (plane, or the scenario's terrain)
        ├─ left_thigh (hinge "left_hip") ── left_shank ("left_knee") ── left_foot ("left_ankle")
        └─ right_thigh ...                  each foot welded to the shell ("on_<side>_pedal"), or for
                                            articulated_contact_v1 a sole-on-pedal pair "<side>_sole_on_pedal"
+          articulated_lateral_v1: each leg adds hip ab/adduction and rotation, the tibia's rotation
+          and ankle roll (14 joints), and knee, shin and calf geoms that rest on the side pads
      rigid: one body, welded to the feet ("on_pedals") until it steps off
 ```
 
@@ -254,7 +256,8 @@ DEFAULT 1000 N·m/rad, 60 N·m·s/rad, 180 N·m), so they give under a bump and 
   and in the 30° launch of the full-effort runs, while the riderless wheel stays up. Contact feet
   stay opt-in until the controller keeps within what the soles carry. The `rider_on_pedals`
   check, in every scenario without a step-off, fails when this happens.
-- **The roll aid holds the upper body too** (`articulated_contact_v1` only). The legs have no roll joints and
+- **The roll aid holds the upper body too** (`articulated_contact_v1`; the lateral rider's
+  upper-body spring leans the whole machine instead, see the lateral rider). The legs have no roll joints and
   contact feet do not hold the body to the shell, so the same roll spring that holds the shell also
   holds the upper body at the wheel's roll target; it stands in for the hip and ankle roll a person
   balances with. Its torque and work add to the reported roll aid. Without it a one-foot stance, or
@@ -281,8 +284,9 @@ DEFAULT 1000 N·m/rad, 60 N·m·s/rad, 180 N·m), so they give under a bump and 
   the turn is `manual_turn_lean_max_deg` (35°, 0.7 g: 1.4 rad/s at 5 m/s, 0.76 rad/s at 9 m/s). The
   lean into the turn changes at up to 60°/s, and the forward lean at 30°/s. Turn requests do not
   fade at walking pace: a stopped rider turns on the spot, through the twist aid (an external yaw
-  torque on the shell, at most 60 N·m) that already held the heading below walking pace. The legs
-  have no twist joint, and the welded rider turns with the wheel. The line never runs more than
+  torque on the shell, at most 60 N·m) that already held the heading below walking pace. The
+  sagittal legs have no twist joint, and the welded rider turns with the wheel (the lateral rider's
+  hips and tibiae twist, and its hips turn the body with the shell). The line never runs more than
   0.5 rad ahead of the wheel, so a wheel held back (a wall, the twist aid's cap) winds up no turn
   that would go on after the input stops. On the stock firmware (2026-10-22)
   a full turn input at a stop turned the wheel 3.75 rad in 1.5 s, and at 3.8-4.1 m/s it settled at
@@ -335,14 +339,14 @@ DEFAULT 1000 N·m/rad, 60 N·m·s/rad, 180 N·m), so they give under a bump and 
   "rider off: both feet off the pedals (the wheel stays up)".
 
 What no rider can do yet: balance sideways or twist without the external aids (the lateral
-rider's later stages), step, hop, use the hips to recover when the soles' centre of pressure
-reaches heel or toe, or brace the legs against the shell. The rigid rider also cannot bend its
-knees and hips.
+rider's later stages), step, hop, or use the hips to recover when the soles' centre of pressure
+reaches heel or toe. Only the lateral rider's legs touch the shell: they rest and press on the
+side pads (stages 2 and 3). The rigid rider also cannot bend its knees and hips.
 
 **A hop with welded feet (feasibility, 2026-10-22; not built).** A hop would be the rider's own
 motion: crouch, straighten the legs fast, then tuck so that the feet lift the wheel. Welded feet
-can pull the wheel up; a real rider does it with the calves against the side pads, which the model
-does not have. A private test rode the Extreme's body on the plain PD balance, without firmware. At
+can pull the wheel up; a real rider does it with the calves against the side pads, which only the
+lateral rider has (this study rode the sagittal rider). A private test rode the Extreme's body on the plain PD balance, without firmware. At
 the crouch rate (3 rad/s) the legs never threw the body up, and the wheel stayed down at every joint
 cap. Straightening as fast as the joint caps allow, the tire rose 1.2 cm at today's 180 N·m per hip
 and knee. It rose 2.4 cm at 300 N·m and 6.2 cm at 400 N·m, and in both the scripted tuck then
@@ -352,32 +356,52 @@ The second is a stronger, still estimated, jump torque. The third is a check of 
 firmware does with a wheel in the air. The fourth is a choice between the welds' pull and a
 calf-pad contact. This is a study phase of its own, not a control setting.
 
-**The absorb (2026-10-23; task 61, part 1).** The owner rides straight into curbs of about 15 cm
-on soft knees that let the wheel come up under him. With legs that held their posture, a curb
-that stopped the wheel in 30 ms turned the welded rider and the shell as one rigid body about the
-axle (about 200 kg·m²/s of the body's momentum): the shell pitched nose-down at 150-300°/s, more
-than the firmware's 210 N·m stops, and the rider fell. Most of that moment went through the
-ankles: the lean task and the joints' damping held the body upright over feet that had stopped
-with the wheel. A welded rider (`articulated_sagittal_v1` and `articulated_lateral_v1`) now
-absorbs. When the axle's speed across the ground falls faster than `absorb_decel_mps2` (30 m/s²,
-the speed and its fall each averaged over 10 ms), the absorb starts in full, and it fades out over
-`absorb_time_s` (0.3 s). In it the knees fold by up to `absorb_fold_rad` (0.6 rad, the hips by the
-crouch's share), the hips and knees hold their posture at 0.15 of `joint_kp`, every leg joint
-keeps 0.2 of `joint_kd`, and the ankles' lean task gives way. All are ESTIMATES. Two other
-triggers did not do: a sole's load (the sagittal rider's soles take peaks of over three times
-their share in a full manual turn) and the speed along the heading (it drops by a tenth for a few
-milliseconds whenever the shell's heading jumps in a hard turn). Riding to 15 km/h, braking hard
-to a stop and a full manual turn at 5 m/s do not start it; a 10 cm curb at 10 km/h does, and the
-knees fold by about 0.5 rad. `RiderState::absorb` reports it. The absorb alone does not carry a
-rider over a 15 cm curb (stock firmware, the convex-mesh tire of bundle P1): the shell stays
-within −12° while the wheel climbs, but the body goes on 0.5 m ahead, leaning 0.5 rad, and the
-recovery overshoots. A brace before the curb (part 2, to come: lean back 0.10 rad and crouch
-0.3 rad in the last 0.55 s) carries both riders over 15 cm at 10-15 km/h and the lateral rider
-also at 8 km/h (the sagittal rider's wheel only gets 7 cm up the face at 8 km/h); 20 cm still
-throws them. In the shipped scenarios (stock firmware, the convex-mesh tire) it starts once each
-in `pothole-5cm-20kmh`, `world-pothole-15kmh`, `world-curb-up-30deg`, `world-curb-up-90deg` and
-`world-stairs-down-5kmh`, and never in `hard-braking-30kmh` or the full-effort, overlean and
-step-off runs.
+**The absorb (2026-10-23; task 61, part 1).** The owner rides straight into curbs of about 15 cm on
+soft knees that let the wheel come up under him. With legs that held their posture, a curb that
+stopped the wheel in 30 ms turned the welded rider and the shell as one rigid body about the axle
+(about 200 kg·m²/s of the body's momentum): the shell pitched nose-down at 150-300°/s, more than
+the firmware's 210 N·m stops, and the rider fell. Most of that moment went through the ankles: the
+lean task and the joints' damping held the body upright over feet that had stopped with the wheel.
+A welded rider (`articulated_sagittal_v1` and `articulated_lateral_v1`) now absorbs. When the
+axle's speed across the ground falls faster than `absorb_decel_mps2` (30 m/s², the speed and its
+fall each averaged over 10 ms), the absorb starts in full, and it fades out over `absorb_time_s`
+(0.3 s). In it the knees fold by up to `absorb_fold_rad` (0.6 rad, the hips by the crouch's share),
+the hips and knees hold their posture at 0.15 of `joint_kp`, every leg joint keeps 0.2 of
+`joint_kd`, and the ankles' lean task gives way. All are ESTIMATES. Two other triggers did not do:
+a sole's load (the sagittal rider's soles take peaks of over three times their share in a full
+manual turn) and the speed along the heading (it drops by a tenth for a few milliseconds whenever
+the shell's heading jumps in a hard turn). Riding to 15 km/h, braking hard to a stop and a full
+manual turn at 5 m/s do not start it; a 10 cm curb at 10 km/h does, and the knees fold by about 0.5
+rad. `RiderState::absorb` reports it. The absorb alone does not carry a rider over a 15 cm curb
+(stock firmware, the convex-mesh tire of bundle P1): the shell stays within −12° while the wheel
+climbs, but the body goes on 0.5 m ahead, leaning 0.5 rad, and the recovery overshoots: the brace
+(below) is needed too. In the shipped scenarios (stock firmware, the convex-mesh tire) it starts
+once each in `pothole-5cm-20kmh`, `world-pothole-15kmh`, `world-curb-up-30deg`,
+`world-curb-up-90deg` and `world-stairs-down-5kmh`, and never in `hard-braking-30kmh` or the
+full-effort, overlean and step-off runs.
+
+**The brace (2026-10-23; task 61, part 2).** A rider who sees a curb coming leans back a little and
+bends the knees. The scripted articulated rider looks ahead every 10 ms: from the ground just in
+front of the tire, at points at most 15 cm apart along the heading, out to `brace_lead_s` (0.55 s)
+at the speed now (`Physics::ground_ray_m`, the ground only: the strip and its curbs, or the city).
+While two neighbouring points rise by more than `brace_step_m` (7 cm), a step and not a slope (that
+slope would be steeper than any road), it braces: it leans back by `brace_lean_deg` (5.7°) on top
+of the lean its intent asks for, and its knees bend by `brace_crouch_rad` (0.3 rad, or the crouch
+asked for if deeper). Once the tire meets the step the ground in front of it is the step's top, the
+brace ends and the absorb takes over. 7 cm is a DEFAULT: the convex-mesh tire climbs 8 cm curbs at
+every speed and angle without help and 10 cm only at walking pace (posefix's curb table); the lean,
+the crouch and the lead are ESTIMATES from the K0 study. No brace below 1 m/s, for a step down, or
+by hand: in Free Ride the player braces, or not, as a rider does. `RiderState::brace_lean_rad`
+reports it. On the stock firmware with the convex-mesh tire, square on: with the absorb and the
+brace, the sagittal rider crosses a 15 cm curb at 10, 12 and 15 km/h (the shell within −17°, −16°
+and −21°), the lateral rider at 8, 10, 12 and 15 km/h (−14° to −24°); both cross 10 cm at 10 km/h
+(−3°), and 20 cm still throws them. At 8 km/h the sagittal rider's wheel gets only 7 cm up the face
+and rolls back: on this rigid mesh the wheel itself cannot climb 15 cm at 8 km/h with that rider.
+On posefix's soft 25 psi tire (bundle P1) both riders cross 15 cm at 8, 10 and 15 km/h (−4° to
+−15°), and 20 cm still throws them. In the shipped scenarios (stock firmware, the convex-mesh tire)
+the rider braces only in `world-curb-up-30deg` and `world-curb-up-90deg`, and with the absorb it
+now rides both (each fell without them); it does not brace up the 20 % climb of
+`hill-climb-low-battery` or the plaza ramp of `world-ramp-up-7kmh`, which are slopes.
 
 ### The lateral rider (opt-in)
 
@@ -546,6 +570,9 @@ is a change in the pitch plane, planned for a later stage). He rides straight in
   5 m/s settles at 34° of lean and 1.12 rad/s (sagittal: 34°, 1.13 rad/s); it rides 30 km/h
   straight with no roll. Stage 1 passed `ride-20kmh-stop` on the stock firmware at 2.45 times real
   time (sagittal 2.51 in the same session).
+- **Tests.** `cargo test -p euc-physics --test lateral` (the body, its joints and soft knees) and
+  `cargo test -p euc-sim --test lateral_pads` (the legs on the Extreme's pads, its turns); the curb
+  answer of both articulated riders in `--test absorb` and `--test brace` (euc-physics).
 
 ## Aids (M2)
 
@@ -644,9 +671,10 @@ Rider and aids (scenario `[rider]`, `[rider.control]`, `[assist]`; these are the
 | `control.tiltback_feel_deg`, `tiltback_ease_kmh_per_deg`, `tiltback_ease_brake` | 2°, 1.5 km/h per degree, 1 m/s² | DEFAULT: how a rider reacts to tiltback |
 | `control.steer_kp`, `steer_kd`, `steer_max_nm` | 2000 N·m/rad, 200 N·m·s/rad, 60 N·m | DEFAULT: how a rider keeps the line |
 | `control.manual_turn_rate_max_rad_s`, `manual_turn_lean_max_deg`, `manual_turn_lean_rate_deg_s`, `manual_lean_rate_deg_s` | 2.5 rad/s, 35°, 60°/s, 30°/s | DEFAULT, riding by hand only (Free Ride, Ride's manual mode): the turn cap at a stop, falling with speed to `g·tan(35°)/v`; scripted riding keeps 1.0 rad/s, 20°, 30°/s and 12°/s |
+| `control.brace_lead_s`, `brace_step_m`, `brace_lean_deg`, `brace_crouch_rad` | 0.55 s, 0.07 m, 5.7°, 0.3 rad | Scripted riding, articulated riders: how far ahead the rider looks for a step up (0: no brace), the smallest step it braces for (DEFAULT: the mesh tire climbs 8 cm alone), and how far it leans back and bends the knees then (ESTIMATES) |
 | `control.manual_drive_lean_max_deg`, `manual_drive_kp` | 22°, 1.2 /s | DEFAULT, manual drive only (`Intent::Accel`): the drive lean limit (stock follows up to 22° at low speed) and the reference-speed gain (tuned on stock at 40 km/h: holds speed, stops cleanly) |
 | `let_go.enabled`, `after_cut_deg`, `fall_deg`, `reaction_s` | true, 20°, 45°, 0.1 s | DEFAULT: when a rider leaves a wheel that goes down |
-| `assist.roll_stiffness`, `roll_damping` | 5000 N·m/rad, 500 N·m·s/rad | on the shell; for `articulated_contact_v1` also on the upper body |
+| `assist.roll_stiffness`, `roll_damping` | 5000 N·m/rad, 500 N·m·s/rad | on the shell; for `articulated_contact_v1` also on the upper body; for `articulated_lateral_v1` the shell's and the upper body's springs lean wheel and rider as one |
 
 ## Scenarios
 

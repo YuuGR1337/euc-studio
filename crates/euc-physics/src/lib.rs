@@ -112,6 +112,19 @@ const ADDUCTION_PER_SWING: f64 = 0.17;
 /// its start (ESTIMATE: legs that give).
 const ABSORB_STIFFNESS: f64 = 0.15;
 
+/// How often the scripted rider looks ahead for a step up, steps (every 10 ms).
+const BRACE_LOOK_STEPS: u64 = 20;
+
+/// The farthest apart the points the scripted rider looks at are, metres: a rise of
+/// `brace_step_m` within it is a step, not a slope.
+const BRACE_SPACING_M: f64 = 0.15;
+
+/// The most points the scripted rider looks at (0.55 s at 30 km/h).
+const BRACE_SAMPLES_MAX: usize = 32;
+
+/// The slowest speed the scripted rider braces at, m/s: at walking pace a curb is stepped over.
+const BRACE_SPEED_MIN_MPS: f64 = 1.0;
+
 /// How long the wheel's speed, and then its fall, are averaged over for the absorb's trigger,
 /// seconds.
 const ABSORB_DECEL_TIME_S: f64 = 0.01;
@@ -271,6 +284,9 @@ pub struct RiderState {
     /// How far the legs give way now, 0 to 1, after something stopped the wheel (see
     /// [`Articulation::absorb_decel_mps2`]); zero for the rigid and contact-feet riders.
     pub absorb: f64,
+    /// How far the scripted rider leans back for a step up ahead now, radians; 0 without a brace
+    /// (see [`RiderControl::brace_lead_s`]).
+    pub brace_lean_rad: f64,
     /// Command minus measured lean, radians.
     pub lean_error_rad: f64,
     /// Last external yaw aid on the shell, N·m, left
@@ -576,9 +592,12 @@ struct Stance {
     offset_rad: [f64; MAX_LEG_JOINTS],
 }
 
-/// The welded rider's absorb: legs that give way when something stops the wheel.
+/// The articulated rider's answer to a curb: a brace before it (scripted riding), legs that give
+/// way when it stops the wheel (the welded riders).
 #[derive(Debug, Clone, Copy, Default)]
 struct Absorb {
+    /// The scripted rider braces for a step up ahead (its look ahead, every 10 ms).
+    brace: bool,
     /// How far the legs give way now, 0 to 1.
     level: f64,
     /// How fast `speed` falls, m/s², averaged over [`ABSORB_DECEL_TIME_S`].
@@ -1047,6 +1066,7 @@ impl Physics {
             ankle_saturated: self.ankle_saturated(),
             ankle_saturation_s: self.ankle_saturation_s,
             absorb: self.absorb.level,
+            brace_lean_rad: self.rider.brace_lean(),
             lean_error_rad: self.rider.lean_command() - measured_lean,
             yaw_aid_torque_nm: self.yaw_aid_torque,
             roll_aid_torque_nm: self.roll_aid_torque,
@@ -1234,6 +1254,7 @@ impl Physics {
         };
         let rider_off = self.rider_off();
         self.update_absorb(rider_off, att.ground_speed);
+        self.look_ahead(&att, rider_off);
         // In an absorb the ankles give way too: holding the body upright over feet that stopped
         // with the wheel would turn the body's momentum into a nose-down moment on the pedals.
         self.ankle_torque = if rider_off { 0.0 } else { self.rider.ankle_torque(&sense) * (1.0 - self.absorb.level) };
@@ -1345,7 +1366,9 @@ impl Physics {
             *lift += (target - *lift).clamp(-step, step);
         }
         let crouch_step = CROUCH_RATE_RAD_S * TIMESTEP_S;
-        self.crouch_rad += (self.crouch_target_rad - self.crouch_rad).clamp(-crouch_step, crouch_step);
+        let brace = if self.absorb.brace { self.setup.rider.control.brace_crouch_rad } else { 0.0 };
+        let crouch = self.crouch_target_rad.max(brace);
+        self.crouch_rad += (crouch - self.crouch_rad).clamp(-crouch_step, crouch_step);
         self.stance_rad += (self.soft_knee_rad() - self.stance_rad).clamp(-crouch_step, crouch_step);
         let lifted = self.foot_lift_rad.map(|lift| lift > 0.0);
         for (index, joint) in legs.joints().iter().enumerate() {
@@ -1538,6 +1561,46 @@ impl Physics {
         } else {
             absorb.level = (absorb.level - TIMESTEP_S / config.absorb_time_s).max(0.0);
         }
+    }
+
+    /// The scripted articulated rider looks ahead every [`BRACE_LOOK_STEPS`] steps and braces
+    /// while a step up lies within `brace_lead_s` at the speed now: from the ground just in front
+    /// of the tire, points at most [`BRACE_SPACING_M`] apart along the heading, and a rise of more
+    /// than `brace_step_m` between two neighbours (a step, not a slope: that slope would be steeper
+    /// than any road). Once the tire meets the step the ground in front of it is the step's top,
+    /// and the brace ends: the absorb takes over. A step down needs no brace. By hand (Free Ride)
+    /// a person braces on their own, so the physics never does.
+    fn look_ahead(&mut self, att: &Attitude, rider_off: bool) {
+        let c = self.setup.rider.control;
+        if !((self.time_s() / TIMESTEP_S).round() as u64).is_multiple_of(BRACE_LOOK_STEPS) {
+            return;
+        }
+        let scripted = self.setup.rider.model.is_articulated() && !self.rider.manual() && c.brace_lead_s > 0.0;
+        if !scripted || rider_off || self.held() || att.speed < BRACE_SPEED_MIN_MPS {
+            self.absorb.brace = false;
+            self.rider.set_brace(false);
+            return;
+        }
+        let axle = self.data.xpos()[self.ids.wheel];
+        let [hx, hy] = att.heading;
+        let front = self.setup.wheel.tire.radius_m;
+        let reach = att.speed * c.brace_lead_s;
+        let samples = ((reach / BRACE_SPACING_M).ceil() as usize).clamp(1, BRACE_SAMPLES_MAX);
+        let mut last = self.ground_ray_m([axle[0] + hx * front, axle[1] + hy * front]);
+        let mut brace = false;
+        for k in 1..=samples {
+            let d = front + reach * k as f64 / samples as f64;
+            let height = self.ground_ray_m([axle[0] + hx * d, axle[1] + hy * d]);
+            if let (Some(before), Some(now)) = (last, height)
+                && now - before > c.brace_step_m
+            {
+                brace = true;
+                break;
+            }
+            last = height;
+        }
+        self.absorb.brace = brace;
+        self.rider.set_brace(brace);
     }
 
     /// Simulated seconds since the model was built.

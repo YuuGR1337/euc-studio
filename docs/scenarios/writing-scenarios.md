@@ -119,6 +119,7 @@ header. `euc sim run --rider-model ...` overrides the scenario's model for one r
 | `control.steer_kp`, `control.steer_kd`, `control.steer_max_nm` | 2000, 200, 60 | The external twist aid that keeps the heading: the start heading (`[world] start.heading_deg`; world +x without a world), then each `route` waypoint in turn. |
 | `control.command_delay_s`, `control.feedback_delay_s` | 0, 0 | Experimental: delay of the rider's commands and of what the rider senses, simulated seconds (0 to 0.30). |
 | `control.manual_turn_rate_max_rad_s`, `control.manual_turn_lean_max_deg`, `control.manual_turn_lean_rate_deg_s`, `control.manual_lean_rate_deg_s` | 2.5, 35, 60, 30 | Riding by hand only (Free Ride, Ride's manual mode): the turn cap at a stop, the lean into turns and how fast the leans change. A scenario's own riding never uses them. |
+| `control.brace_lead_s`, `control.brace_step_m`, `control.brace_lean_deg`, `control.brace_crouch_rad` | 0.55, 0.07, 5.7, 0.3 | The articulated riders' brace for a step up ahead: how far ahead they look (s; 0: no brace), the smallest step (m), the lean back (degrees) and the knee bend (rad). Free Ride never braces for the player. |
 | `control.manual_drive_lean_max_deg`, `control.manual_drive_kp` | 22, 1.2 | Free Ride's drive mode only: the largest lean when asked for an acceleration, and how hard the rider holds the speed the asks add up to. A scenario's own riding never uses them. |
 
 `[rider.let_go]` says when the rider lets go of the pedals of a wheel that goes down: `enabled`

@@ -669,6 +669,16 @@ pub struct RiderControl {
     /// measured speed, 1/s (the lead is capped at 0.5 m/s). It holds speed against what the lean
     /// for the drag alone does not cover.
     pub manual_drive_kp: f64,
+    /// Scripted riding only (the articulated riders): how far ahead the rider looks for a step up
+    /// to brace for, seconds at the speed now (0: no brace). By hand a person braces on their own.
+    pub brace_lead_s: f64,
+    /// The smallest step up the rider braces for, metres (DEFAULT: the convex-mesh tire climbs
+    /// 8 cm curbs at every speed and angle without help, 10 cm only at walking pace).
+    pub brace_step_m: f64,
+    /// How far the rider leans back in a brace, degrees (ESTIMATE).
+    pub brace_lean_deg: f64,
+    /// How far the knees bend in a brace, radians of knee flexion (ESTIMATE).
+    pub brace_crouch_rad: f64,
 }
 
 impl Default for RiderControl {
@@ -702,6 +712,10 @@ impl Default for RiderControl {
             manual_lean_rate_deg_s: 30.0,
             manual_drive_lean_max_deg: 22.0,
             manual_drive_kp: 1.2,
+            brace_lead_s: 0.55,
+            brace_step_m: 0.07,
+            brace_lean_deg: 5.7,
+            brace_crouch_rad: 0.3,
         }
     }
 }
@@ -733,6 +747,9 @@ impl RiderControl {
             ("manual_turn_lean_rate_deg_s", self.manual_turn_lean_rate_deg_s),
             ("manual_lean_rate_deg_s", self.manual_lean_rate_deg_s),
             ("manual_drive_kp", self.manual_drive_kp),
+            ("brace_lead_s", self.brace_lead_s),
+            ("brace_step_m", self.brace_step_m),
+            ("brace_lean_deg", self.brace_lean_deg),
         ];
         for (name, value) in nonnegative {
             if !value.is_finite() || value < 0.0 {
@@ -745,6 +762,12 @@ impl RiderControl {
             if !value.is_finite() || !(0.0..90.0).contains(&value) {
                 return Err(ParamError(format!("rider.control.{name} must be finite and in [0, 90)")));
             }
+        }
+        if !self.brace_crouch_rad.is_finite() || !(0.0..=crate::CROUCH_MAX_RAD).contains(&self.brace_crouch_rad) {
+            return Err(ParamError(format!(
+                "rider.control.brace_crouch_rad must be finite and in [0, {}]",
+                crate::CROUCH_MAX_RAD
+            )));
         }
         if !self.twist_fade_mps.is_finite() || self.twist_fade_mps <= 0.0 {
             return Err(ParamError("rider.control.twist_fade_mps must be finite and positive".into()));
