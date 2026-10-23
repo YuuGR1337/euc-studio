@@ -190,9 +190,13 @@ function Ticker({ fps, moving }: { fps: number; moving: React.RefObject<boolean>
   const invalidate = useThree((s) => s.invalidate);
   useEffect(() => {
     let drawnAt = Number.NaN;
+    let drawnPoses: Float32Array | null = null;
     const id = window.setInterval(() => {
-      if (engine.latest.t === drawnAt && !moving.current) return;
+      // A reset and a new run's first batch can share t = 0: a new raw frame redraws too.
+      if (engine.latest.t === drawnAt && engine.latest.poses === drawnPoses && !moving.current)
+        return;
       drawnAt = engine.latest.t;
+      drawnPoses = engine.latest.poses;
       invalidate();
     }, 1000 / fps);
     return () => window.clearInterval(id);

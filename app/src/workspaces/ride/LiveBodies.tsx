@@ -1,5 +1,5 @@
-import { useFrame } from "@react-three/fiber";
-import { useMemo, useRef } from "react";
+import { useFrame, useThree } from "@react-three/fiber";
+import { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import { surface, text } from "../../design/tokens.ts";
 import { engine, useEngineVersion } from "../../engine/index.ts";
@@ -124,6 +124,10 @@ export function LiveBodies({
     const poses = frame ? (frame.bodies === bodies ? frame.poses : null) : source.latest.poses;
     placeBodies(nodes.current, bodies, poses, placed.current);
   }, -50);
+  // A demand frameloop draws only on request: a new body list with the same names changes no
+  // prop, so ask for the frame in which placeBodies hides its stale groups.
+  const invalidate = useThree((s) => s.invalidate);
+  useEffect(() => invalidate(), [bodies, invalidate]);
 
   const placedBodies = bodies.map((b, i) => (
     <group

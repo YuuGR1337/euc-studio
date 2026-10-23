@@ -108,8 +108,9 @@ test.afterAll(async () => {
   await server?.close();
 });
 
-async function open(page: Page) {
-  await page.goto(base);
+/** The Ride workspace; `query` "?quality=low" gives the low-quality view (a demand frameloop). */
+async function open(page: Page, query = "") {
+  await page.goto(base.replace("#/ride", `${query}#/ride`));
   await expect(page.getByTestId("viewport")).toHaveAttribute("data-scene", "ready", {
     timeout: 60_000,
   });
@@ -121,15 +122,22 @@ function send(page: Page, message: unknown) {
 }
 
 /**
- * One sample at `t` with the poses of FINAL and `speed` (other channels 0), as
+ * One sample at `t` with the poses of FINAL moved `dx` along x and `speed` (other channels 0), as
  * crates/euc-telemetry lays out a batch: to the ride's stream, or to a comparison's run A or B.
  */
 function sendBatch(
   page: Page,
   t: number,
-  { to = "stream", speed = 0 }: { to?: "stream" | "a" | "b"; speed?: number } = {},
+  {
+    to = "stream",
+    speed = 0,
+    dx = 0,
+  }: { to?: "stream" | "a" | "b"; speed?: number; dx?: number } = {},
 ) {
-  const poses = BODIES.flatMap(([name]) => [...(FINAL[name] ?? [0, 0, 0]), 1, 0, 0, 0]);
+  const poses = BODIES.flatMap(([name]) => {
+    const [x, y, z] = FINAL[name] ?? [0, 0, 0];
+    return [x + dx, y, z, 1, 0, 0, 0];
+  });
   const layout = {
     header: [BATCH_MAGIC, BATCH_VERSION, BATCH_FLAG_POSES, BATCH_HEADER_BYTES],
     channels: CHANNELS.length,
@@ -167,11 +175,16 @@ function sendBatch(
   );
 }
 
-function status(page: Page, state: string, t: number) {
+function status(
+  page: Page,
+  state: string,
+  t: number,
+  { epoch = 1, firmware = "stock" }: { epoch?: number; firmware?: string } = {},
+) {
   return send(page, {
     type: "status",
     run_mode: "scenario",
-    run_epoch: 1,
+    run_epoch: epoch,
     buttons_ready: false,
     power_button_ready: false,
     state,
@@ -180,7 +193,7 @@ function status(page: Page, state: string, t: number) {
     build: "Fixture",
     backend: "fixture",
     scenario: "ride-20kmh-stop",
-    firmware: "stock",
+    firmware,
     t_s: t,
     rtf: 0,
     target_rtf: 1,
@@ -289,6 +302,63 @@ test("hides bodies until a frame of them arrives, never at the origin", async ({
   expect((await redrawn()).figure).toBe(false);
   await sendBatch(page, 40);
   await expect.poll(async () => (await drawnFigure(page)).shown).toBe(true);
+});
+
+/** A finished run (status run number 1) drawn at FINAL. */
+async function finishedRun(page: Page) {
+  await send(page, { type: "reset", scenario: "ride-20kmh-stop" });
+  await send(page, { type: "bodies", bodies });
+  await sendBatch(page, 40);
+  await status(page, "completed", 40);
+  await expect
+    .poll(async () => (await drawnBodies(page)).map((b) => b.visible))
+    .toEqual(BODIES.map(() => true));
+}
+
+// The low-quality view draws only on request: on the Ticker's clock when the run moved, on an
+// orbit drag, or when the scene graph changes. These checks never ask for a frame themselves.
+
+test("low quality: a new body list with the same names hides the old bodies at once", async ({
+  page,
+}) => {
+  await open(page, "?quality=low");
+  await finishedRun(page);
+  // The next run, as an attach sends it: a reset, then a new list with the same names. The
+  // reset's own frame is drawn first; only the new list can ask for the frame that hides the
+  // finished run's bodies.
+  await send(page, { type: "reset", scenario: "ride-20kmh-stop" });
+  await page.waitForTimeout(500);
+  await send(page, { type: "bodies", bodies });
+  await expect
+    .poll(async () => (await drawnBodies(page)).map((b) => b.visible), { timeout: 2000 })
+    .toEqual(BODIES.map(() => false));
+  expect((await drawnFigure(page)).shown).toBe(false);
+});
+
+test("low quality: a paused new run after a firmware switch shows its first pose without play", async ({
+  page,
+}) => {
+  await open(page, "?quality=low");
+  await finishedRun(page);
+  // A firmware switch rebuilds a finished run paused. The runner sends a reset and an empty body
+  // list, the new run's status, then a reset, its bodies and one sample at t 0. A reset sets t
+  // to 0 too, so the sample's time alone does not move the Ticker.
+  const next = { epoch: 2, firmware: "ours-clean" };
+  await send(page, { type: "reset", scenario: "ride-20kmh-stop" });
+  await send(page, { type: "bodies", bodies: [] });
+  await status(page, "starting", 0, next);
+  await page.waitForTimeout(500);
+  await send(page, { type: "reset", scenario: "ride-20kmh-stop" });
+  await send(page, { type: "bodies", bodies });
+  await page.waitForTimeout(500);
+  await sendBatch(page, 0, { dx: -70 });
+  await status(page, "paused", 0, next);
+  await expect
+    .poll(async () => (await drawnBodies(page)).find((b) => b.name === "left_foot"), {
+      timeout: 2000,
+    })
+    .toEqual({ name: "left_foot", visible: true, at: [10, 0.1, 0.307] });
+  await expect.poll(async () => (await drawnFigure(page)).shown, { timeout: 2000 }).toBe(true);
 });
 
 /** What a comparison's runs hold: sample times, speeds and the latest frame's float count. */
