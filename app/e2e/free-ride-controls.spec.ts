@@ -63,11 +63,11 @@ test.afterAll(async () => {
 async function open(page: Page) {
   await page.goto(url);
   await page.getByLabel("Free ride control surface", { exact: true }).focus();
-  await expect(page.getByRole("button", { name: "Arm and ride", exact: true })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Ride", exact: true })).toBeEnabled();
 }
 async function arm(page: Page) {
-  await expect(page.getByRole("button", { name: "Arm and ride", exact: true })).toBeEnabled();
-  await page.getByRole("button", { name: "Arm and ride", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Ride", exact: true })).toBeEnabled();
+  await page.getByRole("button", { name: "Ride", exact: true }).click();
   await expect(page.getByRole("button", { name: "Pause ride", exact: true })).toBeVisible();
 }
 async function lastInput(page: Page) {
@@ -77,6 +77,11 @@ async function select(page: Page, name: string, option: string) {
   await page.getByRole("combobox", { name, exact: true }).click();
   await page.getByRole("option", { name: option, exact: true }).click();
 }
+async function openPrecise(page: Page) {
+  await page.getByRole("button", { name: "Precise input", exact: true }).click();
+}
+const status = (page: Page) => page.evaluate(() => ({ ...window.freeRideFixture.status }));
+const deg = (value: number) => (value * Math.PI) / 180;
 
 test("held keys send live lean and turn; release sends neutral with ordered packets", async ({
   page,
@@ -106,7 +111,7 @@ test("outside text focus pauses and a held key cannot resume on refocus", async 
   await page.keyboard.down("w");
   await expect.poll(async () => (await lastInput(page))?.desired_lean_rad).toBeGreaterThan(0);
   await page.getByLabel("Outside text field", { exact: true }).focus();
-  await expect(page.getByRole("button", { name: "Arm and ride", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Ride", exact: true })).toBeVisible();
   await expect.poll(() => page.evaluate(() => window.freeRideFixture.pauses)).toBeGreaterThan(0);
   await page.getByLabel("Free ride control surface", { exact: true }).focus();
   const refocusedAt = await page.evaluate(() => performance.now());
@@ -114,7 +119,8 @@ test("outside text focus pauses and a held key cannot resume on refocus", async 
   await expect
     .poll(() => page.evaluate((start) => performance.now() - start, refocusedAt))
     .toBeGreaterThan(500);
-  await expect(page.getByRole("button", { name: "Arm and ride", exact: true })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Ride", exact: true })).toBeDisabled();
+  expect((await status(page)).armed).toBe(false);
   await page.keyboard.up("w");
   await arm(page);
   await expect.poll(async () => (await lastInput(page))?.desired_lean_rad).toBe(0);
@@ -123,6 +129,7 @@ test("outside text focus pauses and a held key cannot resume on refocus", async 
 test("keyboard slider sends motion only while its key stays down", async ({ page }) => {
   await open(page);
   await arm(page);
+  await openPrecise(page);
   await page.getByRole("slider", { name: "Desired lean", exact: true }).focus();
   await page.keyboard.down("ArrowRight");
   await expect.poll(async () => (await lastInput(page))?.desired_lean_rad).toBeGreaterThan(0);
@@ -131,18 +138,122 @@ test("keyboard slider sends motion only while its key stays down", async ({ page
   await expect(page.getByRole("button", { name: "Pause ride", exact: true })).toBeVisible();
 });
 
-test("gamepad axes drive live packets and disconnect pauses", async ({ page }) => {
-  await open(page);
+/** Connects the controlled pad at rest and lets the controls see it centred (a new run needs that). */
+async function padAtRest(page: Page) {
   await page.evaluate(() => window.freeRideFixture.gamepad([0, 0]));
-  await select(page, "Input source", "Gamepad");
-  await select(page, "Gamepad", "Controlled standard gamepad");
-  await arm(page);
+  await expect(page.getByTestId("free-ride-input")).toContainText("gamepad takes over");
+  await page.waitForTimeout(200);
+}
+
+test("a pushed stick takes over, arms and rides; disconnect pauses", async ({ page }) => {
+  await open(page);
+  await padAtRest(page);
   await page.evaluate(() => window.freeRideFixture.gamepad([0.5, -0.6]));
+  await expect.poll(async () => (await status(page)).source).toBe("gamepad");
+  await expect.poll(async () => (await status(page)).armed).toBe(true);
   await expect.poll(async () => (await lastInput(page))?.desired_lean_rad).toBeGreaterThan(0);
   await expect.poll(async () => (await lastInput(page))?.heading_rate_rad_s).toBeLessThan(0);
   await page.evaluate(() => window.freeRideFixture.gamepad(null));
-  await expect(page.getByRole("button", { name: "Arm and ride", exact: true })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Ride", exact: true })).toBeDisabled();
   await expect.poll(() => page.evaluate(() => window.freeRideFixture.status.armed)).toBe(false);
+});
+
+test("the right trigger leans forward and X counts down to a restart", async ({ page }) => {
+  await open(page);
+  // Standard mapping: 7 is the right trigger, 2 is X.
+  await padAtRest(page);
+  await page.evaluate(() => window.freeRideFixture.gamepad([0, 0], [7], { 7: 1 }));
+  await expect.poll(async () => (await status(page)).armed).toBe(true);
+  await expect.poll(async () => (await lastInput(page))?.desired_lean_rad).toBeGreaterThan(0);
+  await page.evaluate(() => window.freeRideFixture.gamepad([0, 0], [2]));
+  await expect(page.getByText(/Restarting at the start point/)).toBeVisible();
+  await expect.poll(() => page.evaluate(() => window.freeRideFixture.restarts)).toBe(1);
+});
+
+test("the first push rides without the Ride button and the lean ramps up", async ({ page }) => {
+  await open(page);
+  const before = await page.evaluate(() => window.freeRideFixture.inputs.length);
+  await page.keyboard.down("w");
+  await expect.poll(async () => (await status(page)).armed).toBe(true);
+  await expect.poll(async () => (await lastInput(page))?.desired_lean_rad).toBeCloseTo(deg(10), 3);
+  await page.keyboard.up("w");
+  const armed = (await page.evaluate((start) => window.freeRideFixture.inputs.slice(start), before))
+    .filter((p) => p.armed)
+    .map((p) => p.desired_lean_rad);
+  // The first armed packet is neutral, then the lean grows step by step to its 10° key limit.
+  expect(armed[0]).toBe(0);
+  const rising = armed.slice(0, armed.findIndex((lean) => lean >= deg(9.9)) + 1);
+  expect(rising.length).toBeGreaterThan(4);
+  expect(rising.every((lean, i) => i === 0 || lean >= (rising[i - 1] ?? 0))).toBe(true);
+  await expect.poll(async () => (await lastInput(page))?.desired_lean_rad).toBe(0);
+});
+
+test("Space crouches instead of pausing, and keys work with focus on the page", async ({
+  page,
+}) => {
+  await open(page);
+  await page.getByText("Controlled transport. No firmware or physical simulation runs.").click();
+  await page.keyboard.down("w");
+  await expect.poll(async () => (await status(page)).armed).toBe(true);
+  const pausesBefore = await page.evaluate(() => window.freeRideFixture.pauses);
+  await page.keyboard.down("Space");
+  await page.keyboard.up("Space");
+  await page.keyboard.up("w");
+  await expect.poll(async () => (await lastInput(page))?.desired_lean_rad).toBe(0);
+  expect(await page.evaluate(() => window.freeRideFixture.pauses)).toBe(pausesBefore);
+  expect((await status(page)).armed).toBe(true);
+  await page.keyboard.press("Escape");
+  await expect.poll(async () => (await status(page)).armed).toBe(false);
+});
+
+test("on the current engine a full turn gets its cap, Space crouches, R restarts", async ({
+  page,
+}) => {
+  await page.goto(url);
+  await page.evaluate(() => window.freeRideFixture.fr2b(1.4, 0));
+  await page.getByLabel("Free ride control surface", { exact: true }).focus();
+  await page.keyboard.down("a");
+  await expect.poll(async () => (await status(page)).armed).toBe(true);
+  await expect.poll(async () => (await lastInput(page))?.heading_rate_rad_s).toBeCloseTo(1.4, 3);
+  await page.keyboard.down("Space");
+  await expect.poll(async () => (await lastInput(page))?.crouch).toBeGreaterThan(0.95);
+  await page.keyboard.up("Space");
+  await page.keyboard.up("a");
+  await expect.poll(async () => (await lastInput(page))?.crouch).toBe(0);
+  await page.keyboard.press("r");
+  await expect(page.getByText(/Restarting at the start point/)).toBeVisible();
+  await expect.poll(() => page.evaluate(() => window.freeRideFixture.restarts)).toBe(1);
+  await expect.poll(async () => (await status(page)).epoch).toBe(2);
+  await expect(page.getByRole("button", { name: "Ride", exact: true })).toBeVisible();
+});
+
+test("R counts down; R again cancels; Escape cancels too", async ({ page }) => {
+  await open(page);
+  await page.keyboard.press("r");
+  await expect(page.getByText(/Restarting at the start point/)).toBeVisible();
+  await page.keyboard.press("r");
+  await expect(page.getByText(/Restarting at the start point/)).toBeHidden();
+  await page.keyboard.press("r");
+  await page.keyboard.press("Escape");
+  await expect(page.getByText(/Restarting at the start point/)).toBeHidden();
+  await page.waitForTimeout(3500);
+  expect(await page.evaluate(() => window.freeRideFixture.restarts)).toBe(0);
+});
+
+test("a rebound key rides; the studio's keys are refused", async ({ page }) => {
+  await open(page);
+  await page.getByRole("button", { name: "Input settings", exact: true }).click();
+  await page.getByRole("button", { name: "Change Lean forward", exact: true }).click();
+  await page.keyboard.press("c");
+  await expect(page.getByRole("alert")).toContainText("kept for the studio");
+  await page.keyboard.press("i");
+  await expect(page.getByLabel("Lean forward keys", { exact: true })).toContainText("I");
+  await page.getByLabel("Free ride control surface", { exact: true }).focus();
+  await page.keyboard.down("i");
+  await expect.poll(async () => (await lastInput(page))?.desired_lean_rad).toBeGreaterThan(0);
+  await page.keyboard.up("i");
+  await page.getByRole("button", { name: "Default keys", exact: true }).click();
+  await expect(page.getByLabel("Lean forward keys", { exact: true })).toContainText("W");
 });
 
 test("lost input replies pause instead of retaining motion", async ({ page }) => {
@@ -151,7 +262,7 @@ test("lost input replies pause instead of retaining motion", async ({ page }) =>
   await page.keyboard.down("w");
   await expect.poll(async () => (await lastInput(page))?.desired_lean_rad).toBeGreaterThan(0);
   await page.evaluate(() => window.freeRideFixture.delayInput(true));
-  await expect(page.getByRole("button", { name: "Arm and ride", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Ride", exact: true })).toBeVisible();
   await expect(
     page.getByText("Input reply timed out. Controls are paused.", { exact: true }),
   ).toBeVisible();
@@ -186,7 +297,7 @@ test("map editing pauses and sends a new run specification", async ({ page }) =>
   expect(spec?.map?.grade_pct).toEqual([5, 0]);
   expect(spec?.rider_model).toBe("rigid_ankle_v1");
   await expect.poll(() => page.evaluate(() => window.freeRideFixture.status.epoch)).toBe(2);
-  await expect(page.getByRole("button", { name: "Arm and ride", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Ride", exact: true })).toBeVisible();
 });
 
 test("pointer release outside the slider track sends neutral and keeps the ride armed", async ({
@@ -194,6 +305,7 @@ test("pointer release outside the slider track sends neutral and keeps the ride 
 }) => {
   await open(page);
   await arm(page);
+  await openPrecise(page);
   const thumb = page.getByRole("slider", { name: "Desired lean", exact: true });
   const bounds = await thumb.boundingBox();
   if (!bounds) throw new Error("Slider has no bounds.");

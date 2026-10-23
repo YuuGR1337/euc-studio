@@ -2,13 +2,15 @@ import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "reac
 import {
   RIDER_MODELS,
   isWorldChoice,
+  limitsOf,
   type GroundChoice,
   type HeightMap,
 } from "../../engine/freeRide.ts";
 import type { WorldFrame } from "../../engine/world.ts";
 import type { EngineClient } from "../../engine/types.ts";
+import { keyLabel } from "../../lib/rideControls.ts";
 import { Button, IconButton } from "../../ui/Button.tsx";
-import { ChevronRight, Info, Keyboard, Pause, Play } from "../../ui/icons.tsx";
+import { ChevronRight, Info, Keyboard, Pause, Play, RotateCcw } from "../../ui/icons.tsx";
 import { Panel } from "../../ui/Panel.tsx";
 import { Pill } from "../../ui/Pill.tsx";
 import { SegmentedControl } from "../../ui/SegmentedControl.tsx";
@@ -16,9 +18,15 @@ import { Select } from "../../ui/Select.tsx";
 import { Slider } from "../../ui/Slider.tsx";
 import { Tabs, TabPanel } from "../../ui/Tabs.tsx";
 import { Toggle } from "../../ui/Toggle.tsx";
+import { KeyBindings } from "./KeyBindings.tsx";
 import { MapEditor } from "./MapEditor.tsx";
 import { WorldEditor } from "./WorldEditor.tsx";
-import { FreeRideController } from "./controller.ts";
+import {
+  FreeRideController,
+  RESTART_COUNTDOWN_S,
+  offPedals,
+  sliderTurnMaxDeg,
+} from "./controller.ts";
 
 export interface FreeRidePanelProps {
   engine: EngineClient;
@@ -49,6 +57,7 @@ function FreeRideSession({ engine, active, onGround, onExit }: FreeRidePanelProp
     chosenGround ??
     (state.status?.mode === "free_ride" && state.status.ground === "map" ? "map" : "world");
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [preciseOpen, setPreciseOpen] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -82,6 +91,7 @@ function FreeRideSession({ engine, active, onGround, onExit }: FreeRidePanelProp
           : undefined);
   const hasRide = state.status?.mode === "free_ride";
   const booting = hasRide && !state.status?.ready;
+  const restartKey = state.bindings.reset[0] ? keyLabel(state.bindings.reset[0]) : undefined;
   const armReason =
     locked ??
     (engine.status.state === "error" || engine.status.state === "halted"
@@ -93,13 +103,19 @@ function FreeRideSession({ engine, active, onGround, onExit }: FreeRidePanelProp
         ? "Wait for the new run."
         : state.arming
           ? "Waiting for Arm."
-          : state.source === "gamepad" && state.padIndex === null
-            ? "Select a standard gamepad."
-            : state.neutralMs < 250
-              ? "Keep both controls neutral for 250 ms."
-              : state.status.source !== state.source
-                ? "Wait for the native input source."
-                : undefined);
+          : state.countdown
+            ? "Wait for the restart, or cancel it with R."
+            : offPedals(state.status)
+              ? `The rider is off the wheel. Restart${restartKey ? ` with ${restartKey}` : ""} to ride again.`
+              : state.held
+                ? "Let go of the riding keys and the stick first."
+                : state.source === "gamepad" && state.padIndex === null
+                  ? "Connect the gamepad again, or push a riding key to ride with the keyboard."
+                  : state.neutralMs < 250
+                    ? "Getting ready: the engine needs 250 ms of neutral input first."
+                    : state.status.source !== state.source
+                      ? "Wait for the native input source."
+                      : undefined);
   const stateLabel =
     engine.kind !== "live"
       ? "Desktop only"
@@ -108,10 +124,15 @@ function FreeRideSession({ engine, active, onGround, onExit }: FreeRidePanelProp
         : state.arming
           ? "Arming"
           : state.armed
-            ? "Armed"
+            ? "Riding"
             : booting
               ? "Starting"
-              : "Disarmed";
+              : "Paused";
+  const limits = limitsOf(state.status);
+  const turnMaxDeg = sliderTurnMaxDeg(limits);
+  const forwardKey = keyLabel(state.bindings.forward[0] ?? "KeyW");
+  const restartHere = limits.restart && state.status?.ground === "world";
+  const padName = state.pads.find((pad) => pad.index === state.padIndex)?.id ?? null;
   const settingsLocked =
     locked ??
     (state.armed || state.arming || state.playing
@@ -140,7 +161,7 @@ function FreeRideSession({ engine, active, onGround, onExit }: FreeRidePanelProp
   }
   function changeTab(value: "controls" | "map") {
     if (active) {
-      controller.pause("Controls paused. Select Arm to continue.");
+      controller.pause("Controls paused. Push to ride again.");
       if (value === "map" && engine.kind === "live") engine.setPlaying(false);
     }
     setTab(value);
@@ -159,9 +180,11 @@ function FreeRideSession({ engine, active, onGround, onExit }: FreeRidePanelProp
           ? "Choose a world to create a ride."
           : booting
             ? state.status?.reason
-            : state.armed
-              ? "Manual controls active."
-              : state.reason);
+            : state.countdown
+              ? `Restarting ${state.countdown.here ? "here" : "at the start point"} after the countdown. ${restartKey ? `${restartKey} or Esc` : "Esc"} cancels.`
+              : state.armed
+                ? "Riding by hand."
+                : state.reason);
   return (
     <Panel
       title="Free ride"
@@ -225,7 +248,7 @@ function FreeRideSession({ engine, active, onGround, onExit }: FreeRidePanelProp
               <IconButton
                 size="sm"
                 icon={<Info />}
-                label="Both models are estimates. Feet stay welded to the pedals. External yaw and roll aids remain. Articulated joints respond to motor forces and impacts. Crouch input is unavailable."
+                label={`Both models are estimates. Feet stay welded to the pedals. External yaw and roll aids remain. Articulated joints respond to motor forces and impacts. ${!limits.crouch_field ? "This engine build has no crouch input." : limits.can_crouch ? "Crouch bends the knees." : "The rigid rider cannot crouch."}`}
               />
             </div>
             <fieldset
@@ -260,56 +283,11 @@ function FreeRideSession({ engine, active, onGround, onExit }: FreeRidePanelProp
             className="py-16 data-[state=inactive]:hidden"
           >
             <div className="flex flex-col gap-24">
-              <fieldset
-                data-free-ride-choice
-                disabled={!!locked}
-                className="min-w-0 disabled:opacity-40"
-                title={locked}
-              >
-                <span className="mb-8 block text-12 text-fg-2">Input</span>
-                <Select
-                  aria-label="Input source"
-                  value={state.source}
-                  onValueChange={(value) => {
-                    if (!locked) controller.setSource(value);
-                  }}
-                  className="w-full"
-                  options={[
-                    { value: "keyboard_slider", label: "Keyboard and sliders" },
-                    { value: "gamepad", label: "Gamepad" },
-                  ]}
-                />
-              </fieldset>
-              {state.source === "gamepad" && (
-                <div className="flex flex-col gap-16">
-                  <fieldset
-                    data-free-ride-choice
-                    disabled={!!locked || !state.gamepadSupported}
-                    className="min-w-0 disabled:opacity-40"
-                  >
-                    <span className="mb-8 block text-12 text-fg-2">Device</span>
-                    <Select
-                      aria-label="Gamepad"
-                      value={state.padIndex === null ? "none" : String(state.padIndex)}
-                      className="w-full"
-                      options={[
-                        { value: "none", label: "Select a gamepad" },
-                        ...standardPads.map((pad) => ({ value: String(pad.index), label: pad.id })),
-                      ]}
-                      onValueChange={(value) => {
-                        if (!locked) controller.selectPad(value === "none" ? null : Number(value));
-                      }}
-                    />
-                  </fieldset>
-                  {(!state.gamepadSupported || standardPads.length === 0) && (
-                    <p className="text-12 text-fg-2" role="status">
-                      {!state.gamepadSupported
-                        ? "Gamepad input is unavailable in this window."
-                        : "Connect a gamepad with standard mapping."}
-                    </p>
-                  )}
-                </div>
-              )}
+              <p className="text-12 text-fg-2" data-testid="free-ride-input">
+                {state.source === "gamepad"
+                  ? `Riding with the gamepad${padName ? ` (${padName})` : ""}.${state.armed ? "" : " A riding key takes over while paused."}`
+                  : `Riding with the keyboard${state.armed ? "." : `: push ${forwardKey} to ride.`}${!state.armed && standardPads.length ? " The gamepad takes over when its stick moves while paused." : ""}`}
+              </p>
               <div className="flex items-center gap-8">
                 {!hasRide && !state.starting ? (
                   <Button
@@ -354,9 +332,30 @@ function FreeRideSession({ engine, active, onGround, onExit }: FreeRidePanelProp
                       void controller.arm();
                     }}
                   >
-                    Arm and ride
+                    Ride
                   </Button>
                 )}
+                <IconButton
+                  label={
+                    state.countdown
+                      ? "Cancel the restart"
+                      : restartHere
+                        ? `Restart here: a new run at this spot after a ${RESTART_COUNTDOWN_S} s countdown (the firmware boots again)`
+                        : `Restart at the start point after a ${RESTART_COUNTDOWN_S} s countdown (the firmware boots again)`
+                  }
+                  shortcut={restartKey?.toLowerCase()}
+                  icon={<RotateCcw />}
+                  active={!!state.countdown}
+                  disabledReason={
+                    locked ??
+                    (!hasRide
+                      ? "No free ride to restart."
+                      : state.starting
+                        ? "Wait for the new run."
+                        : undefined)
+                  }
+                  onClick={controller.toggleCountdown}
+                />
                 {!state.armed && (
                   <IconButton
                     label="Disarm and pause"
@@ -367,6 +366,18 @@ function FreeRideSession({ engine, active, onGround, onExit }: FreeRidePanelProp
                 )}
               </div>
               {hasRide && state.source === "keyboard_slider" && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="justify-start"
+                  aria-expanded={preciseOpen}
+                  icon={<ChevronRight className={preciseOpen ? "rotate-90" : undefined} />}
+                  onClick={() => setPreciseOpen(!preciseOpen)}
+                >
+                  Precise input
+                </Button>
+              )}
+              {hasRide && state.source === "keyboard_slider" && preciseOpen && (
                 <div className="flex flex-col gap-16">
                   {(["lean", "turn"] as const).map((axis) => (
                     <div
@@ -383,8 +394,8 @@ function FreeRideSession({ engine, active, onGround, onExit }: FreeRidePanelProp
                       <Slider
                         label={axis === "lean" ? "Desired lean" : "Heading rate"}
                         value={state[axis]}
-                        min={axis === "lean" ? -10 : -30}
-                        max={axis === "lean" ? 10 : 30}
+                        min={axis === "lean" ? -limits.lean_max_deg : -turnMaxDeg}
+                        max={axis === "lean" ? limits.lean_max_deg : turnMaxDeg}
                         step={axis === "lean" ? 0.25 : 1}
                         decimals={axis === "lean" ? 1 : 0}
                         unit={axis === "lean" ? "°" : "°/s"}
@@ -406,7 +417,7 @@ function FreeRideSession({ engine, active, onGround, onExit }: FreeRidePanelProp
                     </Button>
                     <IconButton
                       size="sm"
-                      label="W/S controls lean. A/D controls turns. Space or Escape pauses. Sliders return to zero on release."
+                      label="Each slider sends its exact value while held, without the speed shaping of the keys and the stick. Sliders return to zero on release."
                       icon={<Keyboard />}
                     />
                   </div>
@@ -437,48 +448,90 @@ function FreeRideSession({ engine, active, onGround, onExit }: FreeRidePanelProp
                     icon={<Info />}
                   />
                 </div>
-                {state.source === "gamepad" && (
-                  <>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="justify-start"
-                      aria-expanded={settingsOpen}
-                      icon={<ChevronRight className={settingsOpen ? "rotate-90" : undefined} />}
-                      onClick={() => {
-                        if (!settingsOpen) pauseForEdit();
-                        setSettingsOpen(!settingsOpen);
-                      }}
-                    >
-                      Input settings
-                    </Button>
-                    {settingsOpen && (
-                      <div className="flex flex-col gap-16 py-8">
-                        <Slider
-                          label="Dead zone"
-                          value={state.deadzone * 100}
-                          min={5}
-                          max={30}
-                          step={1}
-                          unit="%"
-                          disabledReason={settingsLocked}
-                          onValueChange={(value) => controller.configure({ deadzone: value / 100 })}
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="justify-start"
+                  aria-expanded={settingsOpen}
+                  icon={<ChevronRight className={settingsOpen ? "rotate-90" : undefined} />}
+                  onClick={() => {
+                    if (!settingsOpen) pauseForEdit();
+                    else controller.captureKey(null);
+                    setSettingsOpen(!settingsOpen);
+                  }}
+                >
+                  Input settings
+                </Button>
+                {settingsOpen && (
+                  <div className="flex flex-col gap-24 py-8">
+                    <KeyBindings state={state} controller={controller} />
+                    <div className="flex flex-col gap-16">
+                      <span className="text-12 text-fg-2">Gamepad</span>
+                      <fieldset
+                        data-free-ride-choice
+                        disabled={!!settingsLocked || !state.gamepadSupported}
+                        className="min-w-0 disabled:opacity-40"
+                        title={settingsLocked}
+                      >
+                        <Select
+                          aria-label="Gamepad"
+                          value={state.padIndex === null ? "none" : String(state.padIndex)}
+                          className="w-full"
+                          options={[
+                            { value: "none", label: "First connected gamepad" },
+                            ...standardPads.map((pad) => ({
+                              value: String(pad.index),
+                              label: pad.id,
+                            })),
+                          ]}
+                          onValueChange={(value) => {
+                            if (!settingsLocked)
+                              controller.selectPad(value === "none" ? null : Number(value));
+                          }}
                         />
-                        <Toggle
-                          label="Invert lean"
-                          checked={state.invertLean}
-                          disabledReason={settingsLocked}
-                          onCheckedChange={(invertLean) => controller.configure({ invertLean })}
-                        />
-                        <Toggle
-                          label="Invert turn"
-                          checked={state.invertTurn}
-                          disabledReason={settingsLocked}
-                          onCheckedChange={(invertTurn) => controller.configure({ invertTurn })}
-                        />
-                      </div>
-                    )}
-                  </>
+                      </fieldset>
+                      {(!state.gamepadSupported || standardPads.length === 0) && (
+                        <p className="text-12 text-fg-2" role="status">
+                          {!state.gamepadSupported
+                            ? "Gamepad input is unavailable in this window."
+                            : "Connect a gamepad with standard mapping. Stick or triggers lean, LB crouches, X restarts, Y changes the camera, Start pauses."}
+                        </p>
+                      )}
+                      <Slider
+                        label="Stick dead zone"
+                        value={state.deadzone * 100}
+                        min={5}
+                        max={30}
+                        step={1}
+                        unit="%"
+                        disabledReason={settingsLocked}
+                        onValueChange={(value) => controller.configure({ deadzone: value / 100 })}
+                      />
+                      <Slider
+                        label="Stick response"
+                        value={state.exponent}
+                        min={1}
+                        max={2.5}
+                        step={0.1}
+                        decimals={1}
+                        unit="×"
+                        disabledReason={settingsLocked}
+                        onValueChange={(exponent) => controller.configure({ exponent })}
+                      />
+                      <Toggle
+                        label="Invert lean"
+                        checked={state.invertLean}
+                        disabledReason={settingsLocked}
+                        onCheckedChange={(invertLean) => controller.configure({ invertLean })}
+                      />
+                      <Toggle
+                        label="Invert turn"
+                        checked={state.invertTurn}
+                        disabledReason={settingsLocked}
+                        onCheckedChange={(invertTurn) => controller.configure({ invertTurn })}
+                      />
+                    </div>
+                  </div>
                 )}
                 <Button
                   size="sm"

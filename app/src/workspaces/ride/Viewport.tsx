@@ -13,6 +13,7 @@ import { RollingNumber, RollingText } from "../../ui/RollingNumber.tsx";
 import { SegmentedControl } from "../../ui/SegmentedControl.tsx";
 import { Tooltip } from "../../ui/Tooltip.tsx";
 import { Wait } from "../../ui/Wait.tsx";
+import { FreeRideOverlay } from "../freeRide/FreeRideOverlay.tsx";
 import { PitchProtractor } from "./PitchProtractor.tsx";
 import { ManualButton, ManualHud } from "./ManualHud.tsx";
 import { useManualRiding } from "./manual.ts";
@@ -331,6 +332,7 @@ export function Viewport({
           </div>
           <div className="absolute top-0 left-1/2 -translate-x-1/2">
             <ManualHud />
+            <FreeRideOverlay />
           </div>
           <div className="pointer-events-auto">
             <Pitch />

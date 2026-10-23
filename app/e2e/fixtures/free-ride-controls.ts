@@ -23,8 +23,15 @@ const status: FreeRideStatus = {
 const inputs: FreeRideInput[] = [];
 const starts: FreeRideSpec[] = [];
 let pauses = 0;
-let pad: { id: string; index: number; connected: boolean; mapping: string; axes: number[] } | null =
-  null;
+let pad: {
+  id: string;
+  index: number;
+  connected: boolean;
+  mapping: string;
+  axes: number[];
+  buttons: { pressed: boolean; value: number }[];
+} | null = null;
+let restarts = 0;
 let rejectStart = false;
 let delayInputs = false;
 const pending: (() => void)[] = [];
@@ -44,6 +51,14 @@ const client = {
   },
   setTargetRtf(value: number) {
     this.targetRtf = value;
+  },
+  /** A restart of the current run: a new epoch on the same ground, as the runner's Restart. */
+  restart() {
+    restarts++;
+    status.epoch++;
+    status.armed = false;
+    this.status.runEpoch = status.epoch;
+    this.setPlaying(true);
   },
 };
 export const engine = client as unknown as EngineClient;
@@ -65,6 +80,9 @@ export async function invoke(command: string, args: Record<string, unknown> = {}
     case "free_ride_input": {
       const input = structuredClone(args.input as FreeRideInput);
       inputs.push(input);
+      // The native host refuses unknown fields: a crouch only goes to an engine that has one.
+      if ("crouch" in input && !("crouch" in status))
+        throw new Error("Fixture input has an unknown field: crouch.");
       if (delayInputs) await new Promise<void>((resolve) => pending.push(resolve));
       if (input.run_epoch !== status.epoch) throw new Error("Fixture epoch changed.");
       status.source = input.source;
@@ -81,6 +99,16 @@ export async function invoke(command: string, args: Record<string, unknown> = {}
       if (args.epoch !== status.epoch) throw new Error("Fixture Pause epoch mismatch.");
       pauses++;
       status.armed = false;
+      client.setPlaying(false);
+      return;
+    case "free_ride_restart":
+      if (!("on_pedals" in status))
+        throw new Error("Unexpected fixture command: free_ride_restart");
+      if (args.epoch !== status.epoch) throw new Error("Fixture restart epoch mismatch.");
+      restarts++;
+      status.epoch++;
+      status.armed = false;
+      client.status.runEpoch = status.epoch;
       client.setPlaying(false);
       return;
     case "free_ride_start": {
@@ -106,14 +134,27 @@ const fixture = {
   get pauses() {
     return pauses;
   },
+  get restarts() {
+    return restarts;
+  },
   rejectMap(value: boolean) {
     rejectStart = value;
+  },
+  /** Reports the FR2b fields (turn cap, crouch, quick reset) like the current native host. */
+  fr2b(turnCapRadS: number, crouch: number | null) {
+    Object.assign(status, {
+      turn_cap_rad_s: turnCapRadS,
+      crouch,
+      on_pedals: true,
+      boot_remaining_s: 0,
+    });
   },
   delayInput(value: boolean) {
     delayInputs = value;
     if (!value) pending.splice(0).forEach((resolve) => resolve());
   },
-  gamepad(axes: number[] | null) {
+  /** A standard pad with these axes and these buttons held (indices), or none. */
+  gamepad(axes: number[] | null, held: number[] = [], values: Record<number, number> = {}) {
     pad =
       axes === null
         ? null
@@ -123,6 +164,10 @@ const fixture = {
             connected: true,
             mapping: "standard",
             axes,
+            buttons: Array.from({ length: 17 }, (_, i) => ({
+              pressed: held.includes(i),
+              value: values[i] ?? (held.includes(i) ? 1 : 0),
+            })),
           };
   },
 };

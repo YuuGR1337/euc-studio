@@ -62,6 +62,16 @@ export interface FreeRideStatus {
   roll_aid_work_j: number | null;
   /** The ground of this run. */
   ground: "map" | "world" | "none";
+  // Engines from Free Ride's FR2b on (app/src-tauri/src/engine/free_ride.rs) add the fields below;
+  // older engines leave them out.
+  /** The largest manual turn rate at the current speed, rad/s: what a full turn input gets. */
+  turn_cap_rad_s?: number | null;
+  /** The crouch the legs hold, 0 to 1; null when the rider cannot crouch. */
+  crouch?: number | null;
+  /** The rider stands on the pedals. */
+  on_pedals?: boolean;
+  /** Simulated seconds until the firmware has booted on the stand. */
+  boot_remaining_s?: number | null;
 }
 export interface FreeRideInput {
   run_epoch: number;
@@ -69,6 +79,8 @@ export interface FreeRideInput {
   source: FreeRideSource;
   desired_lean_rad: number;
   heading_rate_rad_s: number;
+  /** Crouch, 0 (standing) to 1 (full); only to engines that report a crouch. */
+  crouch?: number;
   armed: boolean;
 }
 export const FREE_RIDE_LIMITS = {
@@ -80,6 +92,43 @@ export const FREE_RIDE_LIMITS = {
   features: 32,
 } as const;
 const radians = Math.PI / 180;
+/** The manual turn rate an FR2b engine accepts in a packet, rad/s (the rider's cap at a stop). */
+export const MANUAL_TURN_CEILING_RAD_S = 2.5;
+/** What manual input may ask for in a run, read from its status. */
+export interface FreeRideLimits {
+  lean_max_deg: number;
+  /** What a full turn asks for now, rad/s. */
+  turn_max_rad_s: number;
+  /** The largest turn rate a packet may carry, rad/s. */
+  turn_ceiling_rad_s: number;
+  /** The engine reports its own speed-scheduled turn cap (turn_max_rad_s is it). */
+  turn_scheduled: boolean;
+  /** The engine takes a crouch in its packets. */
+  crouch_field: boolean;
+  /** The rider can crouch now (articulated, on the pedals). */
+  can_crouch: boolean;
+  /** The engine restarts a run where the wheel is (free_ride_restart). */
+  restart: boolean;
+  /** The engine lets the rider step off (free_ride_step_off). */
+  step_off: boolean;
+}
+/** The run's limits: an FR2b engine's own, else the original 10° and 30°/s without a crouch. */
+export function limitsOf(status: FreeRideStatus | null | undefined): FreeRideLimits {
+  const fr2b = !!status && "on_pedals" in status;
+  const cap = status?.turn_cap_rad_s;
+  const ceiling = fr2b ? MANUAL_TURN_CEILING_RAD_S : FREE_RIDE_LIMITS.turnDegS * radians;
+  const scheduled = typeof cap === "number" && Number.isFinite(cap) && cap >= 0;
+  return {
+    lean_max_deg: FREE_RIDE_LIMITS.leanDeg,
+    turn_max_rad_s: scheduled ? Math.min(cap, ceiling) : FREE_RIDE_LIMITS.turnDegS * radians,
+    turn_ceiling_rad_s: ceiling,
+    turn_scheduled: scheduled,
+    crouch_field: !!status && "crouch" in status,
+    can_crouch: typeof status?.crouch === "number",
+    restart: fr2b,
+    step_off: fr2b,
+  };
+}
 export const flatMap = (seed = 0): GeneratedMapSpec => ({
   schema: 1,
   generator_revision: 1,
@@ -167,6 +216,17 @@ export const freeRideApi = {
       if (status[key] !== null && !Number.isFinite(status[key]))
         throw new Error(`Invalid status field: ${key}.`);
     }
+    const optional = (value: unknown, lo: number, hi: number) =>
+      value === undefined ||
+      value === null ||
+      (typeof value === "number" && Number.isFinite(value) && value >= lo && value <= hi);
+    if (!optional(status.turn_cap_rad_s, 0, MANUAL_TURN_CEILING_RAD_S))
+      throw new Error("Invalid status field: turn_cap_rad_s.");
+    if (!optional(status.crouch, 0, 1)) throw new Error("Invalid status field: crouch.");
+    if (!optional(status.boot_remaining_s, 0, 3600))
+      throw new Error("Invalid status field: boot_remaining_s.");
+    if (status.on_pedals !== undefined && typeof status.on_pedals !== "boolean")
+      throw new Error("Invalid status field: on_pedals.");
     return status;
   },
   async map(epoch: number): Promise<HeightMap> {
@@ -199,7 +259,7 @@ export const freeRideApi = {
     epochCheck(epoch);
     await invoke("free_ride_arm", { epoch, source });
   },
-  async input(input: FreeRideInput): Promise<void> {
+  async input(input: FreeRideInput, limits: FreeRideLimits = limitsOf(null)): Promise<void> {
     epochCheck(input.run_epoch);
     if (
       !Number.isSafeInteger(input.seq) ||
@@ -207,12 +267,30 @@ export const freeRideApi = {
       input.seq > 0xffff_ffff ||
       !Number.isFinite(input.desired_lean_rad) ||
       !Number.isFinite(input.heading_rate_rad_s) ||
-      Math.abs(input.desired_lean_rad) > 10 * radians ||
-      Math.abs(input.heading_rate_rad_s) > 30 * radians
+      Math.abs(input.desired_lean_rad) > limits.lean_max_deg * radians + 1e-12 ||
+      Math.abs(input.heading_rate_rad_s) > limits.turn_ceiling_rad_s + 1e-12 ||
+      (input.crouch !== undefined &&
+        (!limits.crouch_field ||
+          !Number.isFinite(input.crouch) ||
+          input.crouch < 0 ||
+          input.crouch > 1))
     ) {
       throw new Error("Free ride input exceeds its limits.");
     }
     await invoke("free_ride_input", { input });
+  },
+  /**
+   * Quick reset: a new run of the same free ride where the wheel is now (the test pad restarts at
+   * its origin), the firmware booting again. Engines whose status has `on_pedals` only.
+   */
+  async restart(epoch: number): Promise<void> {
+    epochCheck(epoch);
+    await invoke("free_ride_restart", { epoch });
+  },
+  /** The armed rider steps off the pedals; the run then ends. Engines with `on_pedals` only. */
+  async stepOff(epoch: number): Promise<void> {
+    epochCheck(epoch);
+    await invoke("free_ride_step_off", { epoch });
   },
   async pause(epoch: number): Promise<void> {
     epochCheck(epoch);
