@@ -78,16 +78,19 @@ export function nodesFor(bodies: readonly BodyInfo[]): THREE.Object3D[] {
 /**
  * Poses the articulated bodies standing on the pedals: pelvis `pitch` rad forward about the hip
  * axis, legs straight down from the hips (knees and ankles on the physics' own frames), the
- * whole rider at `at` with heading 0. `hipY` puts the thighs' origins nearer the midline (the
- * lateral rider's hips); the sagittal rider's hang from the pedals.
+ * whole rider at `at` with heading 0, its trunk leaning `lean` rad to its right. `hipY` puts the
+ * thighs' origins nearer the midline (the lateral rider's hips); the sagittal rider's hang from
+ * the pedals.
  */
 export function standArticulated(
   bodies: readonly BodyInfo[],
   nodes: THREE.Object3D[],
-  { pitch = 0, at = new THREE.Vector3(0, 0, 1.2), kneeBend = 0, hipY = PEDAL_Y } = {},
+  { pitch = 0, at = new THREE.Vector3(0, 0, 1.2), kneeBend = 0, hipY = PEDAL_Y, lean = 0 } = {},
 ) {
   const index = (name: string) => bodies.findIndex((b) => b.name === name);
-  const trunk = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), pitch);
+  const trunk = new THREE.Quaternion()
+    .setFromAxisAngle(new THREE.Vector3(1, 0, 0), lean)
+    .multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), pitch));
   const place = (name: string, position: THREE.Vector3, quaternion: THREE.Quaternion) => {
     const node = nodes[index(name)] as THREE.Object3D;
     node.position.copy(position);

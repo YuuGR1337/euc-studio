@@ -191,10 +191,12 @@ The physics drives it (`riderFigure/skeleton.ts`, `figure.ts`):
   tops out at the physics head (0.99 for the default rider).
 - The rigid rider is one body: the figure's pelvis sits at its hip height, and the knees are
   placed by two-link IK between the hip and the foot shapes, slightly bent.
-- Cosmetic only, as decided: the arms hang in the game's carriage and ease at a standstill (the
-  game's `armEaseForSpeed`, from a speed filtered off the pelvis motion), the hands turn toward
-  the thighs as they ease, and the head keeps 0.65 of the trunk's pitch off the eyes (at most
-  0.55 rad). No counter-roll and no rest pitch: the trunk's attitude is the physics'.
+- Cosmetic only, as decided: the arms ride bent and loose (since 2026-10-23 our own carriage,
+  `CARRIAGE` in `figure.ts`, in place of the game's palms-forward ease at a standstill): hands a
+  little ahead of the hips with the knuckles out, lower and closer at speed (from a speed
+  filtered off the pelvis motion), and in a lean the high-side arm swings out and up while the
+  low-side hand drops toward its knee. The head keeps 0.65 of the trunk's pitch off the eyes (at
+  most 0.55 rad). No counter-roll and no rest pitch: the trunk's attitude is the physics'.
 - (Removed 2026-10-23.) A Physics bodies button drew the simulated shapes instead; the street
   kit below replaced it.
 
@@ -215,6 +217,12 @@ CC BY attribution went with Cool Rider's look. The Physics bodies view went too:
 draw only as the figure, and a body list the figure cannot bind draws no rider. The figure's hip
 joints sit at a thigh body's origin when it is within 0.12 m of the midline (the lateral rider's
 hips), else at the figure's own hip width (the sagittal rider's thighs hang from the pedals).
+
+After the lead's review the same day: the jeans are a mid-blue denim (the photos' mid-tones with
+the shade taken out against the white shoe), baggy, with folds over the knee and stacked above
+the shoe, lighter over the front and darker down the inner seam; the guards sit on their own
+forms over the wider legs; the sneakers have a rounded toe and heel and a thicker, rounded sole
+edge; and the arms ride in the carriage above.
 
 ### Navigation targets (intent level)
 

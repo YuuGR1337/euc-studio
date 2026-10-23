@@ -28,7 +28,7 @@ EUC Thrills
 -----------
 The rider figure of the app's 3D view is built with code from EUC Thrills by VibezZzCoder
 (https://github.com/VibezZzCoder/EUC-thrills, commit a66dabd): its loft kit for lofted parts, its rider look
-types, the rider's skeleton and arm-carriage values, and its rider construction with two-link IK. The copied
+types, the rider's skeleton and rest arm values, and its rider construction with two-link IK. The copied
 files are in app/src/vendor/euc-thrills (see its README.md); app/src/workspaces/ride/riderFigure/rig.ts adapts
 the game's rider construction.
 

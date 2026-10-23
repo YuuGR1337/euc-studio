@@ -1,5 +1,5 @@
 /*! EUC Thrills — (c) 2026 VibezZzCoder — MIT — https://github.com/VibezZzCoder/EUC-thrills */
-// EUC Studio: the values the rider's rig reads (its skeleton and arm carriage), copied unchanged
+// EUC Studio: the values the rider's rig reads (its skeleton and rest arm pose), copied unchanged
 // from the game's src/data/tuning.ts (line numbers of that file in the comments). The game's other
 // tuning is not part of this copy.
 
@@ -24,14 +24,4 @@ export const RIDER_BLOCKOUT = {
   armSplay: 0.115, // :407
   armHangFraction: 0.93, // :408
   handForward: 0.12, // :410
-  armEaseElbow: 2.42, // :433
-  armEaseElbowRightBend: 0.15, // :434
-  armEaseIn: 0.02, // :435
-  armEaseForward: 0.02, // :436
-  armEaseRiseMax: 0.07, // :437
-  armEaseElbowOut: 0.6, // :438
-  armEaseElbowOutRight: 0.45, // :439
-  armEaseHandRoll: 0.9, // :440
-  armEaseFullBelow: 4.0, // :441
-  armEaseGoneAbove: 16.0, // :442
 } as const;

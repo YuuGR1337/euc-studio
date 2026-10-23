@@ -15,7 +15,7 @@ commit `a66dabd` (2026-10-18), for the rider figure of the 3D view
 | ---------------- | ----------------------- | ---------------------------------------------------------------------------------- |
 | `blockoutKit.ts` | `render/blockoutKit.ts` | Two comments reworded (they named another rider)                                   |
 | `riderLook.ts`   | `render/riderLook.ts`   | Only the look types (lines 99-710), unchanged; `id` is a string; comments shortened |
-| `tuning.ts`      | `data/tuning.ts`        | Only the skeleton and arm-carriage values the rig reads, unchanged                 |
+| `tuning.ts`      | `data/tuning.ts`        | Only the skeleton and rest arm values the rig reads, unchanged                     |
 
 Comments that name the game's real riders removed: no copied file names or describes any of the
 game's riders.

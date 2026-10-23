@@ -1,13 +1,14 @@
 /*! EUC Thrills — (c) 2026 VibezZzCoder — MIT — https://github.com/VibezZzCoder/EUC-thrills */
 // Adapted for EUC Studio from EUC Thrills' src/render/rider.ts (createPlaceholderRider,
-// solveChain, easedHandTarget, armEaseForSpeed). The construction of a rider from a look (its
+// solveChain). The construction of a rider from a look (its
 // parts, materials, panels and joint frames) is theirs; the look it builds by default is EUC
 // Studio's own street kit (streetKit.ts). What changed:
 // - no stance solve: EUC Studio poses the joints from the physics bodies (figure.ts);
 // - the legs are three free groups (thigh, shin, foot), not one hip-knee-ankle chain, because
 //   each follows its own physics body;
 // - no hair sway, cloth drape or joint-surface bands (the street kit uses none of them);
-// - no rest pitch on the pelvis: the trunk's pitch is the physics'.
+// - no rest pitch on the pelvis: the trunk's pitch is the physics';
+// - the arms keep only the rest pose here: figure.ts carries them when riding.
 // Joint frames are the game's: +x is the rider's left, +y up, +z forward; limbs hang along -y.
 import * as THREE from "three";
 import {
@@ -28,19 +29,6 @@ import type {
 } from "../../../vendor/euc-thrills/riderLook.ts";
 import { RIDER_BLOCKOUT as B } from "../../../vendor/euc-thrills/tuning.ts";
 import { STREET_KIT } from "./streetKit.ts";
-
-const clamp01 = (value: number) => Math.min(1, Math.max(0, value));
-
-/**
- * The arms' ease at a wheel speed, m/s, either sign: 1 at a standstill and up to
- * `armEaseFullBelow`, a smoothstep down to 0 by `armEaseGoneAbove`.
- */
-export function armEaseForSpeed(speed: number): number {
-  const t = clamp01(
-    (Math.abs(speed) - B.armEaseFullBelow) / (B.armEaseGoneAbove - B.armEaseFullBelow),
-  );
-  return 1 - t * t * (3 - 2 * t);
-}
 
 /** Where a limb chain starts, bends and ends, in the parent's frame. */
 export interface Chain {
@@ -106,29 +94,6 @@ export function solveChain(
   );
 }
 
-/**
- * The eased hand for a carriage, in the pelvis frame: `armEaseIn` closer to the body,
- * `armEaseForward` further forward, and raised only as far as the elbow needs to settle at
- * `armEaseElbow` interior (never past `armEaseRiseMax`). The right elbow (`side < 0`) settles
- * `armEaseElbowRightBend` deeper, so the pair is never a mirror.
- */
-export function easedHandTarget(
-  shoulder: THREE.Vector3,
-  base: THREE.Vector3,
-  side: number,
-): THREE.Vector3 {
-  const upper = B.upperArmLength;
-  const lower = B.forearmLength;
-  const out = Math.abs(base.x - shoulder.x) - B.armEaseIn;
-  const forward = base.z - shoulder.z + B.armEaseForward;
-  const drop = base.y - shoulder.y;
-  const elbow = B.armEaseElbow - (side < 0 ? B.armEaseElbowRightBend : 0);
-  const reach = upper * upper + lower * lower - 2 * upper * lower * Math.cos(elbow);
-  const bent = -Math.sqrt(Math.max(0, reach - out * out - forward * forward));
-  const y = shoulder.y + Math.min(drop + B.armEaseRiseMax, Math.max(drop, bent));
-  return new THREE.Vector3(shoulder.x + Math.sign(side) * out, y, shoulder.z + forward);
-}
-
 /** Rider-left is +x, so the outboard side of a limb is +x for the left side. */
 const outboardAngle = (side: number) => (side > 0 ? 0 : Math.PI);
 
@@ -138,12 +103,6 @@ export interface RigArm {
   readonly shoulder: THREE.Group;
   readonly elbow: THREE.Group;
   readonly hand: THREE.Object3D;
-  /** The relaxed hand target, in the pelvis frame, with the right arm's asymmetry baked in. */
-  readonly baseTarget: THREE.Vector3;
-  /** The same hand eased for a standstill (`easedHandTarget`). */
-  readonly easedTarget: THREE.Vector3;
-  readonly baseSplay: number;
-  readonly easedSplay: number;
 }
 
 export interface RigLeg {
@@ -492,7 +451,6 @@ export function buildRiderRig(look: RiderLook = STREET_KIT): RiderRig {
       shoulderY - reach * B.armHangFraction + look.armCarriage.rise,
       B.handForward + (rightArm ? B.armAsymmetryForward : 0),
     );
-    const easedTarget = easedHandTarget(shoulder.position, baseTarget, side);
     solveChain(
       {
         origin: shoulder.position,
@@ -549,16 +507,7 @@ export function buildRiderRig(look: RiderLook = STREET_KIT): RiderRig {
     elbow.add(hand);
 
     pelvis.add(shoulder);
-    arms.push({
-      side,
-      shoulder,
-      elbow,
-      hand,
-      baseTarget,
-      easedTarget,
-      baseSplay,
-      easedSplay: Math.abs(easedTarget.x),
-    });
+    arms.push({ side, shoulder, elbow, hand });
   }
 
   // -- Head ---------------------------------------------------------------------------------------

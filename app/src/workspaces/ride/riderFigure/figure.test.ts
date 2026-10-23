@@ -3,7 +3,7 @@ import * as THREE from "three";
 import { RIDER_BLOCKOUT as B } from "../../../vendor/euc-thrills/tuning.ts";
 import { GAME_TO_BODY, RiderFigure } from "./figure.ts";
 import { ANKLE_ABOVE_PEDAL, articulatedBodies, nodesFor, standArticulated } from "./fixtures.ts";
-import { armEaseForSpeed, buildRiderRig } from "./rig.ts";
+import { buildRiderRig } from "./rig.ts";
 import { STREET_KIT } from "./streetKit.ts";
 import { type RiderBinding, bindRider, poseSkeleton, skeletonPose } from "./skeleton.ts";
 
@@ -119,36 +119,73 @@ describe("rider figure", () => {
     expect(folded.rig.neck.rotation.x).toBeCloseTo(-B.headStabilizationMax, 6);
   });
 
-  it("eases the arms at a standstill and carries them at speed", () => {
+  describe("arm carriage", () => {
     const bodies = articulatedBodies();
     const binding = bindRider(bodies) as RiderBinding;
     const nodes = nodesFor(bodies);
     const pose = skeletonPose();
-    const figure = new RiderFigure();
-    /** The right hand, from the pelvis. */
-    const hand = () => {
-      figure.rig.root.updateMatrixWorld(true);
-      const arm = figure.rig.arms[0];
-      if (!arm) throw new Error("no arm");
-      return arm.hand.getWorldPosition(new THREE.Vector3()).sub(pose.pelvis);
-    };
-    const ride = (speed: number, seconds: number) => {
+    const ride = (figure: RiderFigure, speed: number, seconds: number, lean = 0) => {
       for (let t = 0; t < seconds; t += 1 / 60) {
-        standArticulated(bodies, nodes, { at: new THREE.Vector3(speed * t, 0, 1.2) });
+        standArticulated(bodies, nodes, { at: new THREE.Vector3(speed * t, 0, 1.2), lean });
         poseSkeleton(binding, nodes, pose);
         figure.pose(binding, pose, 1 / 60);
       }
+      figure.rig.root.updateMatrixWorld(true);
     };
-    ride(0, 1);
-    expect(figure.speedMps).toBeCloseTo(0, 9);
-    const still = hand();
-    ride(20, 3);
-    expect(figure.speedMps).toBeCloseTo(20, 1);
-    expect(armEaseForSpeed(figure.speedMps)).toBe(0);
-    const riding = hand();
-    // Eased at a standstill, the right hand sits nearer the body (the game's eased carriage).
-    expect(Math.abs(riding.y)).toBeGreaterThan(Math.abs(still.y) + 0.01);
-    expect(figure.rig.arms[0]?.hand.rotation.y).toBe(0);
+    /** Right (0) or left (1) arm: the hand from the pelvis, world. */
+    const hand = (figure: RiderFigure, i: number) =>
+      (figure.rig.arms[i]?.hand as THREE.Object3D)
+        .getWorldPosition(new THREE.Vector3())
+        .sub(pose.pelvis);
+    /** The elbow's interior angle, rad. */
+    const elbowAngle = (figure: RiderFigure, i: number) => {
+      const arm = figure.rig.arms[i];
+      if (!arm) throw new Error("no arm");
+      const s = arm.shoulder.getWorldPosition(new THREE.Vector3());
+      const e = arm.elbow.getWorldPosition(new THREE.Vector3());
+      const h = arm.hand.getWorldPosition(new THREE.Vector3());
+      return s.sub(e).angleTo(h.sub(e));
+    };
+
+    it("rides the arms bent and loose, the knuckles out, a little lower and closer at speed", () => {
+      const figure = new RiderFigure();
+      ride(figure, 0, 1);
+      expect(figure.speedMps).toBeCloseTo(0, 9);
+      const still = [hand(figure, 0), hand(figure, 1)];
+      for (const i of [0, 1]) {
+        const angle = elbowAngle(figure, i);
+        expect(angle).toBeGreaterThan(1.6);
+        expect(angle).toBeLessThan(2.6);
+        // The knuckles (the hand's +z) face outward: the right hand's to -y, the left's to +y.
+        const side = i === 0 ? -1 : 1;
+        const arm = figure.rig.arms[i] as { hand: THREE.Object3D };
+        const out = new THREE.Vector3(0, 0, 1).transformDirection(arm.hand.matrixWorld);
+        expect(out.y * side).toBeGreaterThan(0.5);
+      }
+      // Never a mirror: the right hand rides a little further forward.
+      expect(still[0]?.x).toBeGreaterThan((still[1]?.x ?? 0) + 0.01);
+      ride(figure, 20, 3);
+      expect(figure.speedMps).toBeCloseTo(20, 1);
+      const riding = hand(figure, 0);
+      expect(riding.z).toBeLessThan((still[0]?.z ?? 0) - 0.02);
+      expect(Math.abs(riding.y)).toBeLessThan(Math.abs(still[0]?.y ?? 0));
+    });
+
+    it("swings the high-side arm out and drops the low-side hand in a lean", () => {
+      const upright = new RiderFigure();
+      ride(upright, 5, 1);
+      const figure = new RiderFigure();
+      // Leaning right: the left arm is on the high side.
+      ride(figure, 5, 1, 0.3);
+      expect(figure.leanRad).toBeCloseTo(0.3, 2);
+      const left = hand(figure, 1);
+      const right = hand(figure, 0);
+      const pelvisLeft = new THREE.Vector3(0, 1, 0).applyQuaternion(pose.pelvisQuaternion);
+      const pelvisUp = new THREE.Vector3(0, 0, 1).applyQuaternion(pose.pelvisQuaternion);
+      expect(left.dot(pelvisLeft)).toBeGreaterThan(hand(upright, 1).y + 0.1);
+      expect(left.dot(pelvisUp)).toBeGreaterThan(hand(upright, 1).z + 0.05);
+      expect(right.dot(pelvisUp)).toBeLessThan(hand(upright, 0).z - 0.05);
+    });
   });
 
   it("ignores a jump (a reset or a seek) as a speed", () => {

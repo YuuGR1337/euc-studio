@@ -35,7 +35,8 @@ import { RIDER_BLOCKOUT as B } from "../../../vendor/euc-thrills/tuning.ts";
 const COLOUR = {
   tee: 0x232325,
   skin: 0xc49279,
-  denim: 0x7b92ae,
+  /** Mid-blue denim: the photos' mid-tones, shade taken out against the white shoe. */
+  denim: 0x4e6c9c,
   helmet: 0x131416,
   /** The visor and the mirror's glass: a silver mirror; the environment colours it. */
   chrome: 0xd4dae2,
@@ -111,36 +112,46 @@ const SEAT = rows(
   ],
   2.3,
 );
-/** Loose jeans, hip to knee. */
+/** Baggy jeans, hip to knee: wide all the way down, the cloth bunched in folds over the knee. */
 const THIGH = rows(
   [
     [0.03, 0.07, 0.074],
     [0, 0.084, 0.088],
-    [-0.06, 0.088, 0.092],
-    [-0.14, 0.086, 0.09],
-    [-0.22, 0.082, 0.085],
-    [-0.3, 0.077, 0.08],
-    [-0.37, 0.072, 0.076],
-    [-0.41, 0.07, 0.074],
-    [-0.44, 0.069, 0.073],
-    [-0.465, 0.056, 0.059],
-    [-0.476, 0.03, 0.032],
+    [-0.06, 0.094, 0.098],
+    [-0.14, 0.097, 0.1],
+    [-0.22, 0.096, 0.098],
+    [-0.3, 0.093, 0.094],
+    [-0.35, 0.09, 0.09],
+    [-0.37, 0.096, 0.095],
+    [-0.39, 0.089, 0.089],
+    [-0.41, 0.094, 0.092],
+    [-0.44, 0.087, 0.087],
+    [-0.465, 0.07, 0.072],
+    [-0.48, 0.04, 0.042],
   ],
   2.3,
 );
-/** The jeans' straight lower leg, knee to a hem that falls on the shoe below the ankle. */
+/**
+ * The jeans' wide lower leg, knee to a hem that rests on the shoe: a fold behind the knee and
+ * the cloth stacked in folds above the shoe.
+ */
 const SHIN = rows(
   [
-    [0.045, 0.024, 0.026],
-    [0.03, 0.048, 0.052],
-    [0.005, 0.064, 0.068],
-    [-0.04, 0.068, 0.071],
-    [-0.12, 0.066, 0.068],
-    [-0.2, 0.064, 0.066],
-    [-0.26, 0.064, 0.067],
-    [-0.3, 0.066, 0.07, -0.002],
-    [-0.33, 0.07, 0.076, -0.006],
-    [-0.338, 0.068, 0.074, -0.006],
+    [0.045, 0.03, 0.032],
+    [0.03, 0.056, 0.06],
+    [0.005, 0.078, 0.082],
+    [-0.03, 0.085, 0.086],
+    [-0.05, 0.08, 0.081],
+    [-0.07, 0.086, 0.085],
+    [-0.12, 0.083, 0.083],
+    [-0.2, 0.081, 0.081],
+    [-0.25, 0.083, 0.084],
+    [-0.27, 0.088, 0.089],
+    [-0.285, 0.082, 0.084],
+    [-0.3, 0.089, 0.091, -0.002],
+    [-0.315, 0.083, 0.086, -0.004],
+    [-0.33, 0.09, 0.095, -0.006],
+    [-0.338, 0.088, 0.093, -0.006],
   ],
   2.3,
 );
@@ -357,10 +368,17 @@ function hexCells(
 const guard = greyOnGear(COLOUR.guard);
 /** The knee as the cup sees it, in the shin's frame: the leg's width carried over the joint. */
 const KNEE_FORM = rows([
-  [-0.15, 0.066, 0.069],
-  [-0.08, 0.068, 0.071],
-  [0, 0.069, 0.072],
-  [0.07, 0.066, 0.07],
+  [-0.15, 0.085, 0.086],
+  [-0.08, 0.088, 0.088],
+  [0, 0.09, 0.091],
+  [0.07, 0.086, 0.088],
+]);
+/** The thigh under the guard's upper cup, without the jeans' folds. */
+const THIGH_FORM = rows([
+  [-0.47, 0.094, 0.094],
+  [-0.4, 0.098, 0.097],
+  [-0.3, 0.1, 0.099],
+  [-0.24, 0.1, 0.099],
 ]);
 /** A strap all the way round the leg. */
 const strapRound = (at: number, height = 0.024): RiderPatch =>
@@ -404,7 +422,7 @@ const KNEE_GUARD: RiderPanelGroup = Object.freeze({
       anchor: "front",
       u0: -0.85,
       u1: 0.85,
-      from: -0.3,
+      from: -0.235,
       to: -0.095,
       lift: 0.007,
       taper: 0.45,
@@ -414,7 +432,7 @@ const KNEE_GUARD: RiderPanelGroup = Object.freeze({
       shade: guard,
     }),
     strapRound(-0.13),
-    strapRound(-0.27),
+    strapRound(-0.22),
   ]),
   build: () => cup(KNEE_FORM, KNEE_CUP),
 });
@@ -423,7 +441,7 @@ const THIGH_GUARD: RiderPanelGroup = Object.freeze({
   role: "gear",
   casts: true,
   patches: Object.freeze([strapRound(-0.315)]),
-  build: () => cup(THIGH, UPPER_CUP),
+  build: () => cup(THIGH_FORM, UPPER_CUP),
 });
 
 // -- Hands ---------------------------------------------------------------------------------------
@@ -514,35 +532,37 @@ function paintGlove(geometry: THREE.BufferGeometry): void {
 const SNEAKER = loftProfile(
   (
     [
-      [-0.108, 0.026, 0.026],
-      [-0.098, 0.04, 0.046],
-      [-0.08, 0.046, 0.056],
-      [-0.055, 0.048, 0.06],
-      [-0.03, 0.05, 0.058],
-      [0, 0.053, 0.052],
-      [0.035, 0.056, 0.044],
-      [0.07, 0.057, 0.036],
-      [0.1, 0.055, 0.03],
-      [0.125, 0.05, 0.025],
-      [0.145, 0.04, 0.02],
-      [0.158, 0.023, 0.013],
-      [0.164, 0.001, 0.001],
+      [-0.11, 0.018, 0.02],
+      [-0.104, 0.032, 0.038],
+      [-0.094, 0.042, 0.05],
+      [-0.075, 0.047, 0.057],
+      [-0.05, 0.049, 0.06],
+      [-0.025, 0.051, 0.058],
+      [0, 0.054, 0.052],
+      [0.035, 0.057, 0.044],
+      [0.07, 0.058, 0.036],
+      [0.1, 0.056, 0.03],
+      [0.124, 0.051, 0.026],
+      [0.142, 0.042, 0.022],
+      [0.155, 0.03, 0.017],
+      [0.163, 0.016, 0.011],
+      [0.166, 0.001, 0.001],
     ] as const
   ).map(([y, halfWidth, halfDepth]) => ({
     y,
     halfWidth,
     halfDepth,
     z: 0.047 - halfDepth,
-    square: 2.6,
+    square: 2.3,
   })),
 );
-/** A thick flat sole, 3 cm, standing a little up the upper's sides. */
+/** A thick sole, 3.4 cm, with a rounded edge, standing a little up the upper's sides. */
 const SNEAKER_SOLE = loftProfile([
-  { y: -0.018, halfWidth: 0.058, halfDepth: 0.136, z: 0.01, square: 4 },
-  { y: -0.014, halfWidth: 0.063, halfDepth: 0.142, z: 0.01, square: 4.4 },
-  { y: 0, halfWidth: 0.064, halfDepth: 0.144, z: 0.01, square: 4.4 },
-  { y: 0.01, halfWidth: 0.063, halfDepth: 0.143, z: 0.01, square: 4.4 },
-  { y: 0.013, halfWidth: 0.059, halfDepth: 0.138, z: 0.01, square: 4.2 },
+  { y: -0.018, halfWidth: 0.056, halfDepth: 0.134, z: 0.01, square: 2.8 },
+  { y: -0.014, halfWidth: 0.062, halfDepth: 0.142, z: 0.01, square: 3 },
+  { y: 0, halfWidth: 0.065, halfDepth: 0.146, z: 0.01, square: 3 },
+  { y: 0.012, halfWidth: 0.064, halfDepth: 0.144, z: 0.01, square: 3 },
+  { y: 0.016, halfWidth: 0.058, halfDepth: 0.137, z: 0.01, square: 2.8 },
 ]);
 /** Where the rig's boot sole meets the upper, in the ankle frame (rig.ts). */
 const SOLE_TOP = -B.ankleAbovePedal + 0.018;
@@ -583,17 +603,26 @@ function paintSneaker(geometry: THREE.BufferGeometry): void {
 
 // -- Jeans ---------------------------------------------------------------------------------------
 
-/** Worn denim: a little lighter over the front of the thigh and the knee. */
+/**
+ * Worn denim: lighter over the front of the thigh and the knee, darker down the inner seam, and a
+ * faint mottle so the cloth is not one flat blue.
+ */
 function fade(top: number, bottom: number, strength: number) {
-  return (geometry: THREE.BufferGeometry): void => {
+  return (geometry: THREE.BufferGeometry, side: number): void => {
     const position = geometry.getAttribute("position");
     const colour = geometry.getAttribute("color");
     for (let i = 0; i < position.count; i++) {
+      const x = position.getX(i);
       const y = position.getY(i);
-      const front = Math.max(0, position.getZ(i)) / 0.09;
+      const z = position.getZ(i);
+      const front = Math.max(0, z) / 0.1;
       const t = (y - bottom) / (top - bottom);
       const along = t > 0 && t < 1 ? Math.sin(Math.PI * t) : 0;
-      const k = colour.getX(i) * (1 + strength * front * along);
+      // The inner seam faces the other leg: -x on the left leg, +x on the right.
+      const inner = Math.max(0, -side * x) / 0.1;
+      const mottle = Math.sin(x * 91 + y * 57) * Math.sin(z * 73 - y * 39);
+      const k =
+        colour.getX(i) * (1 + strength * front * along - 0.12 * inner * inner + 0.04 * mottle);
       colour.setXYZ(i, k, k, k);
     }
   };
@@ -686,6 +715,6 @@ export const STREET_KIT: RiderLook = Object.freeze({
       build: chinStrap,
     },
   ]),
-  // Hands a little nearer the thighs than the game's carriage: arms hang loose.
+  // The rest pose's hands a little nearer the thighs; figure.ts carries the arms when riding.
   armCarriage: Object.freeze({ splay: -0.04, rise: 0 }),
 });
