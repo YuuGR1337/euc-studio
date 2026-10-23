@@ -1,21 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  flatMap,
-  freeRideApi,
-  type FreeRideStatus,
-  type HeightMap,
-} from "../../engine/freeRide.ts";
+import { freeRideApi, type FreeRideStatus } from "../../engine/freeRide.ts";
+import type { WorldFrame } from "../../engine/world.ts";
 import type { EngineClient } from "../../engine/types.ts";
-import { FreeRideController } from "./controller.ts";
+import { DEFAULT_WORLD, FreeRideController } from "./controller.ts";
+import { useFreeRideHud } from "./hud.ts";
 vi.mock("../../engine/freeRide.ts", async (original) => ({
   ...(await original<typeof import("../../engine/freeRide.ts")>()),
   freeRideApi: {
     start: vi.fn(),
     status: vi.fn(),
     map: vi.fn(),
-    pause: vi.fn(),
+    world: vi.fn(),
     input: vi.fn(),
-    arm: vi.fn(),
     restart: vi.fn(),
     stepOff: vi.fn(),
   },
@@ -28,20 +24,51 @@ class Surface extends EventTarget {
     return target === this;
   }
 }
-const grid: HeightMap = {
-  revision: 0,
-  nx: 129,
-  ny: 129,
-  spacing_m: 0.25,
-  origin_xy_m: [-16, -16],
-  heights_mm: new Array<number>(16641).fill(0),
+const frame: WorldFrame = {
+  spec: { seed: 42, revision: 2, biome: "city", densities: { ...DEFAULT_WORLD.densities } },
+  start_xy_m: [0, 0],
+  start_heading_rad: 0,
+  origin_z_m: 0,
 };
 let epoch = 0;
 let native: FreeRideStatus;
 let controller: FreeRideController;
 let close: () => void;
 let engine: EngineClient;
-beforeEach(async () => {
+let outputs: { controller_powered: boolean };
+const setButton = vi.fn(async (_button: string, _pressed: boolean, _epoch: number) => "ok");
+const sendCommand = vi.fn(async (_id: string, _value?: number) => "sent");
+const ride = (patch: Partial<FreeRideStatus> = {}): FreeRideStatus => ({
+  epoch: (epoch += 10),
+  mode: "free_ride",
+  ready: true,
+  armed: true,
+  source: "keyboard_slider",
+  reason: "Ready",
+  rider_model: "articulated_sagittal_v1",
+  desired_lean_deg: 0,
+  commanded_lean_deg: 0,
+  actual_lean_deg: 0,
+  heading_deg: 0,
+  path_length_m: 0,
+  yaw_aid_work_j: 0,
+  roll_aid_work_j: 0,
+  ground: "world",
+  turn_cap_rad_s: 2.5,
+  crouch: 0,
+  on_pedals: true,
+  boot_remaining_s: 0,
+  ...patch,
+});
+
+async function open(status: FreeRideStatus) {
+  native = status;
+  controller = new FreeRideController(engine);
+  close = controller.connect();
+  await vi.advanceTimersByTimeAsync(300);
+}
+
+beforeEach(() => {
   vi.useFakeTimers({
     toFake: ["setInterval", "clearInterval", "setTimeout", "clearTimeout", "performance"],
   });
@@ -54,38 +81,20 @@ beforeEach(async () => {
     "document",
     Object.assign(new EventTarget(), { hidden: false, activeElement: root, hasFocus: () => true }),
   );
-  native = {
-    epoch: (epoch += 10),
-    mode: "free_ride",
-    ready: true,
-    armed: false,
-    source: "keyboard_slider",
-    reason: "Ready",
-    rider_model: "rigid_ankle_v1",
-    desired_lean_deg: 0,
-    commanded_lean_deg: 0,
-    actual_lean_deg: 0,
-    heading_deg: 0,
-    path_length_m: 0,
-    yaw_aid_work_j: 0,
-    roll_aid_work_j: 0,
-    ground: "map",
-  };
   const listeners = new Set<() => void>();
-  let playing = true;
+  let playing = false;
+  outputs = { controller_powered: true };
   engine = {
     kind: "live",
     get playing() {
       return playing;
     },
     targetRtf: 1,
-    status: {
-      state: "running",
-      runMode: "free_ride",
-      runEpoch: native.epoch,
-      backend: "own",
-      message: "",
+    status: { state: "running", runMode: "free_ride", runEpoch: 1, backend: "own", message: "" },
+    get outputs() {
+      return outputs;
     },
+    latest: { speed: 0 },
     subscribe: (listener: () => void) => {
       listeners.add(listener);
       return () => listeners.delete(listener);
@@ -95,18 +104,18 @@ beforeEach(async () => {
       for (const listener of listeners) listener();
     }),
     setTargetRtf: vi.fn(),
+    setButton,
+    sendCommand,
   } as unknown as EngineClient;
-  vi.mocked(freeRideApi.status).mockImplementation(async () => ({ ...native }));
-  vi.mocked(freeRideApi.map).mockResolvedValue(grid);
-  vi.mocked(freeRideApi.start).mockResolvedValue(undefined);
-  vi.mocked(freeRideApi.pause).mockResolvedValue(undefined);
-  vi.mocked(freeRideApi.input).mockResolvedValue(undefined);
-  vi.mocked(freeRideApi.arm).mockImplementation(async () => {
-    native.armed = true;
+  vi.mocked(freeRideApi.status).mockImplementation(async () => {
+    engine.status.runEpoch = native.epoch;
+    return { ...native };
   });
-  controller = new FreeRideController(engine);
-  close = controller.connect(root as unknown as HTMLElement);
-  await vi.advanceTimersByTimeAsync(500);
+  vi.mocked(freeRideApi.world).mockResolvedValue(frame);
+  vi.mocked(freeRideApi.start).mockResolvedValue(undefined);
+  vi.mocked(freeRideApi.input).mockResolvedValue(undefined);
+  vi.mocked(freeRideApi.restart).mockResolvedValue(undefined);
+  vi.mocked(freeRideApi.stepOff).mockResolvedValue(undefined);
 });
 afterEach(async () => {
   close();
@@ -115,113 +124,16 @@ afterEach(async () => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
 });
-describe("rider model run boundary", () => {
-  it("pauses and disarms without changing the current model or starting a run", async () => {
-    await controller.arm();
-    expect(controller.getSnapshot().armed).toBe(true);
-    controller.setRiderModel("articulated_sagittal_v1");
-    expect(engine.setPlaying).toHaveBeenCalledWith(false);
-    expect(controller.getSnapshot()).toMatchObject({
-      armed: false,
-      playing: false,
-      riderModel: "articulated_sagittal_v1",
-      status: { rider_model: "rigid_ankle_v1" },
-    });
-    expect(freeRideApi.start).not.toHaveBeenCalled();
-    expect(freeRideApi.pause).toHaveBeenCalledWith(native.epoch);
-    await vi.advanceTimersByTimeAsync(300);
-    expect(controller.getSnapshot().riderModel).toBe("articulated_sagittal_v1");
-  });
-  it("captures the draft model and waits for a newer native epoch", async () => {
-    controller.setRiderModel("articulated_sagittal_v1");
-    const map = flatMap(7);
-    await controller.start({ map });
-    expect(freeRideApi.start).toHaveBeenCalledWith({ map }, "articulated_sagittal_v1");
-    controller.setRiderModel("rigid_ankle_v1");
-    expect(controller.getSnapshot().riderModel).toBe("articulated_sagittal_v1");
-    await vi.advanceTimersByTimeAsync(300);
-    expect(controller.getSnapshot()).toMatchObject({
-      starting: true,
-      applied: null,
-      status: { rider_model: "rigid_ankle_v1" },
-    });
-    native = { ...native, epoch: native.epoch + 1, rider_model: "articulated_sagittal_v1" };
-    await vi.advanceTimersByTimeAsync(300);
-    expect(controller.getSnapshot()).toMatchObject({
-      starting: false,
-      applied: { map },
-      status: { epoch: native.epoch, rider_model: "articulated_sagittal_v1" },
-    });
-  });
-  it("does not label a different native model as the requested run", async () => {
-    controller.setRiderModel("articulated_sagittal_v1");
-    await controller.start({ map: flatMap() });
-    native = { ...native, epoch: native.epoch + 1 };
-    await vi.advanceTimersByTimeAsync(300);
-    expect(controller.getSnapshot()).toMatchObject({
-      starting: false,
-      applied: null,
-      armed: false,
-      status: { rider_model: "rigid_ankle_v1" },
-    });
-    expect(controller.getSnapshot().error).toContain("differs");
-    expect(freeRideApi.pause).toHaveBeenCalledWith(native.epoch);
-  });
-  it("keeps actual status on a failed start", async () => {
-    controller.setRiderModel("articulated_sagittal_v1");
-    vi.mocked(freeRideApi.start).mockRejectedValueOnce(new Error("Build failed"));
-    await controller.start({ map: flatMap() });
-    expect(controller.getSnapshot()).toMatchObject({
-      starting: false,
-      error: "Build failed",
-      status: { rider_model: "rigid_ankle_v1" },
-    });
-  });
-  it("follows an external reset after the selected model has been applied", async () => {
-    controller.setRiderModel("articulated_sagittal_v1");
-    await controller.start({ map: flatMap() });
-    native = { ...native, epoch: native.epoch + 1, rider_model: "articulated_sagittal_v1" };
-    await vi.advanceTimersByTimeAsync(300);
-    native = { ...native, epoch: native.epoch + 1, rider_model: "rigid_ankle_v1" };
-    await vi.advanceTimersByTimeAsync(300);
-    expect(controller.getSnapshot()).toMatchObject({
-      riderModel: "rigid_ankle_v1",
-      applied: null,
-      status: { epoch: native.epoch, rider_model: "rigid_ankle_v1" },
-    });
-  });
-  it("reads the actual model after an external reset when there is no draft edit", async () => {
-    native = { ...native, epoch: native.epoch + 1, rider_model: "articulated_sagittal_v1" };
-    await vi.advanceTimersByTimeAsync(300);
-    expect(controller.getSnapshot()).toMatchObject({
-      riderModel: "articulated_sagittal_v1",
-      status: { epoch: native.epoch, rider_model: "articulated_sagittal_v1" },
-    });
-  });
-  it("pauses a queued run after the control surface closes", async () => {
-    controller.setRiderModel("articulated_sagittal_v1");
-    let accepted!: () => void;
-    vi.mocked(freeRideApi.start).mockReturnValueOnce(
-      new Promise<void>((resolve) => {
-        accepted = resolve;
-      }),
-    );
-    const start = controller.start({ map: flatMap() });
-    close();
-    close = () => {};
-    native = { ...native, epoch: native.epoch + 1, rider_model: "articulated_sagittal_v1" };
-    accepted();
-    await start;
-    await vi.advanceTimersByTimeAsync(100);
-    expect(freeRideApi.pause).toHaveBeenCalledWith(native.epoch);
-    expect(controller.getSnapshot()).toMatchObject({ armed: false, starting: false });
-  });
-});
 
-const press = (type: "keydown" | "keyup", code: string, repeat = false) => {
+const press = (
+  type: "keydown" | "keyup",
+  code: string,
+  { repeat = false, shiftKey = false } = {},
+) => {
   const event = Object.assign(new Event(type, { cancelable: true }), {
     code,
     repeat,
+    shiftKey,
     metaKey: false,
     ctrlKey: false,
     altKey: false,
@@ -229,34 +141,84 @@ const press = (type: "keydown" | "keyup", code: string, repeat = false) => {
   window.dispatchEvent(event);
   return event;
 };
+const tap = (code: string, options: { shiftKey?: boolean } = {}) => {
+  press("keydown", code, options);
+  press("keyup", code, options);
+};
 const sentInputs = () => vi.mocked(freeRideApi.input).mock.calls.map(([input]) => input);
 const lastSent = () => sentInputs().at(-1);
-const setSpeedKmh = (kmh: number) =>
-  Object.assign(engine as unknown as { latest: { speed: number } }, { latest: { speed: kmh } });
 const radians = (deg: number) => (deg * Math.PI) / 180;
 
-describe("riding by push", () => {
-  it("arms on the first push and ramps the lean up from a neutral first packet", async () => {
-    expect(controller.getSnapshot().armed).toBe(false);
+describe("opening Free Ride", () => {
+  it("starts a ride in the default city when there is none, then plays it", async () => {
+    await open({ ...ride(), mode: "scenario", ready: false, armed: false, ground: "none" });
+    expect(freeRideApi.start).toHaveBeenCalledWith(
+      { world: DEFAULT_WORLD },
+      "articulated_sagittal_v1",
+    );
+    expect(controller.getSnapshot()).toMatchObject({ starting: true, startingKind: "world" });
+    native = ride({ ready: false, boot_remaining_s: 1.2 });
+    await vi.advanceTimersByTimeAsync(300);
+    expect(engine.setPlaying).toHaveBeenCalledWith(true);
+    expect(controller.getSnapshot()).toMatchObject({ starting: false, world: frame });
+    expect(useFreeRideHud.getState().boot).toBeCloseTo(1.2);
+    // Only once per opening, even while the new run is on its way.
+    expect(freeRideApi.start).toHaveBeenCalledTimes(1);
+  });
+
+  it("rides a free ride that already runs, and starts nothing", async () => {
+    await open(ride());
+    expect(freeRideApi.start).not.toHaveBeenCalled();
+    expect(engine.setPlaying).toHaveBeenCalledWith(true);
+  });
+});
+
+describe("riding without arming", () => {
+  it("keys ride as soon as the firmware is ready, the lean ramping up", async () => {
+    await open(ride({ ready: false, armed: false, boot_remaining_s: 0.5 }));
     const down = press("keydown", "KeyW");
     expect(down.defaultPrevented).toBe(true);
-    await vi.advanceTimersByTimeAsync(100);
-    expect(freeRideApi.arm).toHaveBeenCalledWith(native.epoch, "keyboard_slider");
-    expect(controller.getSnapshot().armed).toBe(true);
-    const firstArmed = sentInputs().find((input) => input.armed);
-    expect(firstArmed?.desired_lean_rad).toBe(0);
-    await vi.advanceTimersByTimeAsync(50);
+    await vi.advanceTimersByTimeAsync(500);
+    expect(sentInputs()).toHaveLength(0);
+    native = { ...native, ready: true, armed: true, boot_remaining_s: 0 };
+    await vi.advanceTimersByTimeAsync(200);
     const early = lastSent()?.desired_lean_rad ?? 0;
     expect(early).toBeGreaterThan(0);
-    expect(early).toBeLessThan(radians(10) / 2);
+    expect(early).toBeLessThan(radians(10));
     await vi.advanceTimersByTimeAsync(1500);
+    expect(lastSent()).toMatchObject({ armed: true, source: "keyboard_slider" });
     expect(lastSent()?.desired_lean_rad).toBeCloseTo(radians(10), 3);
     press("keyup", "KeyW");
     await vi.advanceTimersByTimeAsync(1500);
     expect(Math.abs(lastSent()?.desired_lean_rad ?? 1)).toBeLessThan(1e-3);
   });
 
+  it("losing the window lets go of the keys, and the next press rides without a click", async () => {
+    await open(ride());
+    press("keydown", "KeyW");
+    await vi.advanceTimersByTimeAsync(1500);
+    expect(lastSent()?.desired_lean_rad).toBeCloseTo(radians(10), 3);
+    window.dispatchEvent(new Event("blur"));
+    await vi.advanceTimersByTimeAsync(1500);
+    expect(Math.abs(lastSent()?.desired_lean_rad ?? 1)).toBeLessThan(1e-3);
+    press("keydown", "KeyW");
+    await vi.advanceTimersByTimeAsync(1500);
+    expect(lastSent()?.desired_lean_rad).toBeCloseTo(radians(10), 3);
+  });
+
+  it("Escape pauses, and a riding key goes on", async () => {
+    await open(ride());
+    expect(engine.playing).toBe(true);
+    press("keydown", "Escape");
+    expect(engine.playing).toBe(false);
+    await vi.advanceTimersByTimeAsync(200);
+    expect(useFreeRideHud.getState().prompt).toContain("Paused");
+    press("keydown", "KeyW");
+    expect(engine.playing).toBe(true);
+  });
+
   it("does not ride on keys typed into a text field", async () => {
+    await open(ride());
     const field = Object.assign(new Surface(), {
       closest: (selector: string) => (selector.includes("textarea") ? {} : null),
     });
@@ -267,159 +229,124 @@ describe("riding by push", () => {
       ctrlKey: false,
       altKey: false,
     });
-    field.addEventListener("keydown", () => {});
     Object.defineProperty(event, "target", { value: field });
     window.dispatchEvent(event);
     expect(event.defaultPrevented).toBe(false);
-    await vi.advanceTimersByTimeAsync(300);
-    expect(freeRideApi.arm).not.toHaveBeenCalled();
-  });
-
-  it("on an older engine, asks for no more turn at speed than a 20° turn lean holds", async () => {
-    setSpeedKmh(36);
-    press("keydown", "KeyA");
-    await vi.advanceTimersByTimeAsync(1500);
-    const rate = lastSent()?.heading_rate_rad_s ?? 0;
-    // 10 m/s with a 20° turn lean: g·tan(20°)/v = 0.357 rad/s, under the 30°/s (0.524) limit.
-    expect(rate).toBeCloseTo((9.81 * Math.tan(radians(20))) / 10, 2);
-    press("keyup", "KeyA");
-  });
-
-  it("gives a full turn the engine's own cap at the current speed", async () => {
-    native = { ...native, on_pedals: true, crouch: 0, turn_cap_rad_s: 1.7 };
-    await vi.advanceTimersByTimeAsync(300);
-    press("keydown", "KeyD");
-    await vi.advanceTimersByTimeAsync(1500);
-    expect(lastSent()?.heading_rate_rad_s).toBeCloseTo(-1.7, 3);
-    native.turn_cap_rad_s = 0.6;
-    await vi.advanceTimersByTimeAsync(300);
-    expect(lastSent()?.heading_rate_rad_s).toBeCloseTo(-0.6, 3);
-    press("keyup", "KeyD");
-  });
-
-  it("stops before it reverses: a back lean near a stop waits 0.35 s", async () => {
-    setSpeedKmh(0);
-    press("keydown", "KeyS");
-    await vi.advanceTimersByTimeAsync(300);
-    expect(controller.getSnapshot().armed).toBe(true);
-    expect(lastSent()?.desired_lean_rad).toBe(0);
-    await vi.advanceTimersByTimeAsync(800);
-    expect(lastSent()?.desired_lean_rad ?? 0).toBeLessThan(0);
-    press("keyup", "KeyS");
-  });
-
-  it("keeps Space for crouch and sends it only when the run reports a crouch", async () => {
-    const space = press("keydown", "Space");
-    expect(space.defaultPrevented).toBe(true);
-    press("keyup", "Space");
-    press("keydown", "KeyW");
-    await vi.advanceTimersByTimeAsync(300);
-    // An older engine refuses unknown fields: no crouch in its packets.
-    expect(lastSent()).not.toHaveProperty("crouch");
-    press("keyup", "KeyW");
-    native = { ...native, on_pedals: true, crouch: null, turn_cap_rad_s: 2.5 };
-    await vi.advanceTimersByTimeAsync(300);
-    press("keydown", "Space");
     await vi.advanceTimersByTimeAsync(500);
-    // The rigid rider (crouch null) gets 0; an articulated one gets the eased share.
-    expect(lastSent()?.crouch).toBe(0);
-    native.crouch = 0;
-    await vi.advanceTimersByTimeAsync(500);
-    expect(lastSent()?.crouch).toBeCloseTo(1, 2);
-    press("keyup", "Space");
-    await vi.advanceTimersByTimeAsync(500);
-    expect(lastSent()?.crouch).toBeCloseTo(0, 2);
-  });
-
-  it("Escape pauses, and a held key must be let go before it rides again", async () => {
-    press("keydown", "KeyW");
-    await vi.advanceTimersByTimeAsync(300);
-    expect(controller.getSnapshot().armed).toBe(true);
-    press("keydown", "Escape");
-    expect(controller.getSnapshot().armed).toBe(false);
-    native.armed = false;
-    press("keydown", "KeyW", true);
-    await vi.advanceTimersByTimeAsync(600);
-    expect(controller.getSnapshot().armed).toBe(false);
-    press("keyup", "KeyW");
-    press("keydown", "KeyW");
-    await vi.advanceTimersByTimeAsync(600);
-    expect(controller.getSnapshot().armed).toBe(true);
+    expect(Math.abs(lastSent()?.desired_lean_rad ?? 0)).toBe(0);
   });
 });
 
-describe("restart countdown", () => {
-  it("R counts down and restarts the run on its ground; R again cancels", async () => {
-    const map = flatMap(3);
-    await controller.start({ map });
-    native = { ...native, epoch: native.epoch + 1 };
+describe("crash and respawn", () => {
+  it("a crash never pauses; R respawns at the last clear spot and the keys ride again", async () => {
+    await open(ride());
+    const before = native.epoch;
+    native = { ...native, on_pedals: false, crouch: null, reason: "Off the pedals" };
     await vi.advanceTimersByTimeAsync(300);
-    vi.mocked(freeRideApi.start).mockClear();
-    press("keydown", "KeyR");
-    expect(controller.getSnapshot().countdown).not.toBeNull();
-    press("keydown", "KeyR");
-    expect(controller.getSnapshot().countdown).toBeNull();
-    press("keydown", "KeyR");
-    await vi.advanceTimersByTimeAsync(2900);
-    expect(freeRideApi.start).not.toHaveBeenCalled();
+    expect(engine.setPlaying).not.toHaveBeenCalledWith(false);
+    expect(useFreeRideHud.getState().prompt).toBe(
+      "Off the pedals. R respawns here, Shift R at the start.",
+    );
+    tap("KeyR");
+    expect(freeRideApi.restart).toHaveBeenCalledWith(before, false);
+    expect(controller.getSnapshot()).toMatchObject({ starting: true, startingKind: "respawn" });
+    // A second R while the respawn is on its way does nothing.
+    tap("KeyR");
+    expect(freeRideApi.restart).toHaveBeenCalledTimes(1);
+    native = ride();
+    await vi.advanceTimersByTimeAsync(300);
+    expect(controller.getSnapshot().starting).toBe(false);
+    press("keydown", "KeyW");
+    await vi.advanceTimersByTimeAsync(1500);
+    expect(lastSent()).toMatchObject({ run_epoch: native.epoch });
+    expect(lastSent()?.desired_lean_rad).toBeCloseTo(radians(10), 3);
+  });
+
+  it("Shift+R respawns at the world's start; the HUD's button does too", async () => {
+    await open(ride());
+    tap("KeyR", { shiftKey: true });
+    expect(freeRideApi.restart).toHaveBeenLastCalledWith(native.epoch, true);
+    native = ride();
+    await vi.advanceTimersByTimeAsync(300);
+    useFreeRideHud.getState().onRespawn?.(false);
+    expect(freeRideApi.restart).toHaveBeenLastCalledWith(native.epoch, false);
+  });
+
+  it("a failed respawn says why and can be tried again", async () => {
+    await open(ride());
+    vi.mocked(freeRideApi.restart).mockRejectedValueOnce(new Error("No clear spot"));
+    tap("KeyR");
+    await vi.advanceTimersByTimeAsync(50);
+    expect(controller.getSnapshot()).toMatchObject({ starting: false, error: "No clear spot" });
+    tap("KeyR");
+    expect(freeRideApi.restart).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("the wheel's pad", () => {
+  it("P and H hold the power and handle buttons until they are let go", async () => {
+    await open(ride());
+    press("keydown", "KeyP");
+    expect(setButton).toHaveBeenLastCalledWith("power", true, native.epoch);
+    await vi.advanceTimersByTimeAsync(350);
+    // The hold renews its lease while the key is down.
+    expect(setButton.mock.calls.filter(([, pressed]) => pressed).length).toBeGreaterThan(2);
+    press("keyup", "KeyP");
+    expect(setButton).toHaveBeenLastCalledWith("power", false, native.epoch);
+    await vi.advanceTimersByTimeAsync(50);
+    press("keydown", "KeyH");
+    expect(setButton).toHaveBeenLastCalledWith("handle", true, native.epoch);
+    press("keyup", "KeyH");
+    expect(setButton).toHaveBeenLastCalledWith("handle", false, native.epoch);
+  });
+
+  it("a switched-off wheel says so, and P powers it on", async () => {
+    await open(ride());
+    outputs = { controller_powered: false };
+    await vi.advanceTimersByTimeAsync(300);
+    expect(controller.getSnapshot().powered).toBe(false);
+    expect(useFreeRideHud.getState().prompt).toBe("The wheel is off. P powers it on.");
+    expect(engine.setPlaying).not.toHaveBeenCalledWith(false);
+  });
+
+  it("L, B and M send the light, the horn and the pedal mode", async () => {
+    await open(ride());
+    tap("KeyL");
+    await vi.advanceTimersByTimeAsync(10);
+    expect(sendCommand).toHaveBeenLastCalledWith("light", 1);
+    expect(controller.getSnapshot().light).toBe(1);
+    tap("KeyL");
+    await vi.advanceTimersByTimeAsync(10);
+    expect(sendCommand).toHaveBeenLastCalledWith("light", 2);
+    tap("KeyB");
+    expect(sendCommand).toHaveBeenLastCalledWith("horn", undefined);
+    tap("KeyM");
+    await vi.advanceTimersByTimeAsync(10);
+    expect(sendCommand).toHaveBeenLastCalledWith("pedal_mode", 0);
+    controller.pedalMode(2);
+    await vi.advanceTimersByTimeAsync(10);
+    expect(controller.getSnapshot().pedalMode).toBe(2);
+  });
+
+  it("a refused command shows in the prompt and changes nothing", async () => {
+    await open(ride());
+    sendCommand.mockRejectedValueOnce(new Error("The wheel ignores it at speed"));
+    tap("KeyL");
     await vi.advanceTimersByTimeAsync(200);
-    expect(freeRideApi.start).toHaveBeenCalledWith({ map }, controller.getSnapshot().riderModel);
-  });
-
-  it("restarts where the wheel is on an engine with the quick reset", async () => {
-    native = { ...native, ground: "world", on_pedals: true, crouch: 0, turn_cap_rad_s: 2.5 };
-    await vi.advanceTimersByTimeAsync(300);
-    press("keydown", "KeyR");
-    expect(controller.getSnapshot().countdown?.here).toBe(true);
-    await vi.advanceTimersByTimeAsync(3100);
-    expect(freeRideApi.restart).toHaveBeenCalledWith(native.epoch);
-    expect(controller.getSnapshot().starting).toBe(true);
-    native = { ...native, epoch: native.epoch + 1 };
-    await vi.advanceTimersByTimeAsync(300);
-    expect(controller.getSnapshot()).toMatchObject({ starting: false, armed: false });
-  });
-
-  it("X steps off on an engine that can, and never arms a rider off the wheel", async () => {
-    vi.mocked(freeRideApi.stepOff).mockResolvedValue(undefined);
-    press("keydown", "KeyW");
-    await vi.advanceTimersByTimeAsync(300);
-    expect(controller.getSnapshot().armed).toBe(true);
-    press("keydown", "KeyX");
-    expect(freeRideApi.stepOff).not.toHaveBeenCalled(); // an older engine has no step-off
-    native = { ...native, on_pedals: true, crouch: 0, turn_cap_rad_s: 2.5 };
-    await vi.advanceTimersByTimeAsync(300);
-    press("keyup", "KeyX");
-    press("keydown", "KeyX");
-    expect(freeRideApi.stepOff).toHaveBeenCalledWith(native.epoch);
-    native = { ...native, armed: false, on_pedals: false, crouch: null };
-    await vi.advanceTimersByTimeAsync(300);
-    expect(controller.getSnapshot().armed).toBe(false);
-    press("keyup", "KeyW");
-    vi.mocked(freeRideApi.arm).mockClear();
-    press("keydown", "KeyW");
-    await vi.advanceTimersByTimeAsync(600);
-    expect(freeRideApi.arm).not.toHaveBeenCalled();
-  });
-
-  it("Escape cancels the countdown", async () => {
-    press("keydown", "KeyR");
-    press("keydown", "Escape");
-    await vi.advanceTimersByTimeAsync(3500);
-    expect(controller.getSnapshot().countdown).toBeNull();
-    expect(freeRideApi.restart).not.toHaveBeenCalled();
-    expect(freeRideApi.start).not.toHaveBeenCalled();
+    expect(controller.getSnapshot().light).toBe(null);
+    expect(useFreeRideHud.getState().prompt).toBe("The wheel ignores it at speed");
   });
 });
 
-describe("key bindings", () => {
-  it("binds the next key press and refuses the studio's keys", () => {
-    controller.captureKey("crouch");
-    press("keydown", "KeyC");
-    expect(controller.getSnapshot().bindError).toMatch(/kept for the studio/);
-    press("keydown", "ShiftLeft");
-    expect(controller.getSnapshot()).toMatchObject({ capturing: null, bindError: null });
-    expect(controller.getSnapshot().bindings.crouch).toEqual(["ShiftLeft", "Space"]);
-    controller.resetKeys();
-    expect(controller.getSnapshot().bindings.crouch).toEqual(["Space"]);
+describe("a new world", () => {
+  it("starts a run from a random seed and waits for it", async () => {
+    await open(ride());
+    controller.newWorld();
+    const [ground] = vi.mocked(freeRideApi.start).mock.calls[0] ?? [];
+    expect(ground && "world" in ground && ground.world.seed).not.toBe(undefined);
+    expect(controller.getSnapshot()).toMatchObject({ starting: true, startingKind: "world" });
+    native = ride();
+    await vi.advanceTimersByTimeAsync(300);
+    expect(controller.getSnapshot().starting).toBe(false);
   });
 });

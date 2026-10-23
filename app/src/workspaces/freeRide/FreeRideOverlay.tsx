@@ -2,6 +2,8 @@ import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useRef } from "react";
 import { smooth } from "../../design/motion.ts";
 import { onFrame } from "../../lib/frameloop.ts";
+import { Button } from "../../ui/Button.tsx";
+import { RotateCcw } from "../../ui/icons.tsx";
 import { Kbd } from "../../ui/Kbd.tsx";
 import { Pill } from "../../ui/Pill.tsx";
 import { sentShares } from "./controller.ts";
@@ -41,30 +43,19 @@ function Bar({ read, label, ends }: { read: () => number; label: string; ends: [
   );
 }
 
-/** Seconds left on the restart countdown, written on the frame loop. */
-function Countdown({ endsAt }: { endsAt: number }) {
-  const seconds = useRef<HTMLSpanElement>(null);
-  useEffect(
-    () =>
-      onFrame((now) => {
-        if (seconds.current)
-          seconds.current.textContent = String(Math.max(0, Math.ceil((endsAt - now) / 1000)));
-      }),
-    [endsAt],
-  );
-  return <span ref={seconds} className="num text-20 font-semibold text-fg" />;
-}
-
 const readLean = () => sentShares.lean;
 // Left fills to the left (the turn's sign is left positive).
 const readTurn = () => -sentShares.turn;
 const LEAN_ENDS: [string, string] = ["back", "fwd"];
 const TURN_ENDS: [string, string] = ["left", "right"];
 
-/** Free Ride in the 3D view: what to do next, the restart countdown, and what the hands ask. */
+/**
+ * Free Ride in the 3D view: what to do next, the firmware's boot countdown, what the hands ask, and
+ * the respawn buttons (R and Shift+R do the same).
+ */
 export function FreeRideOverlay() {
-  const { open, armed, prompt, countdown, keys } = useFreeRideHud();
-  const show = open && (armed || !!prompt || !!countdown);
+  const { open, riding, prompt, boot, keys, respawn, onRespawn } = useFreeRideHud();
+  const show = open && (riding || !!prompt || boot !== null || !!respawn);
   return (
     <AnimatePresence>
       {show && (
@@ -79,31 +70,28 @@ export function FreeRideOverlay() {
           <span className="flex items-center justify-between gap-8">
             <span className="flex items-center gap-8">
               <span className="label">Free ride</span>
-              {armed && (
+              {riding && (
                 <Pill tone="accent" dot="live">
                   Riding
                 </Pill>
               )}
             </span>
-            {armed && (
+            {riding && (
               <span className="flex items-center gap-4 text-11 text-fg-2">
                 <Kbd>Esc</Kbd> pause
               </span>
             )}
           </span>
-          {countdown && (
+          {boot !== null && (
             <span
               role="status"
-              className="flex items-center justify-between gap-8 rounded-8 bg-caution-tint px-8 py-4 text-12 text-caution"
+              className="flex items-center justify-between gap-8 rounded-8 bg-raised px-8 py-4 text-12 text-fg-2"
             >
-              <span>
-                Restarting {countdown.here ? "here" : "at the start point"}. The firmware boots
-                again.
-              </span>
-              <Countdown endsAt={countdown.endsAt} />
+              <span>The firmware boots on the stand.</span>
+              <span className="num text-13 font-semibold text-fg">{boot.toFixed(1)} s</span>
             </span>
           )}
-          {armed && (
+          {riding && (
             <>
               <Bar read={readLean} label="Lean" ends={LEAN_ENDS} />
               <Bar read={readTurn} label="Turn" ends={TURN_ENDS} />
@@ -113,6 +101,21 @@ export function FreeRideOverlay() {
             <p role="status" className="text-13 text-fg">
               {prompt}
             </p>
+          )}
+          {respawn && onRespawn && (
+            <span className="pointer-events-auto flex items-center gap-8">
+              <Button
+                size="sm"
+                icon={<RotateCcw />}
+                aria-keyshortcuts={respawn.here}
+                onClick={() => onRespawn(false)}
+              >
+                Respawn <Kbd>{respawn.here}</Kbd>
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => onRespawn(true)}>
+                At the start <Kbd>{respawn.start}</Kbd>
+              </Button>
+            </span>
           )}
           {keys && (
             <span className="flex flex-wrap items-center gap-x-8 gap-y-4 text-11 text-fg-2">

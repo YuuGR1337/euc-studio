@@ -1,8 +1,9 @@
 # Free Ride redesign (FR)
 
 Status, 2026-10-22: FR1 study and plan approved. FR2 (controls), FR2b (native controls, by the
-physics owner), FR3 (the Chase camera) and the rider body (FR9's body, moved ahead: their rider,
-copied) are built. The other phases are not built.
+physics owner), FR3 (the Chase camera), the rider body (FR9's body, moved ahead: their rider,
+copied) and the play mode (no clicks, crash freely, respawn, the wheel's pad; see the end of the
+decisions) are built. The other phases are not built.
 
 Tarik (Human) asked for a better Free Ride: the world looks primitive, there is no sky, and the
 controls feel bad. He pointed at [EUC Thrills](https://github.com/VibezZzCoder/EUC-thrills), an
@@ -337,6 +338,27 @@ Later the same day Tarik (Human) asked to copy the game's body and navigation ("
 on"). This replaces decision 7: the rider is EUC Thrills' fictional Cool Rider, with its MIT and
 CC BY 4.0 notices, driven by the physics, with a Physics bodies toggle. It goes ahead of the other
 phases.
+
+Then Tarik asked for a play mode: "freeride experience is really poor. I have to click many
+things, play, etc to test the wheel. And if i crash, it halts mid crash and i have to re-do
+everything. Let the wheel crash and have a hotkey/button for quick respawn. Allow me to interact
+with the wheel buttons, turn it off, click handle, whatever. Set me free to test and play. I wont
+need the test pad anymore, nor any fine tuning for free ride simulations." This replaces
+decision 4 and the arm step of FR2:
+
+- Opening Free Ride starts a city ride and plays; the keys ride once the firmware is up (about
+  1.5 s of simulated time). No arm step, no neutral dwell: input older than 250 ms is neutral.
+- A crash never pauses: firmware, motor and world go on, and the timeline says "Stepped off" or
+  "Rider detached".
+- R respawns at once at the last clear spot (Shift+R at the world's start), a new run whose
+  firmware boots again in about 0.7 s of wall time. The HUD has a button for each.
+- P and H hold the wheel's power and handle buttons; a long press on power switches the wheel
+  off, and the run goes on. L, B and M send the light, horn and pedal-mode commands.
+- The test pad, its editor, the world's density sliders and every tuning control are gone from
+  the Free Ride panel; old test-pad recordings still open.
+
+The engine side is the physics owner's (`free_ride.rs`, committed as "free ride: play mode in the
+engine"); the panel, HUD, keys and pad are the Free Ride agent's (`app/src/workspaces/freeRide`).
 
 ## Open questions for Tarik (answered above for now)
 

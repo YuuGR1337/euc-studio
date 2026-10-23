@@ -141,6 +141,7 @@ export const PAD = {
   rb: 5,
   lt: 6,
   rt: 7,
+  back: 8,
   start: 9,
   up: 12,
   down: 13,
@@ -203,12 +204,16 @@ export interface PadLike {
   readonly buttons?: readonly { readonly pressed: boolean; readonly value: number }[];
 }
 
-export type PadButton = "crouch" | "reset" | "stepOff" | "camera" | "pause";
+export type PadButton = "crouch" | "reset" | "resetStart" | "stepOff" | "camera" | "pause";
 
-/** Gamepad buttons in Free Ride (EUC Thrills' layout where it applies: LB crouch, X reset, Y view). */
+/**
+ * Gamepad buttons in Free Ride (EUC Thrills' layout where it applies: LB crouch, X respawn, Y
+ * view); Back respawns at the world's start.
+ */
 export const PAD_BUTTONS: Record<PadButton, number> = {
   crouch: PAD.lb,
   reset: PAD.x,
+  resetStart: PAD.back,
   stepOff: PAD.b,
   camera: PAD.y,
   pause: PAD.start,
@@ -350,7 +355,27 @@ export class BrakeGate {
 // ---------------------------------------------------------------------------------------------
 // Key bindings (Free Ride)
 
-export type FreeRideAction = "forward" | "back" | "left" | "right" | "crouch" | "stepOff" | "reset";
+export type FreeRideAction =
+  | "forward"
+  | "back"
+  | "left"
+  | "right"
+  | "crouch"
+  | "stepOff"
+  | "reset"
+  | "power"
+  | "handle"
+  | "light"
+  | "horn"
+  | "pedalMode";
+
+/** The riding actions: they move the rider while held. */
+export const MOTION_ACTIONS: ReadonlySet<FreeRideAction> = new Set([
+  "forward",
+  "back",
+  "left",
+  "right",
+]);
 
 export const FREE_RIDE_ACTIONS: { id: FreeRideAction; label: string }[] = [
   { id: "forward", label: "Lean forward" },
@@ -359,7 +384,12 @@ export const FREE_RIDE_ACTIONS: { id: FreeRideAction; label: string }[] = [
   { id: "right", label: "Turn right" },
   { id: "crouch", label: "Crouch (hold)" },
   { id: "stepOff", label: "Step off" },
-  { id: "reset", label: "Restart here" },
+  { id: "reset", label: "Respawn (with Shift: at the start)" },
+  { id: "power", label: "Power button (tap; hold to switch off)" },
+  { id: "handle", label: "Handle button (hold)" },
+  { id: "light", label: "Light: off, on, strobe" },
+  { id: "horn", label: "Horn" },
+  { id: "pedalMode", label: "Pedal mode: soft, medium, hard" },
 ];
 
 export type Bindings = Record<FreeRideAction, string[]>;
@@ -373,6 +403,11 @@ export const DEFAULT_BINDINGS: Bindings = {
   crouch: ["Space"],
   stepOff: ["KeyX"],
   reset: ["KeyR"],
+  power: ["KeyP"],
+  handle: ["KeyH"],
+  light: ["KeyL"],
+  horn: ["KeyB"],
+  pedalMode: ["KeyM"],
 };
 
 /**

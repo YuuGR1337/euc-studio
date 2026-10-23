@@ -53,10 +53,9 @@ export function RideWorkspace({ active }: { active: boolean }) {
     world: { frame: WorldFrame; view: WorldView } | null;
     epoch: number;
   } | null>(null);
-  const dockOpen = useUi((state) => state.docks.ride.right);
   const onGround = useCallback(
     (ground: { map: HeightMap | null; world: WorldFrame | null } | null, epoch: number | null) => {
-      // Closing controls pauses the run. Its ground must remain visible until the run changes.
+      // Closing controls stops the input. The ground must remain visible until the run changes.
       if (!ground || epoch === null || (!ground.map && !ground.world)) return;
       setCached((previous) =>
         previous?.epoch === epoch &&
@@ -111,7 +110,8 @@ export function RideWorkspace({ active }: { active: boolean }) {
         controls ? (
           <FreeRidePanel
             engine={engine}
-            active={active && dockOpen}
+            // The keys ride with the dock folded away too: only leaving Free Ride stops them.
+            active={active}
             onGround={onGround}
             onExit={() => {
               engine.setScenario(

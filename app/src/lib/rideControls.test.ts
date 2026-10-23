@@ -165,7 +165,14 @@ describe("gamepad", () => {
 
   it("fires buttons on their rising edge, never on the first reading", () => {
     const edges = new PadEdges();
-    const held = { crouch: false, reset: true, stepOff: false, camera: false, pause: false };
+    const held = {
+      crouch: false,
+      reset: true,
+      resetStart: false,
+      stepOff: false,
+      camera: false,
+      pause: false,
+    };
     expect(edges.edges(held)).toEqual([]);
     expect(edges.edges(held)).toEqual([]);
     expect(edges.edges({ ...held, reset: false })).toEqual([]);

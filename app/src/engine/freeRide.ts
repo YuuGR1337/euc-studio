@@ -255,10 +255,6 @@ export const freeRideApi = {
     if (!validFrame(frame)) throw new Error("Invalid native world frame.");
     return frame;
   },
-  async arm(epoch: number, source: FreeRideSource): Promise<void> {
-    epochCheck(epoch);
-    await invoke("free_ride_arm", { epoch, source });
-  },
   async input(input: FreeRideInput, limits: FreeRideLimits = limitsOf(null)): Promise<void> {
     epochCheck(input.run_epoch);
     if (
@@ -280,20 +276,16 @@ export const freeRideApi = {
     await invoke("free_ride_input", { input });
   },
   /**
-   * Quick reset: a new run of the same free ride where the wheel is now (the test pad restarts at
-   * its origin), the firmware booting again. Engines whose status has `on_pedals` only.
+   * Respawn: a new run of the same free ride, the wheel and the rider upright at the last clear
+   * spot the wheel passed (`toStart`: at the world's start), the firmware booting again.
    */
-  async restart(epoch: number): Promise<void> {
+  async restart(epoch: number, toStart = false): Promise<void> {
     epochCheck(epoch);
-    await invoke("free_ride_restart", { epoch });
+    await invoke("free_ride_restart", { epoch, toStart });
   },
-  /** The armed rider steps off the pedals; the run then ends. Engines with `on_pedals` only. */
+  /** The rider steps off the pedals; the run goes on, and a respawn rides again. */
   async stepOff(epoch: number): Promise<void> {
     epochCheck(epoch);
     await invoke("free_ride_step_off", { epoch });
-  },
-  async pause(epoch: number): Promise<void> {
-    epochCheck(epoch);
-    await invoke("free_ride_pause", { epoch });
   },
 };

@@ -158,6 +158,8 @@ describe("manual limits (FR2b engines)", () => {
       freeRideApi.input({ ...input, ...motion, heading_rate_rad_s: 2.6 }, limitsOf(fr2b)),
     ).rejects.toThrow(/limits/);
     await freeRideApi.restart(3);
-    expect(ipc.invoke).toHaveBeenLastCalledWith("free_ride_restart", { epoch: 3 });
+    expect(ipc.invoke).toHaveBeenLastCalledWith("free_ride_restart", { epoch: 3, toStart: false });
+    await freeRideApi.restart(4, true);
+    expect(ipc.invoke).toHaveBeenLastCalledWith("free_ride_restart", { epoch: 4, toStart: true });
   });
 });

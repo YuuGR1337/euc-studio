@@ -152,9 +152,10 @@ Four tokens, nothing else.
 Keyboard: ⌘1-⌘4 workspaces, ⌘K palette, Space run/pause, R restart, [ and ] slower/faster,
 ⌘B right dock, ⌘J bottom dock, C camera, M manual control, ? shortcut sheet. Under manual control
 (Ride): W/S or ↑/↓ lean, A/D or ←/→ turn, Space steps off, Esc gives the rider back. The palette, the sheet and the hotkeys
-all read one command list (`src/shell/commands.tsx`). In Free Ride (its panel open) the riding keys
-are its own and rebindable: W/S lean, A/D turn, Space crouch, X step off, R restart here (a
-countdown), Esc pause; Space and R do not reach the run/pause and restart shortcuts there.
+all read one command list (`src/shell/commands.tsx`). In Free Ride the riding keys are its own and
+rebindable: W/S lean, A/D turn, Space crouch, X step off, R respawn (Shift+R at the start), P power
+button, H handle button, L light, B horn, M pedal mode, Esc pause; Space, R and M do not reach the
+run/pause, restart and manual-control shortcuts there.
 
 ## Workspace layout and help
 
@@ -167,9 +168,9 @@ visible before source metadata, explanatory prose, or implementation limits. Use
   pushing all scopes below a long metadata block.
 - Compare keeps scenario and build selection together. The ghost, the traces and the verdicts
   lead the result; quirks and run identity sit below them.
-- Free ride reuses the Ride dock and viewport. The rider is driven with the same manual-riding
-  controls as a scenario (keys, gamepad, the Manual card); the map editor and the rider model use
-  progressive disclosure and do not hide the primary controls.
+- Free ride reuses the Ride dock and viewport and is a play mode: nothing to click before riding.
+  The panel holds only respawn, the wheel's pad, the world and the keys; the HUD in the 3D view
+  says what to do next.
 - Recordings are a palette action ("Open recording…", "Record this run") and a replay bar in the
   run bar. They do not add another permanent bar or reduce the Ride viewport height.
 - Physical wheel buttons remain visible in the Display card. Press duration comes from the
@@ -251,3 +252,4 @@ it models; channels the run does not model show "Not modelled in this run" inste
 | 2026-10-22 | Free Ride input is shaped in `lib/rideControls.ts`: keys lag 0.15 s (lean) and 0.10 s (turn) to at most 10°; a full turn gets the engine's speed-scheduled cap; near a stop a back lean waits 0.35 s; Space crouches; R restarts here after a 3 s countdown                                                             | Methods and starting values from EUC Thrills (MIT; docs/design/free-ride.md). A 10° key step and a fixed 30°/s turn felt like switches; the input stays rider intent                    |
 | 2026-10-22 | Three cameras: Chase (behind the rider; arm 4.2 to 6.0 m and view 65 to 78° by 60 km/h, yaw lag 0.42 to 0.14 s, aim 0.22 s ahead, small bank, stopped by world solids), Side (the old Follow), Orbit. Ride starts on Side, Free Ride on Chase, each kept in `camera.v2`; C goes to Orbit next                           | Method and values from EUC Thrills' chase camera (MIT): speed and turns read at a glance. Ride is the analysis view: pitch and suspension read best from the side                       |
 | 2026-10-22 | The rider is EUC Thrills' Cool Rider (MIT code, CC BY 4.0 look; src/vendor/euc-thrills) posed on the physics bodies: trunk, thighs, shanks and feet follow theirs; arms and head move for show (eased at a stop). The cube button, Physics bodies, draws the simulated shapes instead                                   | The owner asked for their body. The physics stays the truth for what it simulates, and its shapes are one click away                                                                    |
+| 2026-10-22 | Free Ride is a play mode: opening it starts a city ride; keys ride once the firmware is up, no arm step; a crash never pauses; R respawns, Shift+R at the start (HUD buttons too); P, H, L, B, M work the wheel. The panel keeps respawn, the wheel pad, the world and the keys                                         | Replaces the arming, restart-countdown and test-pad rows. Tarik: too many clicks, a crash halted mid-fall, no need for the pad or tuning. The engine side is the physics owner's        |
