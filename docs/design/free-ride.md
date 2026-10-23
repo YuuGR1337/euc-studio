@@ -20,7 +20,9 @@ in our code.
 
 ## What is weak today
 
-Claude's reading of the current code (`app/src/workspaces/freeRide/`, `app/src/workspaces/ride/`):
+Claude's reading of the code at the start (`app/src/workspaces/freeRide/`,
+`app/src/workspaces/ride/`), before FR2. FR2, FR3, the rider body and the play mode have since
+answered each point:
 
 - **No sky or daylight.** The background and the fog are black (`surface.bg`). The fog closes
   from 18 m to 110 m. Light is the studio rig: a white-over-black hemisphere at 0.35, one key
@@ -152,9 +154,9 @@ yaw rate. We cannot copy that part. What carries over is how input becomes a smo
 | Turning at walking pace | Steering is off below 0.05 m/s. | Physics decision | Our physics fades manual turn requests to zero below 1.5 m/s. Real riders twist the wheel at a standstill. Open question for the physics owner. |
 | Crouch | Hold Shift or LB; knees bend (τ 0.07 s); charges a bigger hop over 0.40 s. | Re-implement crouch (Free Ride, studio backend) | `Physics::set_crouch(knee_rad)` exists (0 to 1.2 rad, no pose writes). Free Ride's input packet needs a crouch field. Then crouch is a real body motion that lowers the centre of mass. |
 | Hop, 180 spin, one-foot | Hop sets a launch speed of 3.0 m/s; the spin is a scripted 0.42 s heading sweep; one-foot is presentation only. | Skip | All three set kinematics directly. A physical hop needs the welded-feet rider to unweight and lift the wheel with its legs: a feasibility study for the physics owner first. |
-| Quick reset | R puts the rider at the spawn, stopped and upright, keeps held keys, snaps the camera. | Re-implement (Free Ride, physics owner for semantics) | Two honest options: restart the run at the current spot and heading (the firmware boots again, about 4 s), or a physics re-pose with the firmware kept running. Open question. R is also the studio's restart key today. |
+| Quick reset | R puts the rider at the spawn, stopped and upright, keeps held keys, snaps the camera. | Re-implement (Free Ride, physics owner for semantics) | Built in the play mode: R starts a new run at once at the last clear spot (Shift+R at the world's start), the firmware booting again unthrottled, about 0.7 to 0.8 s from the key to riding. No re-pose with a running firmware. In Free Ride R is the respawn key, not the studio's restart. |
 | One-shot buffer | Presses are buffered for 0.15 s, fire on the rising edge, and a press refreshes rather than queues. | Re-implement (Free Ride) | For reset, view and later hop. |
-| Arming | None; the game is input-ready. | Re-implement our safety more simply (Free Ride) | The native guards stay (250 ms neutral dwell, 250 ms watchdog, confirmed arm). The first push of W or the stick arms once the dwell is met; a viewport pill says "Push W to ride". The first standard gamepad is taken on first input, as Ride's manual mode already does; the explicit picker moves into settings. |
+| Arming | None; the game is input-ready. | Re-implement our safety more simply (Free Ride) | Built in the play mode: no arm step and no neutral dwell. The keys ride once the firmware is up (the stand lets go 1.5 s after the build); the 250 ms watchdog stays, and older input counts as neutral, so the idle wheel balances. The first standard gamepad rides when its stick moves. |
 | Rebinding | Settings rows with Change and Clear per action, stored by `KeyboardEvent.code` in localStorage; Escape reserved; pads not rebindable. | Re-implement (Free Ride) | Same model, in our `Kbd` and `Button` components. Conflicts with studio shortcuts are refused with a reason. |
 | Onboarding | Three hints, cleared by doing: ride, brake, hop; worded per device. | Re-implement (Free Ride) | Ride, brake, carve. Small pills in the viewport. |
 | Touch controls | Floating stick and buttons. | Skip | Desktop app. |
@@ -326,6 +328,7 @@ them.
 3. The rider turns at a stop, through the physics.
 4. R restarts the run where the wheel is, with a truthful firmware reboot (about 4 s) after a
    visible countdown that the rider can cancel. Nothing is teleported while a firmware runs.
+   (Replaced by the play mode below: no countdown, about 0.7 s.)
 5. Crouch now; a hop study after crouch works.
 6. People and traffic wait for FR10.
 7. A generic fictional rider kit for now.
@@ -368,7 +371,8 @@ engine"); the panel, HUD, keys and pad are the Free Ride agent's (`app/src/works
    (sharp turns at low speed, wider at speed), validated against firmware scenarios?
 3. **Turning on the spot.** Should the rider twist the wheel when stopped?
 4. **Quick reset.** Restart at the current spot (firmware boots again, about 4 s) or re-pose the
-   physics with the firmware kept running?
+   physics with the firmware kept running? (Answered by the play mode: a new run at the last
+   clear spot, about 0.7 s.)
 5. **Crouch and hop.** Crouch can use the existing physics now. Do you want a hop study (it needs
    the welded-feet rider to lift the wheel with its legs)?
 6. **People and traffic.** Visual-only life only beyond 12 m that fades as you near it, or wait for

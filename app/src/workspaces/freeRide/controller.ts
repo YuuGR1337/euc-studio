@@ -747,7 +747,7 @@ export class FreeRideController {
           : "Building the world.";
     else if (!hasRide) prompt = s.error ? null : "Starting free ride.";
     else if (s.powered === false)
-      prompt = `The wheel is off. ${pad ? "Its power button" : first("power")} powers it on.`;
+      prompt = `The wheel is off. Hold ${pad ? "Power in the Display card" : first("power")} until it wakes.`;
     else if (!status?.ready) prompt = "The firmware is booting on the stand.";
     else if (offPedals(status))
       prompt = `Off the pedals. ${respawnKey} respawns here, ${startKey} at the start.`;

@@ -163,7 +163,7 @@ test("the wheel's pad: power off and on, handle, light, horn, pedal mode", async
     .toMatchObject({ button: "power", pressed: false });
   // A long press switched the wheel off: the run goes on and says how to switch it on.
   await page.evaluate(() => window.freeRideFixture.power(false));
-  await expect(hud(page)).toContainText("The wheel is off. P powers it on.");
+  await expect(hud(page)).toContainText("The wheel is off. Hold P until it wakes.");
   await page.keyboard.down("p");
   await page.keyboard.up("p");
   await expect(hud(page)).not.toContainText("The wheel is off");

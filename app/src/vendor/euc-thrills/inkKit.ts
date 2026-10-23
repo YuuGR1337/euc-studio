@@ -99,4 +99,3 @@ export function toSrgbBytes(sheet: InkSheet): Uint8Array {
   }
   return bytes;
 }
-

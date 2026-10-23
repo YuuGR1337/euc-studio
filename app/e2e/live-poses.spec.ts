@@ -279,27 +279,17 @@ test("hides bodies until a frame of them arrives, never at the origin", async ({
     .toEqual({ mounted: true, shown: true, pelvis: [80.02, 0, 1.171] });
 
   // A new body list (the next run) hides the bodies and the figure again until that list's first
-  // frame. The low-quality view draws on demand: a run's first batch asks for the frame, and its
-  // reset may ask before the body list arrives, so here the check asks for one itself.
+  // frame. LiveBodies asks for that frame itself when the list changes, in every view.
   await send(page, { type: "reset", scenario: "ride-20kmh-stop" });
   await send(page, { type: "bodies", bodies });
   await status(page, "paused", 0);
-  const redrawn = async () => {
-    await page.evaluate(() =>
-      (window as unknown as { __eucScene?: () => { invalidate: () => void } })
-        .__eucScene?.()
-        .invalidate(),
-    );
-    return { figure: (await drawnFigure(page)).shown, bodies: await drawnBodies(page) };
-  };
-  await expect
-    .poll(async () => {
-      const { figure, bodies } = await redrawn();
-      return [figure, ...bodies.map((b) => b.visible)];
-    })
-    .toEqual([false, ...BODIES.map(() => false)]);
+  const drawn = async () => [
+    (await drawnFigure(page)).shown,
+    ...(await drawnBodies(page)).map((b) => b.visible),
+  ];
+  await expect.poll(drawn).toEqual([false, ...BODIES.map(() => false)]);
   await page.waitForTimeout(500);
-  expect((await redrawn()).figure).toBe(false);
+  expect((await drawnFigure(page)).shown).toBe(false);
   await sendBatch(page, 40);
   await expect.poll(async () => (await drawnFigure(page)).shown).toBe(true);
 });

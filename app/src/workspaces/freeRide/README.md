@@ -67,9 +67,11 @@ shortcuts (C, `.`, `[`, `]`, `?`) cannot be bound. Gamepad buttons are fixed.
 
 - P and H hold the board's power (PB15) and handle (PA12) buttons through `engine.setButton`, with
   the same leases as the Display card's buttons (`ride/wheelButtonInput.ts`): the firmware times a
-  tap or a long press. A long press switches the wheel off: the motor goes free, the rider falls
-  if riding, and the run goes on; the prompt reads `outputs.controller_powered`. A press switches
-  it on again.
+  tap or a long press. Held about 0.8 s at 0.5 m/s or less, power switches the wheel off (the
+  stock firmware ignores it while riding): the motor goes free, the rider falls if riding, and the
+  run goes on; the prompt reads `outputs.controller_powered`. Held again until the firmware
+  latches (`outputs.power_latched`, about 0.55 s), it switches the wheel on. At a stop the second
+  handle press cuts the drive and a third restores it; at speed the firmware ignores both.
 - L, B and M (and the panel's Light, Pedal mode and Horn) send the phone's commands (`light`,
   `horn`, `pedal_mode`) through `engine.sendCommand`, as the Phone panel does. The firmware does
   not report the light or pedal mode back, so the panel shows what it sent last. A refused command

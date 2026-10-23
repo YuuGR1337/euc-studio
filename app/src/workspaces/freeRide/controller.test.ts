@@ -300,12 +300,12 @@ describe("the wheel's pad", () => {
     expect(setButton).toHaveBeenLastCalledWith("handle", false, native.epoch);
   });
 
-  it("a switched-off wheel says so, and P powers it on", async () => {
+  it("a switched-off wheel says so, and how to switch it on", async () => {
     await open(ride());
     outputs = { controller_powered: false };
     await vi.advanceTimersByTimeAsync(300);
     expect(controller.getSnapshot().powered).toBe(false);
-    expect(useFreeRideHud.getState().prompt).toBe("The wheel is off. P powers it on.");
+    expect(useFreeRideHud.getState().prompt).toBe("The wheel is off. Hold P until it wakes.");
     expect(engine.setPlaying).not.toHaveBeenCalledWith(false);
   });
 

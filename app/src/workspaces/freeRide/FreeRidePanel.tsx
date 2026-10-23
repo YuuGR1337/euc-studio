@@ -86,7 +86,7 @@ function FreeRideSession({ engine, active, onGround, onExit }: FreeRidePanelProp
       : !hasRide
         ? "Starting free ride."
         : state.powered === false
-          ? `The wheel is off.${cap("power") ? ` ${cap("power")} powers it on.` : ""}`
+          ? `The wheel is off.${cap("power") ? ` Hold ${cap("power")} until it wakes.` : ""}`
           : !status.ready
             ? `The firmware boots on the stand${typeof boot === "number" ? `: ${boot.toFixed(1)} s` : "."}`
             : offPedals(status)
@@ -154,9 +154,11 @@ function FreeRideSession({ engine, active, onGround, onExit }: FreeRidePanelProp
         </div>
         <Section title="Wheel">
           <p className="text-12 text-fg-2">
-            Power {cap("power") && <Kbd>{cap("power")}</Kbd>}: tap for the firmware's tap, hold to
-            switch the wheel off, press again to switch it on. Handle{" "}
-            {cap("handle") && <Kbd>{cap("handle")}</Kbd>}: hold. Both are also in the Display card.
+            Power {cap("power") && <Kbd>{cap("power")}</Kbd>}: a tap is the firmware's tap. Held for
+            about a second at a stop it switches the wheel off (the firmware ignores it while
+            riding); held again until the wheel wakes, it switches it on. Handle{" "}
+            {cap("handle") && <Kbd>{cap("handle")}</Kbd>}: at a stop the second press cuts the drive
+            and a third restores it. Both are also in the Display card.
           </p>
           <div className="flex flex-wrap items-center justify-between gap-8">
             <span className="flex items-center gap-4 text-12 text-fg-2">
