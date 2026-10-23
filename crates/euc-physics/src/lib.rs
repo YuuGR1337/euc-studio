@@ -1297,8 +1297,12 @@ impl Physics {
             // accelerated) about half as much as asked. A lifted foot keeps its spring.
             let stiffness = if ankle && !lifted[leg] { 0.0 } else { config.joint_kp };
             let target = self.posture_target(index, joint);
-            let posture =
-                stiffness * (target - self.data.qpos()[joint.qpos]) - config.joint_kd * self.data.qvel()[joint.dof];
+            // Contact feet damp their ankles in the joint itself (implicit; see mjcf.rs). A foot that
+            // rocks off its deck turns on the ankle alone, and this explicit damping on its small
+            // inertia (about 0.01 kg·m², above the step's stability limit) made it chatter at the
+            // torque cap: the soles hopped on their decks and slid back.
+            let damping = if ankle && legs.pairs.is_some() { 0.0 } else { config.joint_kd };
+            let posture = stiffness * (target - self.data.qpos()[joint.qpos]) - damping * self.data.qvel()[joint.dof];
             let mut limit = joint.kind.cap(&self.setup.rider);
             if joint.kind == JointKind::AnkleRoll {
                 // A real sole rolls its pedal only as far as its centre of pressure can move

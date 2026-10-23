@@ -231,8 +231,12 @@ DEFAULT 1000 N·m/rad, 60 N·m·s/rad, 180 N·m), so they give under a bump and 
 - **Lifting a foot** (`articulated_contact_v1`). `Physics::set_foot_lift(foot, rad)` bends one leg (that much more hip flexion,
   twice that at the knee, the foot kept level) at 3 rad/s; 0.3 rad lifts the foot about 2 cm. One
   foot at a time; the other leg then carries the whole lean task. Its sole sticks to its pedal
-  meanwhile (under 1 mm of slip in a quarter-second lift), but setting the foot down again unloads
-  the other foot: it hops for up to about 1 s and lands 2-5 cm back on its deck.
+  meanwhile (under 1 mm of slip in a quarter-second lift), and the foot comes down where the leg
+  puts it, while the other stays within about 1 cm. A contact foot's ankle damping
+  (`articulation.joint_kd`) is a joint damping that the implicit integrator handles, not part of
+  the motor command: a foot off its deck turns on the ankle alone (about 0.01 kg·m²), and the
+  explicit damping chattered between the ±200 N·m caps every step. The soles then hopped for up to
+  1 s and slid 2-8 cm back on their decks (2026-10-23).
 - **Crouch** (both articulated models; Free Ride's crouch input). `Physics::set_crouch(knee_rad)`,
   0 to 1.2 rad of knee flexion. The knees bend toward it at 3 rad/s (a full crouch in 0.4 s) and
   the hips by 0.58 of it, while the upper body keeps the lean the controller holds. At 0.58 the

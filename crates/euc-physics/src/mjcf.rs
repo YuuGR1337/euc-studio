@@ -612,7 +612,12 @@ fn articulated(x: &mut Xml, setup: &Setup, layout: &Layout) {
         x.line(format!(r#"          <joint name="{side}_knee" axis="0 1 0" range="-0.03 2.2" damping="0.5"/>"#));
         limb(x, side, "shank", r.mass_kg * 0.05, length, 0.045, ground_only);
         x.line(format!(r#"          <body name="{side}_foot" pos="0 0 -{length}">"#));
-        x.line(format!(r#"            <joint name="{side}_ankle" axis="0 1 0" range="-0.9 0.7" damping="0.5"/>"#));
+        // Contact feet: the ankle's posture damping lives in the joint, where the implicit
+        // integrator keeps it stable on a foot off its deck (lib.rs leaves it out of the motor).
+        let ankle_damping = if feet_in_contact(setup) { 0.5 + setup.rider.articulation.joint_kd } else { 0.5 };
+        x.line(format!(
+            r#"            <joint name="{side}_ankle" axis="0 1 0" range="-0.9 0.7" damping="{ankle_damping}"/>"#
+        ));
         let mass = r.mass_kg * 0.02;
         let z = 0.03 - r.ankle_above_pedals_m;
         let (ix, iy, iz) = (

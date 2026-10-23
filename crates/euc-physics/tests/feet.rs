@@ -84,7 +84,7 @@ fn a_lifted_foot_leaves_its_pedal_while_the_other_carries_the_rider() {
     physics.set_foot_lift(Foot::Right, 0.3).unwrap();
     assert!(physics.set_foot_lift(Foot::Left, 0.3).is_err(), "one foot at a time");
     let (mut highest, mut left_least, mut left_sum) = (0.0_f64, f64::INFINITY, 0.0);
-    let (mut off_s, mut stance_slip) = (0.0, 0.0_f64);
+    let (mut off_s, mut stance_slip, mut at_cap, mut lift_steps) = (0.0, 0.0_f64, 0_u32, 0_u32);
     // A quarter-second lift, as when a rider shifts a foot: the sagittal rider has no hip roll,
     // so it cannot hold one-foot stance for long (see the next test).
     ride(&mut physics, 0.25, |p| {
@@ -97,10 +97,13 @@ fn a_lifted_foot_leaves_its_pedal_while_the_other_carries_the_rider() {
             left_sum += left.normal_n * TIMESTEP_S;
             stance_slip = stance_slip.max(left.slip_m);
         }
+        let ankle = p.rider_joints().into_iter().find(|j| j.name == "right_ankle").expect("right ankle");
+        lift_steps += 1;
+        at_cap += u32::from(ankle.torque_nm.abs() > 190.0);
     });
     let left_mean = left_sum / off_s;
     println!(
-        "lift: right up {highest:.4} m, off the pedal {off_s:.3} s, left mean {left_mean:.1} N, least {left_least:.1} N, left slip {stance_slip:.5} m"
+        "lift: right up {highest:.4} m, off the pedal {off_s:.3} s, left mean {left_mean:.1} N, least {left_least:.1} N, left slip {stance_slip:.5} m, right ankle at its cap {at_cap} of {lift_steps} steps"
     );
     assert!(highest > 0.01, "the right sole rises off its pedal: {highest} m");
     assert!(off_s > 0.1, "the right foot is off its pedal for a while: {off_s} s");
@@ -108,6 +111,12 @@ fn a_lifted_foot_leaves_its_pedal_while_the_other_carries_the_rider() {
     assert!(left_least > 0.5 * weight, "and never lets the rider drop: {left_least} N");
     // 0.6-0.7 mm measured (2026-10-22), with the constant linkage ratio and with the rocker curve.
     assert!(stance_slip < 0.002, "and its sole sticks to the pedal while it carries the rider: {stance_slip} m");
+    // The lifted foot hangs on its ankle quietly. With its posture damping in the motor command
+    // (explicit, on about 0.01 kg·m²) it chattered between the ±200 N·m caps (389 of 500 steps).
+    assert!(
+        at_cap * 20 < lift_steps,
+        "the lifted foot's ankle holds it without chatter: {at_cap} of {lift_steps} steps at the cap"
+    );
     physics.set_foot_lift(Foot::Right, 0.0).unwrap();
     let (mut forward, mut sideways, mut widest) = (0.0_f64, 0.0_f64, 0.0_f64);
     ride(&mut physics, 2.0, |p| {
@@ -125,12 +134,12 @@ fn a_lifted_foot_leaves_its_pedal_while_the_other_carries_the_rider() {
     assert!(!physics.rider_off() && !state.fallen, "the rider stays on: {state:?}");
     assert!(left.in_contact && right.in_contact, "both feet back on: {left:?} {right:?}");
     assert!(right.lift_m.abs() < 0.005, "the right foot stands on its pedal again: {right:?}");
-    // Setting the right foot down unloads the left one: it hops for up to about 1 s and lands a few
-    // centimetres back on its deck (left 0.022 m with the constant linkage ratio, 0.044 m with the
-    // rocker curve of plant.toml; 2026-10-22). How far follows the suspension, so the end position
-    // is held to the decks below, not to where the feet stood.
+    // The right foot comes down where the leg puts it, 2.4 cm ahead of where it stood, and the left
+    // one stays within 1.3 cm (2026-10-23). A sole has about 2.5 cm to either end of its deck. With
+    // the ankles' damping in the motor command, setting the foot down made the left one hop for up
+    // to about 1 s and land 2-4 cm back.
     assert!(sideways < 0.03, "the soles stay on their decks sideways: {sideways} m");
-    assert!(forward < 0.08, "and lengthwise: {forward} m");
+    assert!(forward < 0.03, "and lengthwise: {forward} m");
     assert!(widest < 0.1, "the rider's centre of mass stays between the pedals: {widest} m");
 }
 
@@ -148,7 +157,9 @@ fn a_one_foot_stance_holds_with_the_roll_aid_and_without_it_the_rider_comes_off(
     assert!(!physics.rider_off() && !physics.state().fallen);
     assert!(left.in_contact && right.in_contact);
     assert!(left.offset_m[1].abs() < 0.02 && right.offset_m[1].abs() < 0.02, "sideways on the decks");
-    assert!(left.offset_m[0].abs() < 0.08 && right.offset_m[0].abs() < 0.08, "lengthwise on the decks");
+    // Back on both feet, each sole stands within 1 cm of where it stood (9 and 6 mm, 2026-10-23).
+    // Before the ankles' damping moved into the joints both slid 6-8 cm back while they hopped.
+    assert!(left.offset_m[0].abs() < 0.02 && right.offset_m[0].abs() < 0.02, "lengthwise on the decks");
 
     // Without any roll aid the rider topples over the standing foot; once both feet have been
     // off their pedals for LOST_FOOTING_S the rider counts as off and every aid and motor stops.
@@ -166,6 +177,43 @@ fn a_one_foot_stance_holds_with_the_roll_aid_and_without_it_the_rider_comes_off(
     let state = physics.rider_state();
     assert!(!state.attached && state.roll_aid_torque_nm == 0.0 && state.yaw_aid_torque_nm == 0.0);
     assert!(physics.rider_joints().iter().all(|j| j.torque_nm == 0.0));
+}
+
+#[test]
+fn a_re_landing_settles_without_hopping() {
+    // After a one-foot stance the right foot comes down. From 0.3 s after it touches its deck no
+    // sole carries more than 1.5 times its static share, and no sole drifts more than 1 cm while
+    // it is unloaded (the left one from the start, the right one once it has touched).
+    let mut physics = standing();
+    let static_n = physics.setup().rider.mass_kg * physics.gravity() / 2.0;
+    physics.set_foot_lift(Foot::Right, 0.3).unwrap();
+    ride(&mut physics, 1.0, |_| {});
+    physics.set_foot_lift(Foot::Right, 0.0).unwrap();
+    let mut touched: Option<f64> = None;
+    let (mut late_peak, mut drift) = (0.0_f64, [0.0_f64; 2]);
+    let mut last = feet(&physics).map(|foot| foot.offset_m[0]);
+    ride(&mut physics, 1.5, |p| {
+        let now = feet(p);
+        if touched.is_none() && now[1].in_contact {
+            touched = Some(p.time_s());
+        }
+        for (side, foot) in now.iter().enumerate() {
+            let counted = side == 0 || touched.is_some();
+            if counted && !foot.in_contact {
+                drift[side] += (foot.offset_m[0] - last[side]).abs();
+            }
+            last[side] = foot.offset_m[0];
+            if touched.is_some_and(|at| p.time_s() - at > 0.3) {
+                late_peak = late_peak.max(foot.normal_n);
+            }
+        }
+    });
+    println!(
+        "re-landing: touched at {touched:?} s, later peak {late_peak:.0} N (static {static_n:.0} N), unloaded drift {drift:?} m"
+    );
+    assert!(touched.is_some(), "the right foot comes back down");
+    assert!(late_peak < 1.5 * static_n, "the landing has settled after 0.3 s: {late_peak} N");
+    assert!(drift.iter().all(|&d| d < 0.01), "no sole drifts while unloaded: {drift:?} m");
 }
 
 #[test]
