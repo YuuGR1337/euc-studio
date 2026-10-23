@@ -53,6 +53,9 @@ pub enum RiderModel {
     ArticulatedSagittalV1,
     /// The articulated model with each sole on its own pedal through contact.
     ArticulatedContactV1,
+    /// The articulated model with lateral legs (hip ab/adduction and rotation, ankle roll), feet
+    /// welded to the pedals.
+    ArticulatedLateralV1,
 }
 
 impl RiderModel {
@@ -62,6 +65,7 @@ impl RiderModel {
             Self::RigidAnkleV1 => "rigid_ankle_v1",
             Self::ArticulatedSagittalV1 => "articulated_sagittal_v1",
             Self::ArticulatedContactV1 => "articulated_contact_v1",
+            Self::ArticulatedLateralV1 => "articulated_lateral_v1",
         }
     }
 }
@@ -72,6 +76,7 @@ impl From<euc_physics::RiderModel> for RiderModel {
             euc_physics::RiderModel::RigidAnkleV1 => Self::RigidAnkleV1,
             euc_physics::RiderModel::ArticulatedSagittalV1 => Self::ArticulatedSagittalV1,
             euc_physics::RiderModel::ArticulatedContactV1 => Self::ArticulatedContactV1,
+            euc_physics::RiderModel::ArticulatedLateralV1 => Self::ArticulatedLateralV1,
         }
     }
 }
@@ -92,12 +97,24 @@ pub struct ModelAids {
     /// External yaw torque cap, N·m.
     pub steer_max_nm: f64,
     /// External roll stiffness on the articulated upper body, N·m/rad: contact feet do not hold
-    /// the body to the shell (`articulated_contact_v1` only; absent for the other models).
+    /// the body to the shell, and the lateral legs are only as strong as a person's
+    /// (`articulated_contact_v1` and `articulated_lateral_v1`; absent for the other models).
     #[serde(default, skip_serializing_if = "is_zero")]
     pub upper_body_roll_stiffness: f64,
     /// External roll damping on the articulated upper body, N·m·s/rad (as above).
     #[serde(default, skip_serializing_if = "is_zero")]
     pub upper_body_roll_damping: f64,
+    /// External yaw stiffness on the articulated upper body, N·m/rad: the lateral legs twist, so
+    /// the yaw aid turns the upper body with the shell (`articulated_lateral_v1` only; absent
+    /// for the other models).
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub upper_body_steer_kp: f64,
+    /// External yaw damping on the articulated upper body, N·m·s/rad (as above).
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub upper_body_steer_kd: f64,
+    /// External yaw torque cap on the articulated upper body, N·m (as above).
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub upper_body_steer_max_nm: f64,
 }
 
 #[allow(clippy::trivially_copy_pass_by_ref)] // serde's skip_serializing_if passes a reference.
@@ -107,17 +124,23 @@ fn is_zero(value: &f64) -> bool {
 
 impl ModelAids {
     /// The aids a rider and its assist settings run with: the shell's roll spring and the yaw
-    /// aid for every model, and for contact feet the same roll spring on the upper body.
+    /// aid for every model, for contact feet and lateral legs the same roll spring on the upper
+    /// body, and for lateral legs the same yaw aid on the upper body.
     pub fn of(rider: &euc_physics::Rider, assist: &euc_physics::Assist) -> Self {
-        let contact = rider.model.has_contact_feet();
+        let upper = rider.model.upper_body_aids();
+        let lateral = rider.model.has_lateral_legs();
+        let c = rider.control;
         Self {
             roll_stiffness: assist.roll_stiffness,
             roll_damping: assist.roll_damping,
-            steer_kp: rider.control.steer_kp,
-            steer_kd: rider.control.steer_kd,
-            steer_max_nm: rider.control.steer_max_nm,
-            upper_body_roll_stiffness: if contact { assist.roll_stiffness } else { 0.0 },
-            upper_body_roll_damping: if contact { assist.roll_damping } else { 0.0 },
+            steer_kp: c.steer_kp,
+            steer_kd: c.steer_kd,
+            steer_max_nm: c.steer_max_nm,
+            upper_body_roll_stiffness: if upper { assist.roll_stiffness } else { 0.0 },
+            upper_body_roll_damping: if upper { assist.roll_damping } else { 0.0 },
+            upper_body_steer_kp: if lateral { c.steer_kp } else { 0.0 },
+            upper_body_steer_kd: if lateral { c.steer_kd } else { 0.0 },
+            upper_body_steer_max_nm: if lateral { c.steer_max_nm } else { 0.0 },
         }
     }
 }
@@ -257,6 +280,9 @@ impl RecordingContext {
             aids.steer_max_nm,
             aids.upper_body_roll_stiffness,
             aids.upper_body_roll_damping,
+            aids.upper_body_steer_kp,
+            aids.upper_body_steer_kd,
+            aids.upper_body_steer_max_nm,
         ]
         .iter()
         .any(|value| !value.is_finite() || *value < 0.0)
@@ -522,7 +548,7 @@ mod tests {
 
     #[test]
     fn context_round_trips_every_rider_model_and_fills_in_the_schema() {
-        for model in ["rigid_ankle_v1", "articulated_sagittal_v1", "articulated_contact_v1"] {
+        for model in ["rigid_ankle_v1", "articulated_sagittal_v1", "articulated_contact_v1", "articulated_lateral_v1"] {
             let json = serde_json::json!({ "run_mode": "scenario", "rider_model": model, "model_aids": aids() });
             let context = RecordingContext::from_json(&json).unwrap();
             let mut expected = json.clone();
@@ -542,12 +568,13 @@ mod tests {
     }
 
     #[test]
-    fn contact_feet_record_the_upper_body_roll_aid_and_welded_feet_do_not() {
+    fn contact_feet_and_lateral_legs_record_the_upper_body_aids_and_welded_feet_do_not() {
         let assist = euc_physics::Assist::default();
         for (model, upper) in [
             (euc_physics::RiderModel::RigidAnkleV1, 0.0),
             (euc_physics::RiderModel::ArticulatedSagittalV1, 0.0),
             (euc_physics::RiderModel::ArticulatedContactV1, assist.roll_stiffness),
+            (euc_physics::RiderModel::ArticulatedLateralV1, assist.roll_stiffness),
         ] {
             let rider = euc_physics::Rider { model, ..euc_physics::Rider::default() };
             let aids = ModelAids::of(&rider, &assist);
@@ -555,6 +582,10 @@ mod tests {
             let json = serde_json::to_value(aids).unwrap();
             // Absent unless the model has the aid, so welded and rigid contexts stay as before.
             assert_eq!(json.get("upper_body_roll_stiffness").is_some(), upper > 0.0, "{model:?}: {json}");
+            // Only the lateral legs twist, so only they have the yaw aid on the upper body.
+            let lateral = model == euc_physics::RiderModel::ArticulatedLateralV1;
+            assert_eq!(aids.upper_body_steer_kp, if lateral { rider.control.steer_kp } else { 0.0 });
+            assert_eq!(json.get("upper_body_steer_kd").is_some(), lateral, "{model:?}: {json}");
             assert_eq!(serde_json::from_value::<ModelAids>(json).unwrap(), aids);
         }
         let mut bad = aids();

@@ -49,7 +49,7 @@ fn ride(physics: &mut Physics, seconds: f64) {
 
 #[test]
 fn the_window_follows_the_wheel_down_the_spawn_street() {
-    for model in [RiderModel::RigidAnkleV1, RiderModel::ArticulatedSagittalV1] {
+    for model in [RiderModel::RigidAnkleV1, RiderModel::ArticulatedSagittalV1, RiderModel::ArticulatedLateralV1] {
         let ground = WorldGround::at_spawn(WorldSpec::city(7)).unwrap();
         let mut physics = Physics::new(setup(model, ground.clone())).unwrap();
         ride(&mut physics, 0.5);

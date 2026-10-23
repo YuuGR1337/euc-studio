@@ -87,7 +87,7 @@ pub(crate) struct Args {
     #[arg(long, default_value_t = 4000)]
     max_quantum: u32,
     /// With --scenario: ride with this rider model instead of the scenario's (`rigid_ankle_v1`,
-    /// `articulated_sagittal_v1` or `articulated_contact_v1`).
+    /// `articulated_sagittal_v1`, `articulated_contact_v1` or `articulated_lateral_v1`).
     #[arg(long, value_name = "MODEL", requires = "scenario", value_parser = rider_model)]
     rider_model: Option<euc_physics::RiderModel>,
     /// CPU backend: `own` (our Cortex-M3 core, in every build) or `unicorn` (development builds
@@ -283,8 +283,10 @@ pub(crate) fn rider_model(text: &str) -> Result<euc_physics::RiderModel, String>
         "rigid_ankle_v1" => Ok(euc_physics::RiderModel::RigidAnkleV1),
         "articulated_sagittal_v1" => Ok(euc_physics::RiderModel::ArticulatedSagittalV1),
         "articulated_contact_v1" => Ok(euc_physics::RiderModel::ArticulatedContactV1),
+        "articulated_lateral_v1" => Ok(euc_physics::RiderModel::ArticulatedLateralV1),
         other => Err(format!(
-            "unknown rider model {other}: rigid_ankle_v1, articulated_sagittal_v1 or articulated_contact_v1"
+            "unknown rider model {other}: rigid_ankle_v1, articulated_sagittal_v1, articulated_contact_v1 or \
+             articulated_lateral_v1"
         )),
     }
 }

@@ -312,6 +312,12 @@ pub enum RiderModel {
     /// in hard braking, the steep low-battery climb and full-effort launches the rider comes off
     /// the pedals (docs/models/body.md).
     ArticulatedContactV1,
+    /// The articulated rider with lateral legs: each hip also abducts and adducts and turns about
+    /// the thigh, each ankle also rolls (inversion and eversion), so the legs can lean the body
+    /// and press the wheel sideways. de Leva's segments, hips at their anatomical width, soft
+    /// knees at rest; both feet welded to the pedals until the rider leaves, with the ankle roll
+    /// kept within what a sole on its pedal can carry. Opt-in (docs/models/body.md).
+    ArticulatedLateralV1,
 }
 
 impl RiderModel {
@@ -321,12 +327,24 @@ impl RiderModel {
             Self::RigidAnkleV1 => "rigid_ankle_v1",
             Self::ArticulatedSagittalV1 => "articulated_sagittal_v1",
             Self::ArticulatedContactV1 => "articulated_contact_v1",
+            Self::ArticulatedLateralV1 => "articulated_lateral_v1",
         }
     }
 
-    /// The rider has legs with hips, knees and ankles (either articulated model).
+    /// The rider has legs with hips, knees and ankles (any articulated model).
     pub const fn is_articulated(self) -> bool {
-        matches!(self, Self::ArticulatedSagittalV1 | Self::ArticulatedContactV1)
+        matches!(self, Self::ArticulatedSagittalV1 | Self::ArticulatedContactV1 | Self::ArticulatedLateralV1)
+    }
+
+    /// The legs also move sideways: hip ab/adduction and rotation, ankle roll.
+    pub const fn has_lateral_legs(self) -> bool {
+        matches!(self, Self::ArticulatedLateralV1)
+    }
+
+    /// The external roll aid holds the upper body as well as the shell: contact feet do not hold
+    /// the body to the shell, and the lateral legs are only as strong as a person's.
+    pub const fn upper_body_aids(self) -> bool {
+        matches!(self, Self::ArticulatedContactV1 | Self::ArticulatedLateralV1)
     }
 
     /// Each sole stands on its pedal through contact instead of a weld.
@@ -351,11 +369,32 @@ pub struct Articulation {
     /// Contact time constant of a sole on its pedal, seconds (MuJoCo `solref`): how much shoe and
     /// pedal give. Used by [`RiderModel::ArticulatedContactV1`].
     pub sole_contact_time_s: f64,
+    /// Knee flexion of the riding stance, radians: a rider rides on soft knees, never locked.
+    /// The rest posture of [`RiderModel::ArticulatedLateralV1`]; a crouch bends on from it.
+    pub soft_knee_rad: f64,
+    /// Hip abduction and adduction torque cap, N·m, per hip ([`RiderModel::ArticulatedLateralV1`]).
+    pub hip_adduction_max_nm: f64,
+    /// Hip rotation torque cap, N·m, per hip ([`RiderModel::ArticulatedLateralV1`]).
+    pub hip_rotation_max_nm: f64,
+    /// Ankle inversion and eversion torque cap, N·m, per ankle
+    /// ([`RiderModel::ArticulatedLateralV1`]). A welded sole carries at most its load times half
+    /// its width on top of that.
+    pub ankle_roll_max_nm: f64,
 }
 
 impl Default for Articulation {
     fn default() -> Self {
-        Self { joint_kp: 1000.0, joint_kd: 60.0, joint_max_nm: 180.0, sole_friction: 1.0, sole_contact_time_s: 0.005 }
+        Self {
+            joint_kp: 1000.0,
+            joint_kd: 60.0,
+            joint_max_nm: 180.0,
+            sole_friction: 1.0,
+            sole_contact_time_s: 0.005,
+            soft_knee_rad: 0.35,
+            hip_adduction_max_nm: 150.0,
+            hip_rotation_max_nm: 50.0,
+            ankle_roll_max_nm: 35.0,
+        }
     }
 }
 
@@ -708,10 +747,20 @@ impl Setup {
             ("joint_kd", r.articulation.joint_kd),
             ("joint_max_nm", r.articulation.joint_max_nm),
             ("sole_friction", r.articulation.sole_friction),
+            ("hip_adduction_max_nm", r.articulation.hip_adduction_max_nm),
+            ("hip_rotation_max_nm", r.articulation.hip_rotation_max_nm),
+            ("ankle_roll_max_nm", r.articulation.ankle_roll_max_nm),
         ] {
             if !value.is_finite() || value <= 0.0 {
                 return Err(ParamError(format!("rider.articulation.{name} must be finite and positive")));
             }
+        }
+        let soft_knee = r.articulation.soft_knee_rad;
+        if !soft_knee.is_finite() || !(0.0..=crate::CROUCH_MAX_RAD).contains(&soft_knee) {
+            return Err(ParamError(format!(
+                "rider.articulation.soft_knee_rad must be finite and in [0, {}]",
+                crate::CROUCH_MAX_RAD
+            )));
         }
         // MuJoCo needs at least two steps per contact time constant to stay stable.
         let sole_time = r.articulation.sole_contact_time_s;

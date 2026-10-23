@@ -121,7 +121,7 @@ Without `[body.suspension]` the carriage is left out and the wheel hinges straig
 
 ## The rider
 
-Two rider models share one controller (below). A scenario names its model in `[rider] model`.
+The rider models share one controller (below). A scenario names its model in `[rider] model`.
 
 - **`articulated_sagittal_v1` (the default since 2026-10-22).** An upper body (trunk, head, fixed
   arms) on two legs, each a thigh, a shank and a foot on hip, knee and ankle hinges that turn
@@ -130,6 +130,9 @@ Two rider models share one controller (below). A scenario names its model in `[r
 - **`articulated_contact_v1` (opt-in).** The same articulated rider with each sole standing on its
   own pedal through friction contact instead of a weld. It has its own id so that a recording or a
   result that names `articulated_sagittal_v1` keeps meaning welded feet.
+- **`articulated_lateral_v1` (opt-in, built in stages from 2026-10-23).** The articulated rider
+  with legs that also move sideways and twist, de Leva's segments and soft knees, its feet welded
+  to the pedals. See [the lateral rider](#the-lateral-rider-opt-in) below.
 - **`rigid_ankle_v1`.** One rigid body: mass, centre of mass height above the pedals and a radius
   of gyration, hinged at the ankles and welded to the feet. It is the controlled baseline of the
   results before 2026-10-22; a scenario selects it with `model = "rigid_ankle_v1"`, and
@@ -265,9 +268,10 @@ DEFAULT 1000 N·m/rad, 60 N·m·s/rad, 180 N·m), so they give under a bump and 
   counts as off:
   "rider off: both feet off the pedals (the wheel stays up)".
 
-What neither rider can do yet: balance sideways or twist without the external aids, step, hop, use
-the hips to recover when the soles' centre of pressure reaches heel or toe, or brace the legs
-against the shell. The rigid rider also cannot bend its knees and hips.
+What no rider can do yet: balance sideways or twist without the external aids (the lateral
+rider's later stages), step, hop, use the hips to recover when the soles' centre of pressure
+reaches heel or toe, or brace the legs against the shell. The rigid rider also cannot bend its
+knees and hips.
 
 **A hop with welded feet (feasibility, 2026-10-22; not built).** A hop would be the rider's own
 motion: crouch, straighten the legs fast, then tuck so that the feet lift the wheel. Welded feet
@@ -282,6 +286,72 @@ The second is a stronger, still estimated, jump torque. The third is a check of 
 firmware does with a wheel in the air. The fourth is a choice between the welds' pull and a
 calf-pad contact. This is a study phase of its own, not a control setting.
 
+### The lateral rider (opt-in)
+
+A rider's legs also move sideways: they lean the body into a turn, press a calf on a side pad
+and twist the wheel at walking pace. `articulated_lateral_v1` is the articulated rider with those
+joints. It is built in stages; in stage 1 (2026-10-23) it has its body and its posture, and the
+external aids still steer. Later stages add the leg-pad contact, the turn made by the body and the
+twist at walking pace, then take the aids away above walking pace.
+
+- **Segments: de Leva (1996), adult men (ESTIMATES for an average man, not anyone's body).**
+  Thigh 14.16 %, shank 4.33 % and foot 1.37 % of the mass, the upper body the other 60.28 %; the
+  thigh 0.2425 and the shank 0.2493 of the height (43 and 44 cm at 1.78 m); each segment's centre
+  of mass and radii of gyration from the same table. The upper body's centre of mass puts the whole
+  rider's at `com_above_pedals_m` in the built, straight-legged stance.
+- **Hips at their anatomical width.** The hip joint centres sit 9.0 cm either side of the midline
+  at 1.78 m, scaled with the height (Harrington et al. 2007: 0.33 × pelvis width + 7.3 mm, with a
+  250 mm pelvis width; ESTIMATE). The feet stay on the pedal centres, so each leg leans in by about
+  5° from its pedal up to its hip, as a rider's legs stand on a wide wheel. (The other articulated
+  riders' hips sit right above the pedals.)
+- **Six hinges per leg.** Hip flexion, hip ab/adduction (about the front-back axis), hip rotation
+  (about the thigh), knee, ankle pitch and ankle roll (inversion and eversion, about the foot's long
+  axis). Angles are anatomical: in the rest stance the hips are abducted and the ankles inverted by
+  the legs' lean. Adduction, internal rotation and inversion are positive on both legs. The ranges
+  are the AAOS normal ranges: hip flexion 120°, extension 30°, abduction 45°, adduction 30°,
+  rotation 45° each way; knee 0-135°; ankle inversion 35°, eversion 15°. The ankle pitch keeps the
+  articulated rider's −52° to 40°, because a crouch needs more dorsiflexion than the AAOS 20°
+  (weight-bearing dorsiflexion goes well past it).
+- **Strength (ESTIMATES, per joint).** Hip flexion and extension and the knee 180 N·m, the ankle
+  pitch 200 N·m (as the articulated rider). Hip ab/adduction `hip_adduction_max_nm` 150 N·m (about
+  1.9 N·m/kg; professional footballers measure 2.6-3.0 N·m/kg eccentric). Hip rotation
+  `hip_rotation_max_nm` 50 N·m (about 0.6 N·m/kg; the rotators are the weakest hip muscles). Ankle
+  roll `ankle_roll_max_nm` 35 N·m (isokinetic, adult men: inversion 37 N·m, eversion 33 N·m).
+- **Soft knees.** At rest the knees bend by `soft_knee_rad` (DEFAULT 0.35 rad, 20°: riding guides
+  say slightly bent, never locked) and the hips by 0.60 of it, so the centre of mass stays over the
+  ankles. Under the rider's weight the knees hold 21.4°, each with about 26 N·m, and the centre of
+  mass sits 1.4 cm lower than the straight-legged sagittal rider's. A crouch bends on from there:
+  `set_crouch(0)` is the soft-knee stance and `set_crouch(1.2)` the same full 1.2 rad of knee
+  flexion as before. With de Leva's segments the hips need 0.60 of the knee bend (the articulated
+  rider's 0.58 left the centre of mass 2.2° ahead in a full crouch); at 0.60 it stays within 0.4° of
+  the ankles from the soft knees to a full crouch.
+- **The lateral joints hold the rest stance.** The hips' ab/adduction and rotation hold it with
+  the posture spring. A standing ankle's roll, like its pitch, has no posture spring: the legs' A
+  shape sets it.
+- **Honest welded soles.** Both feet are welded to the pedals. A real sole rolls its pedal only as
+  hard as its centre of pressure can move to the edge of the foot, so each ankle's roll motor is held
+  to the sole's load times half its width (4.5 cm), within its strength. The load is the weld's
+  constraint force along the deck's normal, averaged over 20 ms: the welded feet ring at about
+  140 Hz, and each weld's load swings by about ±250 N (sagittal rider) and ±40 N (lateral rider)
+  about half the rider's weight in steady riding. `Physics::sole_loads()` reports each sole's load
+  (negative: the foot pulls its pedal, which only a weld can), its ankle roll moment and the limit
+  it was held to; `Physics::sole_pulls()` says whether a foot pulls. Riding at 15 km/h the soles
+  carry the rider's weight within 1 % and no foot pulls.
+- **The aids hold the upper body to the shell.** In stage 1 the external aids, not the legs, still
+  steer the wheel. Into a full manual turn the shell's roll spring rolls the wheel with up to about
+  1000 N·m, more than legs carry, and the twist aid turns the shell with up to 60 N·m. Through
+  person-strength legs alone the hip ab/adductors saturated at 150 N·m and the wheel spun round.
+  So the roll spring's law (5000 N·m/rad, 500 N·m·s/rad) also holds the upper body at the shell's
+  roll and roll rate, and the yaw aid's gains (2000 N·m/rad, 200 N·m·s/rad, at most 60 N·m) hold it
+  at the shell's heading and turn rate. Both are external torques on the upper body; their torque
+  and work add to the reported aids, and recordings carry them. In a 0.4 rad/s turn at 15 km/h
+  the lateral joints then carry under 3 N·m.
+- **It rides as the sagittal rider.** On the test balance law it reaches 4.22 m/s in 10 s towards
+  15 km/h and stops in 11.46 m (sagittal: 4.22 m/s, 11.45 m); a full manual turn at 5 m/s settles
+  at 34° of lean and 1.12 rad/s (sagittal: 34°, 1.13 rad/s); it rides 30 km/h straight with no
+  roll. On the stock firmware `ride-20kmh-stop` passes at 2.45 times real time (sagittal 2.51 in
+  the same session).
+
 ## Aids (M2)
 
 - **Roll spring.** Neither rider can balance sideways (a real rider steers and twists), so a
@@ -289,13 +359,20 @@ calf-pad contact. This is a study phase of its own, not a control setting.
   c = 500 N·m·s/rad, far stiffer than the toppling moment of wheel and rider (about 1200 N·m/rad).
   It shows in recordings as a roll that stays at zero. Set `[assist] roll_stiffness = 0` in a
   scenario to see the wheel fall over sideways.
-- **Upper-body roll aid** (`articulated_contact_v1` only). The same law, with the same gains, holds
-  the articulated upper body at the wheel's roll target, because contact feet do not hold the body to
-  the shell and the legs cannot roll. It is an external torque, like the shell's roll spring and the
-  yaw aid of the steering (point 4 above); its torque and work add to the reported roll aid.
+- **Upper-body roll aid** (`articulated_contact_v1` and `articulated_lateral_v1`). The same law,
+  with the same gains, holds the articulated upper body: for contact feet at the wheel's roll
+  target, because contact feet do not hold the body to the shell and the legs cannot roll; for the
+  lateral rider at the shell's roll and roll rate, because its legs are only as strong as a
+  person's. It is an external torque, like the shell's roll spring and the yaw aid of the steering
+  (point 4 above); its torque and work add to the reported roll aid.
+- **Upper-body yaw aid** (`articulated_lateral_v1` only). The yaw aid's gains and cap hold the
+  lateral rider's upper body at the shell's heading and turn rate, because its hips twist. An
+  external torque; its torque and work add to the reported yaw aid.
 - **Recorded.** A recording's context (`model_aids`) carries every aid the run had: the shell's roll
-  stiffness and damping, the yaw aid's gains and cap, and for `articulated_contact_v1`
-  `upper_body_roll_stiffness` and `upper_body_roll_damping` (absent for the other models).
+  stiffness and damping, the yaw aid's gains and cap, for `articulated_contact_v1` and
+  `articulated_lateral_v1` `upper_body_roll_stiffness` and `upper_body_roll_damping`, and for
+  `articulated_lateral_v1` `upper_body_steer_kp`, `upper_body_steer_kd` and
+  `upper_body_steer_max_nm` (each absent for the models without it).
 - **Air drag** acts on the rider's centre of mass: `F = ½·ρ·CdA·v·|v|`, ρ = 1.2 kg/m³,
   CdA = 0.6 m² (sim.py's value, an upright adult).
 
@@ -335,7 +412,7 @@ Rider and aids (scenario `[rider]`, `[rider.control]`, `[assist]`; these are the
 
 | Parameter | Value | Note |
 |---|---|---|
-| `model` | `articulated_sagittal_v1` | `rigid_ankle_v1`: the controlled baseline; `articulated_contact_v1`: contact feet (opt-in) |
+| `model` | `articulated_sagittal_v1` | `rigid_ankle_v1`: the controlled baseline; `articulated_contact_v1`: contact feet (opt-in); `articulated_lateral_v1`: lateral legs (opt-in) |
 | `mass_kg` | 80 kg | |
 | `com_above_pedals_m` | 1.0 m | about 55 % of a 1.78 m adult's height |
 | `ankle_above_pedals_m` | 0.08 m | the hinge |
@@ -343,6 +420,8 @@ Rider and aids (scenario `[rider]`, `[rider.control]`, `[assist]`; these are the
 | `height_m` | 1.78 m | drawing; the articulated segment lengths scale with it |
 | `articulation.joint_kp`, `joint_kd`, `joint_max_nm` | 1000 N·m/rad, 60 N·m·s/rad, 180 N·m | ESTIMATE: hip and knee posture (and a lifted foot's ankle), per joint |
 | `articulation.sole_friction`, `sole_contact_time_s` | 1.0, 0.005 s | DEFAULT: rubber on grip pins; shoe and pedal give (`articulated_contact_v1`) |
+| `articulation.soft_knee_rad` | 0.35 rad | DEFAULT: the knees' bend at rest, 20° (`articulated_lateral_v1`) |
+| `articulation.hip_adduction_max_nm`, `hip_rotation_max_nm`, `ankle_roll_max_nm` | 150, 50, 35 N·m | ESTIMATE: per joint, from published strength of adults (`articulated_lateral_v1`; see the lateral rider) |
 | `cda_m2` | 0.6 m² | air drag |
 | `control.lean_kp`, `lean_kd` | 6000 N·m/rad, 900 N·m·s/rad | about 1.3 Hz, damping 0.6 about the ankles |
 | `control.ankle_max_nm` | 400 N·m | both legs |

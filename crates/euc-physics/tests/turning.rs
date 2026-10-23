@@ -45,7 +45,7 @@ fn ride(physics: &mut Physics, seconds: f64) {
 /// the line turns at the requested rate and the twist aid, within its 60 N·m cap, follows it.
 #[test]
 fn by_hand_the_rider_pivots_the_wheel_at_a_stop() {
-    for model in [RiderModel::RigidAnkleV1, RiderModel::ArticulatedSagittalV1] {
+    for model in [RiderModel::RigidAnkleV1, RiderModel::ArticulatedSagittalV1, RiderModel::ArticulatedLateralV1] {
         let mut physics = Physics::new(setup(model)).unwrap();
         ride(&mut physics, 0.5);
         physics.set_held(false);
@@ -82,7 +82,7 @@ fn by_hand_the_rider_pivots_the_wheel_at_a_stop() {
 /// wheel to the manual limit (35°, about 0.7 g) and carves a circle the tire holds.
 #[test]
 fn by_hand_a_full_turn_at_speed_leans_to_the_manual_limit() {
-    for model in [RiderModel::RigidAnkleV1, RiderModel::ArticulatedSagittalV1] {
+    for model in [RiderModel::RigidAnkleV1, RiderModel::ArticulatedSagittalV1, RiderModel::ArticulatedLateralV1] {
         let mut physics = Physics::new(setup(model)).unwrap();
         ride(&mut physics, 0.5);
         physics.set_held(false);
@@ -120,7 +120,7 @@ fn by_hand_a_full_turn_at_speed_leans_to_the_manual_limit() {
 
 #[test]
 fn scripted_turn_input_does_not_spin_a_stationary_wheel() {
-    for model in [RiderModel::RigidAnkleV1, RiderModel::ArticulatedSagittalV1] {
+    for model in [RiderModel::RigidAnkleV1, RiderModel::ArticulatedSagittalV1, RiderModel::ArticulatedLateralV1] {
         let mut physics = Physics::new(setup(model)).unwrap();
         ride(&mut physics, 0.5);
         physics.set_held(false);
@@ -152,7 +152,7 @@ fn rigid_rider_keeps_a_straight_line_at_high_speed() {
 
 #[test]
 fn a_steady_turn_input_leans_the_wheel_into_a_circle_of_plausible_radius() {
-    for model in [RiderModel::RigidAnkleV1, RiderModel::ArticulatedSagittalV1] {
+    for model in [RiderModel::RigidAnkleV1, RiderModel::ArticulatedSagittalV1, RiderModel::ArticulatedLateralV1] {
         let mut physics = Physics::new(setup(model)).unwrap();
         ride(&mut physics, 0.5);
         physics.set_held(false);

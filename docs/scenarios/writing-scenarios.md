@@ -76,14 +76,16 @@ Every field has a default; give only what you change. The model is described in
 
 The default rider is articulated (`articulated_sagittal_v1`): an upper body on two legs with hip,
 knee and ankle hinges, the feet welded to the pedals. `model = "articulated_contact_v1"` is the same
-rider with each sole on its own pedal through friction contact (opt-in). The rigid rider
+rider with each sole on its own pedal through friction contact (opt-in), and
+`model = "articulated_lateral_v1"` the rider with legs that also move sideways and twist, on soft
+knees (opt-in, built in stages). The rigid rider
 (`model = "rigid_ankle_v1"`) stays for controlled comparisons with the results before 2026-10-22: a
 scenario that measures the firmware against that baseline on purpose pins it and says why in its
 header. `euc sim run --rider-model ...` overrides the scenario's model for one run.
 
 | Field | Default | Meaning |
 |---|---|---|
-| `model` | `"articulated_sagittal_v1"` | Or `"rigid_ankle_v1"`, or `"articulated_contact_v1"` (contact feet, opt-in; see [body.md](../models/body.md#the-articulated-rider-default)). |
+| `model` | `"articulated_sagittal_v1"` | Or `"rigid_ankle_v1"`, or `"articulated_contact_v1"` (contact feet, opt-in; see [body.md](../models/body.md#the-articulated-rider-default)), or `"articulated_lateral_v1"` (lateral legs, opt-in; see [body.md](../models/body.md#the-lateral-rider-opt-in)). |
 | `mass_kg` | 80 | Rider mass; every segment's mass scales with it. |
 | `height_m` | 1.78 | Standing height; every segment's length scales with it. |
 | `ankle_above_pedals_m` | 0.08 | Ankle joints above the pedals, shoe included. |
@@ -92,6 +94,8 @@ header. `euc sim run --rider-model ...` overrides the scenario's model for one r
 | `cda_m2` | 0.6 | Drag area of rider and wheel. |
 | `articulation.joint_kp`, `articulation.joint_kd`, `articulation.joint_max_nm` | 1000, 60, 180 | Hip and knee posture: stiffness (N·m/rad), damping (N·m·s/rad), strongest torque per joint (N·m). |
 | `articulation.sole_friction`, `articulation.sole_contact_time_s` | 1.0, 0.005 | Sole-on-pedal friction and contact softness (s), for `articulated_contact_v1`. |
+| `articulation.soft_knee_rad` | 0.35 | Knee bend of the riding stance (rad), for `articulated_lateral_v1`. |
+| `articulation.hip_adduction_max_nm`, `articulation.hip_rotation_max_nm`, `articulation.ankle_roll_max_nm` | 150, 50, 35 | Strongest hip ab/adduction, hip rotation and ankle roll per joint (N·m), for `articulated_lateral_v1`. |
 | `control.lean_kp`, `control.lean_kd` | 6000, 900 | Ankle stiffness (N·m/rad) and damping (N·m·s/rad) about the lean. |
 | `control.ankle_max_nm` | 400 | Strongest ankle torque, both legs. Contact feet carry less: about 70 N·m backward and 120 N·m forward for the default rider, while the centre of pressure stays under the soles. |
 | `control.speed_kp`, `control.speed_ki` | 0.6, 0.03 | Acceleration asked per m/s of speed error, and its integral. |

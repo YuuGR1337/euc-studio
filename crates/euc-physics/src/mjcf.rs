@@ -17,9 +17,13 @@
 //! touch the ground alongside rider shapes. The articulated model (the default) uses a free upper
 //! body and six internal hip/knee/ankle hinges; each foot welds to its pedal until release, or,
 //! for `articulated_contact_v1`, stands on it through its own contact pair (`<side>_sole_on_pedal`).
+//! The lateral model (`articulated_lateral_v1`) has the same bodies with six hinges per leg (hip
+//! flexion, ab/adduction and rotation, knee, ankle pitch and roll), de Leva's segments and the
+//! hips at their anatomical width, the legs leaning in from the pedals to the hips.
 
 use crate::TIMESTEP_S;
-use crate::params::{RiderModel, Setup, Solid};
+use crate::anthropometry::{self, FOOT, SHANK, Segment, THIGH, range};
+use crate::params::{Rider, RiderModel, Setup, Solid};
 
 /// Names the simulator looks up in the compiled model.
 pub(crate) mod names {
@@ -45,6 +49,85 @@ pub(crate) const LEAN_LIMIT_RAD: f64 = 0.7;
 
 /// The articulated rider's sole-on-pedal contact pairs are named `<side>` + this.
 pub(crate) const SOLE_PAIR_SUFFIX: &str = "_sole_on_pedal";
+
+/// Half the width of an articulated sole, metres: how far its centre of pressure can move
+/// sideways from the middle of the foot.
+pub(crate) const SOLE_HALF_WIDTH_M: f64 = 0.045;
+
+/// What an articulated leg joint does. Signs: hip flexion and ankle dorsiflexion negative, knee
+/// flexion positive (all about +y); hip adduction, hip internal rotation and ankle inversion
+/// positive on both legs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum JointKind {
+    /// Hip flexion and extension.
+    Hip,
+    /// Hip abduction and adduction (lateral legs).
+    HipAdduction,
+    /// Hip internal and external rotation, about the thigh (lateral legs).
+    HipRotation,
+    /// Knee flexion.
+    Knee,
+    /// Ankle dorsiflexion and plantarflexion.
+    Ankle,
+    /// Ankle inversion and eversion (lateral legs).
+    AnkleRoll,
+}
+
+impl JointKind {
+    /// The pitch joints, which share the upper body's lean task.
+    pub(crate) const fn pitch(self) -> bool {
+        matches!(self, Self::Hip | Self::Knee | Self::Ankle)
+    }
+
+    /// The motor's torque cap, N·m.
+    pub(crate) const fn cap(self, rider: &Rider) -> f64 {
+        let a = &rider.articulation;
+        match self {
+            Self::Hip | Self::Knee => a.joint_max_nm,
+            Self::Ankle => rider.control.ankle_max_nm / 2.0,
+            Self::HipAdduction => a.hip_adduction_max_nm,
+            Self::HipRotation => a.hip_rotation_max_nm,
+            Self::AnkleRoll => a.ankle_roll_max_nm,
+        }
+    }
+}
+
+/// One articulated leg joint: its name, what it does and its leg (0 left, 1 right).
+pub(crate) type LegJoint = (&'static str, JointKind, usize);
+
+const SAGITTAL_JOINTS: [LegJoint; 6] = [
+    ("left_hip", JointKind::Hip, 0),
+    ("left_knee", JointKind::Knee, 0),
+    ("left_ankle", JointKind::Ankle, 0),
+    ("right_hip", JointKind::Hip, 1),
+    ("right_knee", JointKind::Knee, 1),
+    ("right_ankle", JointKind::Ankle, 1),
+];
+
+const LATERAL_JOINTS: [LegJoint; 12] = [
+    ("left_hip", JointKind::Hip, 0),
+    ("left_hip_adduction", JointKind::HipAdduction, 0),
+    ("left_hip_rotation", JointKind::HipRotation, 0),
+    ("left_knee", JointKind::Knee, 0),
+    ("left_ankle", JointKind::Ankle, 0),
+    ("left_ankle_roll", JointKind::AnkleRoll, 0),
+    ("right_hip", JointKind::Hip, 1),
+    ("right_hip_adduction", JointKind::HipAdduction, 1),
+    ("right_hip_rotation", JointKind::HipRotation, 1),
+    ("right_knee", JointKind::Knee, 1),
+    ("right_ankle", JointKind::Ankle, 1),
+    ("right_ankle_roll", JointKind::AnkleRoll, 1),
+];
+
+/// The leg joints of an articulated `model`, left leg then right, each from the hip down
+/// (none for the rigid rider).
+pub(crate) const fn leg_joints(model: RiderModel) -> &'static [LegJoint] {
+    match model {
+        RiderModel::RigidAnkleV1 => &[],
+        RiderModel::ArticulatedSagittalV1 | RiderModel::ArticulatedContactV1 => &SAGITTAL_JOINTS,
+        RiderModel::ArticulatedLateralV1 => &LATERAL_JOINTS,
+    }
+}
 
 /// The articulated rider stands on the pedals through contact (no pedal welds).
 pub(crate) const fn feet_in_contact(setup: &Setup) -> bool {
@@ -157,6 +240,8 @@ pub(crate) fn mjcf(setup: &Setup) -> String {
     x.line("    </body>");
     if setup.rider.model == RiderModel::RigidAnkleV1 {
         rider(&mut x, setup, &layout);
+    } else if setup.rider.model.has_lateral_legs() {
+        lateral(&mut x, setup, &layout);
     } else {
         articulated(&mut x, setup, &layout);
     }
@@ -183,12 +268,10 @@ pub(crate) fn mjcf(setup: &Setup) -> String {
     if setup.rider.model == RiderModel::RigidAnkleV1 {
         x.line(format!(r#"    <motor name="{}" joint="{}" ctrlrange="-{max} {max}"/>"#, names::ANKLE, names::LEAN));
     } else {
-        for side in ["left", "right"] {
-            for joint in ["hip", "knee", "ankle"] {
-                let limit = if joint == "ankle" { max / 2.0 } else { setup.rider.articulation.joint_max_nm };
-                let limited = limit > 0.0;
-                x.line(format!(r#"    <motor name="{side}_{joint}_motor" joint="{side}_{joint}" ctrlrange="-{limit} {limit}" ctrllimited="{limited}"/>"#));
-            }
+        for (joint, kind, _) in leg_joints(setup.rider.model) {
+            let limit = kind.cap(&setup.rider);
+            let limited = limit > 0.0;
+            x.line(format!(r#"    <motor name="{joint}_motor" joint="{joint}" ctrlrange="-{limit} {limit}" ctrllimited="{limited}"/>"#));
         }
     }
     x.line("  </actuator>");
@@ -466,6 +549,156 @@ fn articulated(x: &mut Xml, setup: &Setup, layout: &Layout) {
         );
     }
     x.line("    </body>");
+}
+
+/// The lateral rider: the articulated rider's seven bodies with de Leva's segments, the hips at
+/// their anatomical width and six hinges per leg. The model is built in the rest stance: legs
+/// straight, each leaning in from its pedal to its hip, feet flat on the pedals. The joints'
+/// `ref` makes their angles anatomical: in the rest stance each hip is abducted and each ankle
+/// inverted by the legs' lean. The posture loop bends the knees to the soft riding stance.
+fn lateral(x: &mut Xml, setup: &Setup, layout: &Layout) {
+    let rider = setup.rider;
+    let (height, mass) = (rider.height_m, rider.mass_kg);
+    let (thigh, shank) = (THIGH.length * height, SHANK.length * height);
+    let hip_y = anthropometry::HIP_HALF_WIDTH * height;
+    // Each straight leg runs from its hip down and out to its ankle over the pedal.
+    let tilt = ((layout.pedal_y - hip_y) / (thigh + shank)).asin();
+    let cos = tilt.cos();
+    let ankle_z = setup.wheel.tire.radius_m - sag_m(setup) + ankle_above_axle(setup);
+    // The hips' height above the pedals.
+    let pelvis = rider.ankle_above_pedals_m + (thigh + shank) * cos;
+    let (thigh_kg, shank_kg, foot_kg) = (THIGH.mass * mass, SHANK.mass * mass, FOOT.mass * mass);
+    let upper_mass = mass - 2.0 * (thigh_kg + shank_kg + foot_kg);
+    // Heights above the pedals of each leg's segment centres; the upper body's centre of mass
+    // puts the whole rider's at `com_above_pedals_m`, over the middle of the pedals.
+    let leg_moment = 2.0
+        * (foot_kg * FOOT_COM_M[1]
+            + shank_kg * (rider.ankle_above_pedals_m + (1.0 - SHANK.com) * shank * cos)
+            + thigh_kg * (rider.ankle_above_pedals_m + (shank + (1.0 - THIGH.com) * thigh) * cos));
+    let upper_com = (mass * rider.com_above_pedals_m - leg_moment) / upper_mass - pelvis;
+    let upper_x = -2.0 * foot_kg * FOOT_COM_M[0] / upper_mass;
+    let inertia = upper_mass * rider.gyration_m.powi(2);
+    let ground_only = r#"contype="2" conaffinity="0" solref="0.005 1""#;
+    x.line(format!(r#"    <body name="rider" pos="0 0 {}">"#, ankle_z + (thigh + shank) * cos));
+    x.line(r#"      <freejoint name="rider_free"/>"#);
+    x.line(format!(
+        r#"      <inertial mass="{upper_mass}" pos="{upper_x} 0 {upper_com}" diaginertia="{inertia} {inertia} {}"/>"#,
+        inertia * 0.5
+    ));
+    x.line(format!(
+        r#"      <geom name="trunk" type="capsule" fromto="0 0 0 0 0 {}" size="0.13" {ground_only}/>"#,
+        height * 0.32
+    ));
+    x.line(format!(
+        r#"      <geom name="head" type="sphere" pos="0 0 {}" size="0.10" {ground_only}/>"#,
+        height - pelvis - 0.1
+    ));
+    let (hip, shoulder) = (0.53 * height - pelvis, 0.82 * height - pelvis);
+    for (side, sign) in [("left", 1.0), ("right", -1.0)] {
+        // Fixed arms for the silhouette; the upper body's inertial already holds their mass.
+        let arm = sign * anthropometry::SHOULDER_HALF_WIDTH * height;
+        x.line(format!(
+            r#"      <geom name="arm_{side}" type="capsule" fromto="0 {arm} {shoulder} 0 {arm} {hip}" size="0.045" mass="0" {ground_only}/>"#
+        ));
+        let leg = Leg { side, sign, hip_y, thigh, shank, tilt, masses: [thigh_kg, shank_kg, foot_kg], height };
+        lateral_leg(x, &leg, rider.ankle_above_pedals_m, ground_only);
+    }
+    x.line("    </body>");
+}
+
+/// Where a lateral rider's foot carries its mass, from the ankle: forward, and up from the pedal,
+/// metres (as the articulated rider's).
+const FOOT_COM_M: [f64; 2] = [0.03, 0.03];
+
+/// One lateral leg as built: straight, leaning out from its hip by `tilt` (radians) to its pedal.
+struct Leg {
+    side: &'static str,
+    /// +1 for the left leg, −1 for the right.
+    sign: f64,
+    /// The hip's distance from the midline, metres.
+    hip_y: f64,
+    /// Thigh and shank lengths, metres.
+    thigh: f64,
+    shank: f64,
+    tilt: f64,
+    /// Thigh, shank and foot masses, kilograms.
+    masses: [f64; 3],
+    /// The rider's height, metres.
+    height: f64,
+}
+
+/// A lateral leg's thigh, shank and foot with their six hinges, inside the upper body.
+fn lateral_leg(x: &mut Xml, leg: &Leg, ankle_above_pedals: f64, ground_only: &str) {
+    let Leg { side, sign, hip_y, thigh, shank, tilt, masses: [thigh_kg, shank_kg, foot_kg], height } = *leg;
+    let (sin, cos) = tilt.sin_cos();
+    // Down the leg from hip to knee to ankle, leaning out by `tilt`.
+    let along = |length: f64| [0.0, sign * length * sin, -length * cos];
+    let [_, knee_y, knee_z] = along(thigh);
+    let [_, ankle_y, ankle_z] = along(shank);
+    // The segments' principal axes run along the leaning leg: a turn of `sign·tilt` about x.
+    let quat = format!("{} {} 0 0", (sign * tilt / 2.0).cos(), (sign * tilt / 2.0).sin());
+    let segment = |x: &mut Xml, indent: &str, name: &str, seg: Segment, mass: f64, length: f64, radius: f64| {
+        let [ix, iy, iz] = seg.gyration.map(|g| mass * (g * length).powi(2));
+        let [_, cy, cz] = along(seg.com * length);
+        x.line(format!(
+            r#"{indent}<inertial mass="{mass}" pos="0 {cy} {cz}" quat="{quat}" diaginertia="{ix} {iy} {iz}"/>"#
+        ));
+        let [_, ey, ez] = along(length);
+        x.line(format!(
+            r#"{indent}<geom name="{side}_{name}_shape" type="capsule" fromto="0 0 0 0 {ey} {ez}" size="{radius}" {ground_only}/>"#
+        ));
+    };
+    // Adduction and inversion turn the foot toward the midline and internal rotation turns the
+    // toes in, on either leg; `ref` holds the rest stance's angles.
+    let inward = format!("{} 0 0", -sign);
+    x.line(format!(r#"      <body name="{side}_thigh" pos="0 {} 0">"#, sign * hip_y));
+    x.line(format!(
+        r#"        <joint name="{side}_hip" axis="0 1 0" range="-{} {}" damping="0.5"/>"#,
+        range::HIP_FLEXION,
+        range::HIP_EXTENSION
+    ));
+    x.line(format!(
+        r#"        <joint name="{side}_hip_adduction" axis="{inward}" range="-{} {}" ref="{}" damping="0.5"/>"#,
+        range::HIP_ABDUCTION,
+        range::HIP_ADDUCTION,
+        -tilt
+    ));
+    let (along_z, rotation) = (-sign * cos, range::HIP_ROTATION);
+    x.line(format!(
+        r#"        <joint name="{side}_hip_rotation" axis="0 {sin} {along_z}" range="-{rotation} {rotation}" damping="0.5"/>"#
+    ));
+    segment(x, "        ", "thigh", THIGH, thigh_kg, thigh, 0.065);
+    x.line(format!(r#"        <body name="{side}_shank" pos="0 {knee_y} {knee_z}">"#));
+    x.line(format!(
+        r#"          <joint name="{side}_knee" axis="0 1 0" range="-0.03 {}" damping="0.5"/>"#,
+        range::KNEE_FLEXION
+    ));
+    segment(x, "          ", "shank", SHANK, shank_kg, shank, 0.045);
+    x.line(format!(r#"          <body name="{side}_foot" pos="0 {ankle_y} {ankle_z}">"#));
+    // Weight-bearing dorsiflexion goes well past the AAOS 20° (a crouch needs it): the
+    // articulated rider's ankle range stays.
+    x.line(format!(r#"            <joint name="{side}_ankle" axis="0 1 0" range="-0.9 0.7" damping="0.5"/>"#));
+    x.line(format!(
+        r#"            <joint name="{side}_ankle_roll" axis="{inward}" range="-{} {}" ref="{tilt}" damping="0.5"/>"#,
+        range::ANKLE_EVERSION,
+        range::ANKLE_INVERSION
+    ));
+    let [forward, up] = FOOT_COM_M;
+    let sole_z = up - ankle_above_pedals;
+    let foot_length = FOOT.length * height;
+    let [ix, iy, iz] =
+        [FOOT.gyration[2], FOOT.gyration[1], FOOT.gyration[0]].map(|g| foot_kg * (g * foot_length).powi(2));
+    x.line(format!(
+        r#"            <inertial mass="{foot_kg}" pos="{forward} 0 {sole_z}" diaginertia="{ix} {iy} {iz}"/>"#
+    ));
+    x.line(format!(
+        r#"            <geom name="{side}_sole" type="box" pos="{forward} 0 {sole_z}" size="0.12 {SOLE_HALF_WIDTH_M} 0.03" {ground_only}/>"#
+    ));
+    x.line(
+        "          </body>
+        </body>
+      </body>",
+    );
 }
 
 fn limb(x: &mut Xml, side: &str, name: &str, mass: f64, length: f64, radius: f64, contact_attrs: &str) {

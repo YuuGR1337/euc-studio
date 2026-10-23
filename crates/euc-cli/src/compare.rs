@@ -57,7 +57,7 @@ pub(crate) struct CompareArgs {
     #[arg(long, default_value_t = 4000)]
     max_quantum: u32,
     /// Ride with this rider model instead of the scenario's (`rigid_ankle_v1`,
-    /// `articulated_sagittal_v1` or `articulated_contact_v1`).
+    /// `articulated_sagittal_v1`, `articulated_contact_v1` or `articulated_lateral_v1`).
     #[arg(long, value_name = "MODEL", value_parser = crate::sim::rider_model)]
     rider_model: Option<euc_physics::RiderModel>,
     /// Also write the JSON report (what `--json` prints) to this file.
