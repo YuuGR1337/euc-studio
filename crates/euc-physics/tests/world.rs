@@ -52,6 +52,12 @@ fn the_window_follows_the_wheel_down_the_spawn_street() {
     for model in [RiderModel::RigidAnkleV1, RiderModel::ArticulatedSagittalV1, RiderModel::ArticulatedLateralV1] {
         let ground = WorldGround::at_spawn(WorldSpec::city(7)).unwrap();
         let mut physics = Physics::new(setup(model, ground.clone())).unwrap();
+        // The window and the box pool are not part of the moving mass (the rider's drag sense
+        // divides by it): wheel 16 kg, shell 26 kg and rider 80 kg, as without a world.
+        let mut flat = setup(model, ground.clone());
+        flat.world = None;
+        assert!((physics.total_mass() - 122.0).abs() < 1e-9, "{model:?}: {} kg", physics.total_mass());
+        assert_eq!(physics.total_mass(), Physics::new(flat).unwrap().total_mass(), "{model:?}");
         ride(&mut physics, 0.5);
         physics.set_held(false);
         physics.rider().set_intent(Intent::Speed(5.0));

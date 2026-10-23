@@ -668,7 +668,7 @@ impl Physics {
             on_pedals: if articulated { None } else { Some(id(MjtObj::mjOBJ_EQUALITY, names::ON_PEDALS)?) },
             articulated: articulated_ids,
         };
-        let total_mass = model.body_mass().iter().sum();
+        let total_mass = moving_mass(&model);
         let mut data = MjData::new(Box::new(model));
         let tire = setup.wheel.tire;
         // The tire's contact friction on asphalt; the world scales it by the surface under it.
@@ -1684,6 +1684,13 @@ impl Physics {
             speed: axle_vel[0] * heading[0] + axle_vel[1] * heading[1],
         }
     }
+}
+
+/// The mass of wheel, shell and rider, kilograms. The world's mocap bodies (the ground window and
+/// the box pool) are fixed in space and left out: at their geoms' default density the window alone
+/// would add hundreds of tonnes, and the rider would sense no air drag.
+fn moving_mass(model: &MjModel) -> f64 {
+    model.body_mass().iter().zip(model.body_mocapid()).filter(|&(_, mocap)| *mocap < 0).map(|(mass, _)| mass).sum()
 }
 
 fn cross(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
