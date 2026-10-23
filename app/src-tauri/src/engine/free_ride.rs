@@ -282,6 +282,7 @@ impl FreeRideState {
             height_map,
             world,
             model_aids: euc_sim::recording::ModelAids::of(&rider, &assist),
+            rider_joints: euc_sim::recording::rider_joints(rider.model),
         };
         context.validate()?;
         serde_json::to_value(context).map(Some).map_err(|error| error.to_string())

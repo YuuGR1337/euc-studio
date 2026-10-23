@@ -60,6 +60,11 @@ pub(crate) mod range {
     pub const HIP_ROTATION: f64 = 45.0 * std::f64::consts::PI / 180.0;
     /// Knee flexion, 135°.
     pub const KNEE_FLEXION: f64 = 135.0 * std::f64::consts::PI / 180.0;
+    /// The tibia's external rotation at a softly bent knee, 30° (ESTIMATE: about 40° at 90° of
+    /// flexion, less as the knee straightens).
+    pub const KNEE_EXTERNAL_ROTATION: f64 = 30.0 * std::f64::consts::PI / 180.0;
+    /// The tibia's internal rotation at a softly bent knee, 20° (ESTIMATE: about 30° at 90°).
+    pub const KNEE_INTERNAL_ROTATION: f64 = 20.0 * std::f64::consts::PI / 180.0;
     /// Ankle inversion, 35°.
     pub const ANKLE_INVERSION: f64 = 35.0 * std::f64::consts::PI / 180.0;
     /// Ankle eversion, 15°.

@@ -27,7 +27,7 @@ fn extreme() -> WheelBody {
             imu_above_axle_m: 0.15,
         },
         suspension: None,
-        shapes: Some(Shapes { tire: Some(Torus { major_m: 0.1716, minor_m: 0.058 }), solids: Vec::new() }),
+        shapes: Some(Shapes { tire: Some(Torus { major_m: 0.1716, minor_m: 0.058 }), ..Shapes::default() }),
     }
 }
 

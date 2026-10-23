@@ -20,7 +20,7 @@ fn setup(model: RiderModel) -> Setup {
             imu_above_axle_m: 0.15,
         },
         suspension: None,
-        shapes: Some(Shapes { tire: Some(Torus { major_m: 0.1716, minor_m: 0.058 }), solids: Vec::new() }),
+        shapes: Some(Shapes { tire: Some(Torus { major_m: 0.1716, minor_m: 0.058 }), ..Shapes::default() }),
     });
     setup.rider.model = model;
     setup
@@ -81,7 +81,7 @@ fn centre_of_mass_lean(physics: &Physics) -> f64 {
 }
 
 #[test]
-fn the_lateral_rider_is_opt_in_with_twelve_real_joints_on_the_same_bodies() {
+fn the_lateral_rider_is_opt_in_with_fourteen_real_joints_on_the_same_bodies() {
     let parsed: Rider = toml::from_str(r#"model = "articulated_lateral_v1""#).unwrap();
     assert_eq!(parsed.model, RiderModel::ArticulatedLateralV1);
     assert_eq!(parsed.model.id(), "articulated_lateral_v1");
@@ -113,12 +113,14 @@ fn the_lateral_rider_is_opt_in_with_twelve_real_joints_on_the_same_bodies() {
             "left_hip_adduction",
             "left_hip_rotation",
             "left_knee",
+            "left_knee_rotation",
             "left_ankle",
             "left_ankle_roll",
             "right_hip",
             "right_hip_adduction",
             "right_hip_rotation",
             "right_knee",
+            "right_knee_rotation",
             "right_ankle",
             "right_ankle_roll"
         ]
@@ -130,11 +132,15 @@ fn the_lateral_rider_is_opt_in_with_twelve_real_joints_on_the_same_bodies() {
     let mut invalid = setup(RiderModel::ArticulatedLateralV1);
     invalid.rider.articulation.soft_knee_rad = 1.5;
     assert!(Physics::new(invalid).is_err(), "soft knees stay within the deepest crouch");
+    let mut invalid = setup(RiderModel::ArticulatedLateralV1);
+    invalid.rider.articulation.foot_offset_m = 0.1;
+    assert!(Physics::new(invalid).is_err(), "the foot stays on its pedal");
 }
 
-/// At rest the rider stands on soft knees, the hips at their anatomical width above feet on the
-/// pedals: the legs lean in, the feet lie flat, and the centre of mass sits lower than the
-/// straight-legged sagittal rider's and still over the ankles.
+/// At rest the rider stands on soft knees (30°, the owner's report), the hips at their anatomical
+/// width above feet on the pedals: the legs lean in, the feet lie flat, and the centre of mass sits
+/// lower than the straight-legged sagittal rider's and still over the ankles. Without pads (this
+/// wheel has no measured shapes) the knees do not swing out.
 #[test]
 fn soft_knees_lower_the_centre_of_mass_over_the_ankles() {
     let mut physics = lateral();
@@ -155,9 +161,9 @@ fn soft_knees_lower_the_centre_of_mass_over_the_ankles() {
         thigh[1] - pelvis[1]
     );
     for knee in knees {
-        assert!((knee.to_degrees() - 20.0).abs() < 3.0, "soft knees: {}°", knee.to_degrees());
+        assert!((knee.to_degrees() - 30.0).abs() < 3.0, "soft knees: {}°", knee.to_degrees());
     }
-    assert!((0.005..0.03).contains(&drop), "centre of mass drop {drop} m");
+    assert!((0.015..0.05).contains(&drop), "centre of mass drop {drop} m");
     assert!(centre_of_mass_lean(&physics).abs() < 1_f64.to_radians());
     assert!((thigh[1] - pelvis[1] - 0.0898).abs() < 0.003, "hip half width {}", thigh[1] - pelvis[1]);
     // The legs lean in: hips abducted, ankles inverted, and nothing twisted.
@@ -165,7 +171,8 @@ fn soft_knees_lower_the_centre_of_mass_over_the_ankles() {
         let (adduction, roll) =
             (joint(&physics, &format!("{side}_hip_adduction")), joint(&physics, &format!("{side}_ankle_roll")));
         assert!(adduction < -0.05 && roll > 0.05, "{side}: adduction {adduction}, ankle roll {roll}");
-        assert!(joint(&physics, &format!("{side}_hip_rotation")).abs() < 0.01);
+        assert!(joint(&physics, &format!("{side}_hip_rotation")).abs() < 0.02);
+        assert!(joint(&physics, &format!("{side}_knee_rotation")).abs() < 0.02);
     }
 }
 
@@ -262,7 +269,7 @@ fn a_crouch_bends_on_from_the_soft_knees_over_the_ankles() {
         pitch.to_degrees()
     );
     assert!((standing - height).abs() < 0.01 && (after - before).abs() < 0.5 && pitch < 3_f64.to_radians());
-    assert!((joint(&physics, "left_knee").to_degrees() - 20.0).abs() < 3.0);
+    assert!((joint(&physics, "left_knee").to_degrees() - 30.0).abs() < 3.0);
 }
 
 /// A straight run at 30 km/h stays upright and steady: the extra joints add no wobble.
@@ -283,7 +290,7 @@ fn a_straight_run_at_30_kmh_stays_steady() {
     assert!(roll < 1_f64.to_radians(), "{}°", roll.to_degrees());
 }
 
-/// Stepping off releases both welds, stops all twelve motors and every aid, and the feet come
+/// Stepping off releases both welds, stops all fourteen motors and every aid, and the feet come
 /// down beside the wheel.
 #[test]
 fn stepping_off_releases_the_feet_and_stops_every_motor_and_aid() {

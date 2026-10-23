@@ -290,9 +290,23 @@ calf-pad contact. This is a study phase of its own, not a control setting.
 
 A rider's legs also move sideways: they lean the body into a turn, press a calf on a side pad
 and twist the wheel at walking pace. `articulated_lateral_v1` is the articulated rider with those
-joints. It is built in stages; in stage 1 (2026-10-23) it has its body and its posture, and the
-external aids still steer. Later stages add the leg-pad contact, the turn made by the body and the
-twist at walking pace, then take the aids away above walking pace.
+joints. It is built in stages: stage 1 (2026-10-23) gave it its body and its posture, stage 2 the
+knees' rotation and the legs on the side pads; the external aids still steer. Later stages add the
+turn made by the body and the twist at walking pace, then take the aids away above walking pace.
+The model kept its id while it gained the knees' rotation in stage 2 (12 joints before, 14 now):
+its recordings name the joints they had (`context.rider_joints`).
+
+**Owner's report** (two photos of the owner riding the Extreme, straight and in a curve, and his
+answers; not in the repository): he rides on the stock pad covers with knee and shin guards.
+Riding straight his knees bend about 30° (25-40°: a low wide-angle camera) with the lower legs
+about 15° forward, the shoe covers the whole deck, and the knee guard rests on the cover's upper
+front corner by the front handle while the calf stays behind the cover's front block. In a curve
+the outside knee presses the shell's front-top corner and the inside knee spreads away from the
+wheel, both deeply bent; he puts more weight on the inside pedal and countersteers at speed. His
+ankle sits about 3-6 cm behind the pedal's centre (the model keeps it over the centre; moving it
+is a change in the pitch plane, planned for a later stage). He rides straight into curbs of about
+15 cm without lifting the wheel, meeting them on soft knees that let the wheel come up under him
+(a knee-absorb response is planned for stages 3-5, with a 15 cm curb as its test).
 
 - **Segments: de Leva (1996), adult men (ESTIMATES for an average man, not anyone's body).**
   Thigh 14.16 %, shank 4.33 % and foot 1.37 % of the mass, the upper body the other 60.28 %; the
@@ -301,39 +315,80 @@ twist at walking pace, then take the aids away above walking pace.
   rider's at `com_above_pedals_m` in the built, straight-legged stance.
 - **Hips at their anatomical width.** The hip joint centres sit 9.0 cm either side of the midline
   at 1.78 m, scaled with the height (Harrington et al. 2007: 0.33 × pelvis width + 7.3 mm, with a
-  250 mm pelvis width; ESTIMATE). The feet stay on the pedal centres, so each leg leans in by about
-  5° from its pedal up to its hip, as a rider's legs stand on a wide wheel. (The other articulated
-  riders' hips sit right above the pedals.)
-- **Six hinges per leg.** Hip flexion, hip ab/adduction (about the front-back axis), hip rotation
-  (about the thigh), knee, ankle pitch and ankle roll (inversion and eversion, about the foot's long
-  axis). Angles are anatomical: in the rest stance the hips are abducted and the ankles inverted by
-  the legs' lean. Adduction, internal rotation and inversion are positive on both legs. The ranges
-  are the AAOS normal ranges: hip flexion 120°, extension 30°, abduction 45°, adduction 30°,
-  rotation 45° each way; knee 0-135°; ankle inversion 35°, eversion 15°. The ankle pitch keeps the
-  articulated rider's −52° to 40°, because a crouch needs more dorsiflexion than the AAOS 20°
-  (weight-bearing dorsiflexion goes well past it).
+  250 mm pelvis width; ESTIMATE). Each foot stands `foot_offset_m` (DEFAULT 1.5 cm; the photos do
+  not show it) outside its pedal's centre, so each leg leans in by about 6° from its pedal up to its
+  hip, as a rider's legs stand on a wide wheel. (The other articulated riders' hips sit right above
+  the pedals.)
+- **Seven hinges per leg.** Hip flexion, hip ab/adduction (about the front-back axis), hip rotation
+  (about the thigh), knee, the tibia's rotation about the shank (stage 2), ankle pitch and ankle
+  roll (inversion and eversion, about the foot's long axis). Angles are anatomical: in the rest
+  stance the hips are abducted and the ankles inverted by the legs' lean. Adduction, internal
+  rotation and inversion are positive on both legs. The ranges are the AAOS normal ranges: hip
+  flexion 120°, extension 30°, abduction 45°, adduction 30°, rotation 45° each way; knee 0-135°;
+  ankle inversion 35°, eversion 15°. The tibia turns out 30° and in 20° (ESTIMATE: about 40° and
+  30° at 90° of knee flexion, less on softly bent knees). The ankle pitch keeps the articulated
+  rider's −52° to 40°, because a crouch needs more dorsiflexion than the AAOS 20° (weight-bearing
+  dorsiflexion goes well past it). With six hinges a leg on its welded foot could not move by
+  itself; the tibia's rotation gives each leg one motion of its own, the knee's swing out and in
+  about the line from hip to ankle, which the legs need to stand round the pads.
 - **Strength (ESTIMATES, per joint).** Hip flexion and extension and the knee 180 N·m, the ankle
   pitch 200 N·m (as the articulated rider). Hip ab/adduction `hip_adduction_max_nm` 150 N·m (about
   1.9 N·m/kg; professional footballers measure 2.6-3.0 N·m/kg eccentric). Hip rotation
-  `hip_rotation_max_nm` 50 N·m (about 0.6 N·m/kg; the rotators are the weakest hip muscles). Ankle
-  roll `ankle_roll_max_nm` 35 N·m (isokinetic, adult men: inversion 37 N·m, eversion 33 N·m).
-- **Soft knees.** At rest the knees bend by `soft_knee_rad` (DEFAULT 0.35 rad, 20°: riding guides
-  say slightly bent, never locked) and the hips by 0.60 of it, so the centre of mass stays over the
-  ankles. Under the rider's weight the knees hold 21.4°, each with about 26 N·m, and the centre of
-  mass sits 1.4 cm lower than the straight-legged sagittal rider's. A crouch bends on from there:
+  `hip_rotation_max_nm` 50 N·m (about 0.6 N·m/kg; the rotators are the weakest hip muscles). The
+  tibia's rotation `knee_rotation_max_nm` 25 N·m. Ankle roll `ankle_roll_max_nm` 35 N·m
+  (isokinetic, adult men: inversion 37 N·m, eversion 33 N·m).
+- **Soft knees.** At rest the knees bend by `soft_knee_rad` (0.52 rad, 30°: the owner's report;
+  riding guides say slightly bent, never locked; stage 1 used 20°) and the hips by 0.60 of it, so
+  the centre of mass stays over the ankles. Under the rider's weight the knees hold 31.7° and the
+  centre of mass sits 3.0 cm lower than the straight-legged sagittal rider's. A crouch bends on
+  from there:
   `set_crouch(0)` is the soft-knee stance and `set_crouch(1.2)` the same full 1.2 rad of knee
   flexion as before. With de Leva's segments the hips need 0.60 of the knee bend (the articulated
   rider's 0.58 left the centre of mass 2.2° ahead in a full crouch); at 0.60 it stays within 0.4° of
   the ankles from the soft knees to a full crouch.
-- **The lateral joints hold the rest stance.** The hips' ab/adduction and rotation hold it with
-  the posture spring. A standing ankle's roll, like its pitch, has no posture spring: the legs' A
-  shape sets it.
+- **The lateral joints hold the settled stance.** Once the model has settled, the hips'
+  ab/adduction and rotation and the tibia's rotation hold what they then held (so their posture
+  springs carry no load at rest), moved by the knee's swing: the hip turns out, the tibia turns in
+  as far, and the hip abducts 0.17 rad per radian of swing (measured on the model). A standing
+  ankle's roll, like its pitch, has no posture spring: the legs' A shape sets it.
+- **The legs on the side pads** (stage 2; a wheel with measured pads). The pads are the cover's
+  measured contact faces (`geometry.toml` `[pad_covers]`), as boxes from the packs' outer face out
+  to each face, the right cover 1.0 mm further out. A leg touches the shell with its knee (a 5 cm
+  ball at the joint), its shin with the guard (a 3.5 cm capsule on the front of the upper shank)
+  and its calf (a 5 cm capsule behind the shin bone over the middle of the shank); all ESTIMATES
+  for an adult man with guards. The knee and the shin reach the pads on their side and the front
+  and top solids; the calf reaches the pads but not the cover's front block (a face that starts
+  more than 5 cm ahead of the pedal's centre), behind which the owner's calf stays. Without that
+  rule the calf met the block's rear face as the rider leaned to accelerate, and the wheel took
+  10 s to reach 1.9 m/s instead of 4.2. Contact: friction `pad_friction` 0.3 (hard guards and
+  trousers on plastic), softness `pad_contact_time_s` 0.03 s, soft at first touch and firm 2 cm
+  in (DEFAULTS). The pairs are off while the model settles: the knees bend to the stance and swing
+  out until both legs stand 2 mm clear of the shell, or swing as far as they go (0.45 rad, the
+  tibia's range) and press in less than 1 cm. Then the pairs come on, and a slow stance loop swings
+  each knee out when its leg presses harder than `pad_preload_n` (DEFAULT 20 N) and in when it
+  presses less. At rest each calf rests on its pad's upper arm with 20 N, the knees swung out
+  0.05-0.06 rad. The pads' depth is INFERRED to ±20 % (about ±1 cm), and the rest stance carries
+  that uncertainty. `Physics::leg_pads()` reports
+  each leg's load, its gap to the shell and its swing. The pairs go off when the rider leaves.
+- **What stage 2 measured** (test balance law, the Extreme's profile with its suspension). Riding
+  straight the pads do not hold the rider back: 4.226 m/s after 10 s towards 15 km/h (sagittal
+  4.234 m/s), the legs' load at most 56 N. In a 0.4 rad/s turn at 15 km/h the inside leg takes
+  280 N for a moment as the wheel rolls in, then both legs carry about 21 N; the aids did 33.8 J
+  of roll work and −2.8 J of yaw work in the 4 s (without pads: 32.9 J and −2.8 J). A full manual
+  turn at 5 m/s (35° at 60°/s) is beyond stage 2: as the external aid rolls the wheel in, the
+  inside pad pushes the inside leg with up to 1.7 kN, and the rider can come off. Stage 3 makes the
+  turn with the legs (the inside leg spreads, the body leans in, the outside knee presses), and Free
+  Ride stays on the sagittal rider until stage 4. On the stock firmware `ride-20kmh-stop` passes at
+  2.14 times real time (sagittal 2.57 in the same session) and `world-ramp-up-7kmh` at 1.85 (1.93).
 - **Honest welded soles.** Both feet are welded to the pedals. A real sole rolls its pedal only as
   hard as its centre of pressure can move to the edge of the foot, so each ankle's roll motor is held
   to the sole's load times half its width (4.5 cm), within its strength. The load is the weld's
-  constraint force along the deck's normal, averaged over 20 ms: the welded feet ring at about
-  140 Hz, and each weld's load swings by about ±250 N (sagittal rider) and ±40 N (lateral rider)
-  about half the rider's weight in steady riding. `Physics::sole_loads()` reports each sole's load
+  constraint force along the deck's normal, averaged over 20 ms. The tire's ring of 48 capsules
+  ripples the wheel at 48 times its turn rate (144 Hz at 15 km/h): on the suspension-less test
+  wheel each weld's load swings by up to ±250 N (sagittal rider) and ±40 N (lateral rider) about
+  half the rider's weight, on the Extreme's profile with its suspension by about ±17 N. (Stage 1
+  took the swing for a ringing of the welds; the tire's ripple explains it, and it vanishes on an
+  ellipsoid tire.) `Physics::sole_loads()` reports each sole's load
   (negative: the foot pulls its pedal, which only a weld can), its ankle roll moment and the limit
   it was held to; `Physics::sole_pulls()` says whether a foot pulls. Riding at 15 km/h the soles
   carry the rider's weight within 1 % and no foot pulls.
@@ -345,12 +400,12 @@ twist at walking pace, then take the aids away above walking pace.
   roll and roll rate, and the yaw aid's gains (2000 N·m/rad, 200 N·m·s/rad, at most 60 N·m) hold it
   at the shell's heading and turn rate. Both are external torques on the upper body; their torque
   and work add to the reported aids, and recordings carry them. In a 0.4 rad/s turn at 15 km/h
-  the lateral joints then carry under 3 N·m.
-- **It rides as the sagittal rider.** On the test balance law it reaches 4.22 m/s in 10 s towards
-  15 km/h and stops in 11.46 m (sagittal: 4.22 m/s, 11.45 m); a full manual turn at 5 m/s settles
-  at 34° of lean and 1.12 rad/s (sagittal: 34°, 1.13 rad/s); it rides 30 km/h straight with no
-  roll. On the stock firmware `ride-20kmh-stop` passes at 2.45 times real time (sagittal 2.51 in
-  the same session).
+  the lateral joints then carry under 3 N·m (stage 1).
+- **It rides as the sagittal rider.** On the test balance law, without pads, it reaches 4.22 m/s in
+  10 s towards 15 km/h and stops in 11.50 m (sagittal: 4.22 m/s, 11.45 m); a full manual turn at
+  5 m/s settles at 34° of lean and 1.12 rad/s (sagittal: 34°, 1.13 rad/s); it rides 30 km/h
+  straight with no roll. Stage 1 passed `ride-20kmh-stop` on the stock firmware at 2.45 times real
+  time (sagittal 2.51 in the same session).
 
 ## Aids (M2)
 
@@ -372,7 +427,9 @@ twist at walking pace, then take the aids away above walking pace.
   stiffness and damping, the yaw aid's gains and cap, for `articulated_contact_v1` and
   `articulated_lateral_v1` `upper_body_roll_stiffness` and `upper_body_roll_damping`, and for
   `articulated_lateral_v1` `upper_body_steer_kp`, `upper_body_steer_kd` and
-  `upper_body_steer_max_nm` (each absent for the models without it).
+  `upper_body_steer_max_nm` (each absent for the models without it). For `articulated_lateral_v1`
+  the context also names the rider's leg joints (`rider_joints`), because the model gained a joint
+  under the same id.
 - **Air drag** acts on the rider's centre of mass: `F = ½·ρ·CdA·v·|v|`, ρ = 1.2 kg/m³,
   CdA = 0.6 m² (sim.py's value, an upright adult).
 
@@ -420,8 +477,10 @@ Rider and aids (scenario `[rider]`, `[rider.control]`, `[assist]`; these are the
 | `height_m` | 1.78 m | drawing; the articulated segment lengths scale with it |
 | `articulation.joint_kp`, `joint_kd`, `joint_max_nm` | 1000 N·m/rad, 60 N·m·s/rad, 180 N·m | ESTIMATE: hip and knee posture (and a lifted foot's ankle), per joint |
 | `articulation.sole_friction`, `sole_contact_time_s` | 1.0, 0.005 s | DEFAULT: rubber on grip pins; shoe and pedal give (`articulated_contact_v1`) |
-| `articulation.soft_knee_rad` | 0.35 rad | DEFAULT: the knees' bend at rest, 20° (`articulated_lateral_v1`) |
-| `articulation.hip_adduction_max_nm`, `hip_rotation_max_nm`, `ankle_roll_max_nm` | 150, 50, 35 N·m | ESTIMATE: per joint, from published strength of adults (`articulated_lateral_v1`; see the lateral rider) |
+| `articulation.soft_knee_rad` | 0.52 rad | the owner's report: the knees' bend at rest, 30° (`articulated_lateral_v1`) |
+| `articulation.foot_offset_m` | 0.015 m | DEFAULT: each foot this far outside its pedal's centre (`articulated_lateral_v1`) |
+| `articulation.hip_adduction_max_nm`, `hip_rotation_max_nm`, `knee_rotation_max_nm`, `ankle_roll_max_nm` | 150, 50, 25, 35 N·m | ESTIMATE: per joint, from published strength of adults (`articulated_lateral_v1`; see the lateral rider) |
+| `articulation.pad_friction`, `pad_contact_time_s`, `pad_preload_n` | 0.3, 0.03 s, 20 N | DEFAULT: a leg on a side pad, and how hard it rests there (`articulated_lateral_v1` on a wheel with measured pads) |
 | `cda_m2` | 0.6 m² | air drag |
 | `control.lean_kp`, `lean_kd` | 6000 N·m/rad, 900 N·m·s/rad | about 1.3 Hz, damping 0.6 about the ankles |
 | `control.ankle_max_nm` | 400 N·m | both legs |

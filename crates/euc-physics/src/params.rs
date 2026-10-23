@@ -36,6 +36,9 @@ pub struct Shapes {
     pub tire: Option<Torus>,
     /// Solids of the shell (packs, seat, handle, brackets, pedals), by name.
     pub solids: Vec<Solid>,
+    /// The side pad covers where a leg can rest, as boxes from the packs' outer faces out to
+    /// each face (`pad_<face>_<side>`). Only the lateral rider's legs touch them.
+    pub pads: Vec<Solid>,
 }
 
 /// A torus around the y axis.
@@ -372,14 +375,28 @@ pub struct Articulation {
     /// Knee flexion of the riding stance, radians: a rider rides on soft knees, never locked.
     /// The rest posture of [`RiderModel::ArticulatedLateralV1`]; a crouch bends on from it.
     pub soft_knee_rad: f64,
+    /// How far each foot stands out from its pedal's centre, metres
+    /// ([`RiderModel::ArticulatedLateralV1`]).
+    pub foot_offset_m: f64,
     /// Hip abduction and adduction torque cap, N·m, per hip ([`RiderModel::ArticulatedLateralV1`]).
     pub hip_adduction_max_nm: f64,
     /// Hip rotation torque cap, N·m, per hip ([`RiderModel::ArticulatedLateralV1`]).
     pub hip_rotation_max_nm: f64,
+    /// Tibial rotation torque cap, N·m, per knee ([`RiderModel::ArticulatedLateralV1`]).
+    pub knee_rotation_max_nm: f64,
     /// Ankle inversion and eversion torque cap, N·m, per ankle
     /// ([`RiderModel::ArticulatedLateralV1`]). A welded sole carries at most its load times half
     /// its width on top of that.
     pub ankle_roll_max_nm: f64,
+    /// Friction between a leg and a side pad (trousers on the cover), sliding coefficient
+    /// ([`RiderModel::ArticulatedLateralV1`]).
+    pub pad_friction: f64,
+    /// Contact time constant of a leg on a pad, seconds (MuJoCo `solref`): how much the calf
+    /// gives ([`RiderModel::ArticulatedLateralV1`]).
+    pub pad_contact_time_s: f64,
+    /// How hard each leg rests on its pad when riding straight, newtons
+    /// ([`RiderModel::ArticulatedLateralV1`]).
+    pub pad_preload_n: f64,
 }
 
 impl Default for Articulation {
@@ -390,11 +407,58 @@ impl Default for Articulation {
             joint_max_nm: 180.0,
             sole_friction: 1.0,
             sole_contact_time_s: 0.005,
-            soft_knee_rad: 0.35,
+            soft_knee_rad: 0.52,
+            foot_offset_m: 0.015,
             hip_adduction_max_nm: 150.0,
             hip_rotation_max_nm: 50.0,
+            knee_rotation_max_nm: 25.0,
             ankle_roll_max_nm: 35.0,
+            pad_friction: 0.3,
+            pad_contact_time_s: 0.03,
+            pad_preload_n: 20.0,
         }
+    }
+}
+
+impl Articulation {
+    /// Checks every articulation parameter before model construction.
+    pub fn validate(&self) -> Result<(), ParamError> {
+        for (name, value) in [
+            ("joint_kp", self.joint_kp),
+            ("joint_kd", self.joint_kd),
+            ("joint_max_nm", self.joint_max_nm),
+            ("sole_friction", self.sole_friction),
+            ("hip_adduction_max_nm", self.hip_adduction_max_nm),
+            ("hip_rotation_max_nm", self.hip_rotation_max_nm),
+            ("knee_rotation_max_nm", self.knee_rotation_max_nm),
+            ("ankle_roll_max_nm", self.ankle_roll_max_nm),
+            ("pad_friction", self.pad_friction),
+            ("pad_preload_n", self.pad_preload_n),
+        ] {
+            if !value.is_finite() || value <= 0.0 {
+                return Err(ParamError(format!("rideself.{name} must be finite and positive")));
+            }
+        }
+        let offset = self.foot_offset_m;
+        if !offset.is_finite() || offset.abs() > MAX_FOOT_OFFSET_M {
+            return Err(ParamError(format!("rideself.foot_offset_m must be finite and within ±{MAX_FOOT_OFFSET_M} m")));
+        }
+        let soft_knee = self.soft_knee_rad;
+        if !soft_knee.is_finite() || !(0.0..=crate::CROUCH_MAX_RAD).contains(&soft_knee) {
+            return Err(ParamError(format!(
+                "rideself.soft_knee_rad must be finite and in [0, {}]",
+                crate::CROUCH_MAX_RAD
+            )));
+        }
+        // MuJoCo needs at least two steps per contact time constant to stay stable.
+        for (name, time) in
+            [("sole_contact_time_s", self.sole_contact_time_s), ("pad_contact_time_s", self.pad_contact_time_s)]
+        {
+            if !time.is_finite() || time < 2.0 * crate::TIMESTEP_S {
+                return Err(ParamError(format!("rideself.{name} must be at least {} s", 2.0 * crate::TIMESTEP_S)));
+            }
+        }
+        Ok(())
     }
 }
 
@@ -742,34 +806,7 @@ impl Setup {
         if r.let_go.after_cut_deg > r.let_go.fall_deg || r.let_go.fall_deg > 90.0 {
             return Err(ParamError("rider.let_go thresholds must satisfy 0 < after_cut_deg <= fall_deg <= 90".into()));
         }
-        for (name, value) in [
-            ("joint_kp", r.articulation.joint_kp),
-            ("joint_kd", r.articulation.joint_kd),
-            ("joint_max_nm", r.articulation.joint_max_nm),
-            ("sole_friction", r.articulation.sole_friction),
-            ("hip_adduction_max_nm", r.articulation.hip_adduction_max_nm),
-            ("hip_rotation_max_nm", r.articulation.hip_rotation_max_nm),
-            ("ankle_roll_max_nm", r.articulation.ankle_roll_max_nm),
-        ] {
-            if !value.is_finite() || value <= 0.0 {
-                return Err(ParamError(format!("rider.articulation.{name} must be finite and positive")));
-            }
-        }
-        let soft_knee = r.articulation.soft_knee_rad;
-        if !soft_knee.is_finite() || !(0.0..=crate::CROUCH_MAX_RAD).contains(&soft_knee) {
-            return Err(ParamError(format!(
-                "rider.articulation.soft_knee_rad must be finite and in [0, {}]",
-                crate::CROUCH_MAX_RAD
-            )));
-        }
-        // MuJoCo needs at least two steps per contact time constant to stay stable.
-        let sole_time = r.articulation.sole_contact_time_s;
-        if !sole_time.is_finite() || sole_time < 2.0 * crate::TIMESTEP_S {
-            return Err(ParamError(format!(
-                "rider.articulation.sole_contact_time_s must be at least {} s",
-                2.0 * crate::TIMESTEP_S
-            )));
-        }
+        r.articulation.validate()?;
         r.control.validate()?;
         if let Some(s) = &w.suspension {
             s.validate()?;
@@ -784,6 +821,10 @@ impl Setup {
         Ok(())
     }
 }
+
+/// How far a lateral rider's foot may stand from its pedal's centre, metres: about half a pedal
+/// deck's width less half a foot's.
+const MAX_FOOT_OFFSET_M: f64 = 0.04;
 
 /// A parameter out of its range.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]

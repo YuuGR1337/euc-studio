@@ -47,6 +47,11 @@ pub const TIMESTEP_S: f64 = 0.0005;
 /// The default rider model's id ([`RiderModel::default`]).
 pub const RIDER_MODEL: &str = "articulated_sagittal_v1";
 
+/// The leg joints of `model` in [`Physics::rider_joints`] order (none for the rigid rider).
+pub fn leg_joint_names(model: RiderModel) -> Vec<&'static str> {
+    mjcf::leg_joints(model).iter().map(|(name, _, _)| *name).collect()
+}
+
 /// Pitch or roll beyond which the wheel counts as fallen, radians (45°).
 const FALLEN_RAD: f64 = std::f64::consts::FRAC_PI_4;
 
@@ -82,6 +87,38 @@ const CROUCH_RATE_RAD_S: f64 = 3.0;
 /// The deepest crouch, radians of knee flexion.
 pub(crate) const CROUCH_MAX_RAD: f64 = 1.2;
 
+/// How far a lateral knee swings out at most, radians of the hip's external rotation: about as
+/// far as the tibia's internal rotation lets the knee go with the foot on its pedal.
+const SWING_MAX_RAD: f64 = 0.45;
+
+/// How long a knee that cannot swing further waits for its leg to follow before the contact pairs
+/// come on, seconds.
+const STANCE_SWING_WAIT_S: f64 = 0.2;
+
+/// The most a lateral leg may press into the shell when its contact pairs come on, metres: the
+/// contact then pushes it back out (the pads' depth is uncertain by about ±1 cm).
+const STANCE_PENETRATION_MAX_M: f64 = 0.01;
+
+/// How far a lateral hip abducts per radian of knee swing, radians: measured on the model with
+/// the knees bent 21° to 30° (0.15 to 0.18).
+const ADDUCTION_PER_SWING: f64 = 0.17;
+
+/// How fast a lateral knee swings out or in, radians per second.
+const SWING_RATE_RAD_S: f64 = 2.0;
+
+/// How fast the stance swings a knee per newton of pad load off the preload, radians per second
+/// per newton: 100 N too much moves it out at 0.2 rad/s.
+const SWING_PER_N: f64 = 0.01;
+
+/// How far clear of the shell the lateral legs stand before their contact pairs come on, metres.
+const STANCE_CLEARANCE_M: f64 = 0.002;
+
+/// Longest extra settle for the lateral legs to stand clear of the pads, seconds.
+const STANCE_SETTLE_MAX_S: f64 = 1.0;
+
+/// Settle after the pads come on, for the legs to come to rest on them, seconds.
+const STANCE_REST_S: f64 = 0.5;
+
 /// The hips' share of a crouch's knee flexion. The upper body keeps the lean the controller
 /// holds; at 0.58 the hips go back about as far as the knees go forward, so the centre of mass
 /// stays within 1° of the ankles at any depth (at 1/2 a full crouch put it 7.8° ahead, and the
@@ -91,14 +128,18 @@ const CROUCH_HIP_SHARE: f64 = 0.58;
 /// The same share for the lateral rider's segments (de Leva's, longer shanks than thighs).
 const LATERAL_CROUCH_HIP_SHARE: f64 = 0.60;
 
+/// How far [`Physics::leg_pads`] looks for a pad from a leg, metres; a leg further away reports
+/// this gap.
+const LEG_PAD_GAP_MAX_M: f64 = 0.2;
+
 /// A sole pulling on its pedal harder than this, newtons, is counted as a pull: a welded foot can
 /// pull, a real one cannot.
 const SOLE_PULL_N: f64 = 5.0;
 
-/// Time constant over which a welded sole's load is averaged, seconds. The welds ring at about
-/// 140 Hz (the welded feet's vertical mode on the 2 ms weld): in steady riding the welded legs'
-/// load swings by ±250 N (sagittal) and ±40 N (lateral) about the rider's weight every few
-/// milliseconds; 20 ms takes the ringing out and keeps a step's or a bump's load.
+/// Time constant over which a welded sole's load is averaged, seconds. The tire's ring of 48
+/// capsules ripples the wheel at 48 times its turn rate (144 Hz at 15 km/h): on a wheel without
+/// suspension each weld's load then swings by up to ±250 N about its mean (±17 N on the Extreme's
+/// profile with its suspension). 20 ms takes the ripple out and keeps a step's or a bump's load.
 const SOLE_LOAD_TIME_S: f64 = 0.02;
 
 /// How the rider left the pedals.
@@ -251,7 +292,7 @@ pub struct SoleLoad {
     /// `left` or `right`.
     pub name: &'static str,
     /// How hard the pedal pushes the sole along the deck's normal, newtons, averaged over the
-    /// last 20 ms (the weld rings). Negative: the foot pulls the pedal, which only the weld can
+    /// last 20 ms (the tire's ripple). Negative: the foot pulls the pedal, which only the weld can
     /// do.
     pub normal_n: f64,
     /// The ankle's roll moment on the foot, N·m, inversion positive (zero without ankle roll).
@@ -265,8 +306,41 @@ pub struct SoleLoad {
 const HUMAN_BODIES: [&str; 7] =
     ["rider", "left_thigh", "left_shank", "left_foot", "right_thigh", "right_shank", "right_foot"];
 
-/// The most leg joints a model has (the lateral rider's 12).
-const MAX_LEG_JOINTS: usize = 12;
+/// The most leg joints a model has (the lateral rider's 14).
+const MAX_LEG_JOINTS: usize = 14;
+
+/// The most leg-on-shell contact pairs a model has (knee, shin and calf on up to 10 shell parts a
+/// side).
+const MAX_PAD_PAIRS: usize = 64;
+
+/// One lateral leg part (knee, shin or calf) on one shell part (a side pad, the front or the top
+/// solid): the contact pair and its two geoms.
+#[derive(Debug, Clone, Copy, Default)]
+struct PadPair {
+    pair: usize,
+    /// 0 left, 1 right.
+    leg: usize,
+    /// The leg part's geom.
+    part: usize,
+    /// The shell part's geom.
+    pad: usize,
+}
+
+/// One lateral leg against the shell (its side's pads, the front and top solids), as of the last
+/// step.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LegPad {
+    /// `left` or `right`.
+    pub name: &'static str,
+    /// How hard the shell pushes the knee, shin and calf, newtons (the normal forces summed).
+    pub force_n: f64,
+    /// The smallest distance from the knee, shin or calf to the shell, metres; negative: pressed
+    /// in.
+    pub gap_m: f64,
+    /// How far the knee swings out about the line from hip to ankle, radians (the hip's external
+    /// rotation that the stance holds).
+    pub swing_rad: f64,
+}
 
 #[derive(Debug, Clone, Copy)]
 struct LegJoint {
@@ -290,6 +364,10 @@ struct ArticulatedIds {
     welds: Option<[usize; 2]>,
     /// The sole-on-pedal contact pairs (`articulated_contact_v1`), left then right.
     pairs: Option<[usize; 2]>,
+    /// The leg-on-pad contact pairs (`articulated_lateral_v1` on a wheel with measured pads);
+    /// the first `pad_pair_count` are real.
+    pad_pairs: [PadPair; MAX_PAD_PAIRS],
+    pad_pair_count: usize,
     /// The sole geoms, left then right.
     soles: [usize; 2],
     /// The pedal geoms on the shell, left then right.
@@ -299,11 +377,28 @@ struct ArticulatedIds {
 }
 
 impl ArticulatedIds {
-    fn resolve(model: &MjModel, rider: RiderModel) -> Result<Self, PhysicsError> {
+    fn resolve(model: &MjModel, setup: &Setup) -> Result<Self, PhysicsError> {
         let id = |kind, name: &str| {
             model.name_to_id(kind, name).ok_or_else(|| PhysicsError::Model(format!("no {name} in the model")))
         };
+        let rider = setup.rider.model;
         let contact = rider.has_contact_feet();
+        let mut pad_pairs = [PadPair::default(); MAX_PAD_PAIRS];
+        let mut pad_pair_count = 0;
+        for (leg, side) in ["left", "right"].into_iter().enumerate() {
+            for (part, target) in mjcf::leg_pairs(setup, leg) {
+                let slot = pad_pairs
+                    .get_mut(pad_pair_count)
+                    .ok_or_else(|| PhysicsError::Model(format!("more than {MAX_PAD_PAIRS} leg-on-shell pairs")))?;
+                *slot = PadPair {
+                    pair: id(MjtObj::mjOBJ_PAIR, &format!("{side}_{part}{}{target}", mjcf::PAD_PAIR_INFIX))?,
+                    leg,
+                    part: id(MjtObj::mjOBJ_GEOM, &format!("{side}_{part}"))?,
+                    pad: id(MjtObj::mjOBJ_GEOM, target)?,
+                };
+                pad_pair_count += 1;
+            }
+        }
         let unused = LegJoint { name: "", kind: JointKind::Hip, leg: 0, qpos: 0, dof: 0, motor: 0, rest: 0.0 };
         let mut joints = [unused; MAX_LEG_JOINTS];
         let leg_joints = mjcf::leg_joints(rider);
@@ -333,6 +428,8 @@ impl ArticulatedIds {
             joint_count: leg_joints.len(),
             welds,
             pairs,
+            pad_pairs,
+            pad_pair_count,
             soles: sides(MjtObj::mjOBJ_GEOM, &|side| format!("{side}_sole"))?,
             pedals: sides(MjtObj::mjOBJ_GEOM, &|side| format!("pedal_{side}"))?,
             feet: sides(MjtObj::mjOBJ_BODY, &|side| format!("{side}_foot"))?,
@@ -342,6 +439,11 @@ impl ArticulatedIds {
     /// The model's leg joints.
     fn joints(&self) -> &[LegJoint] {
         &self.joints[..self.joint_count]
+    }
+
+    /// The model's leg-on-pad contact pairs.
+    fn pad_pairs(&self) -> &[PadPair] {
+        &self.pad_pairs[..self.pad_pair_count]
     }
 }
 
@@ -429,6 +531,25 @@ struct Attitude {
     speed: f64,
 }
 
+/// The lateral legs' stance against the shell (`Physics::stance`).
+#[derive(Debug, Clone, Copy, Default)]
+struct Stance {
+    /// How far each knee swings out about the line from hip to ankle, radians (left, right): the
+    /// hip's external rotation the stance holds.
+    swing_rad: [f64; 2],
+    /// The legs' contact pairs with the shell are on.
+    pads_on: bool,
+    /// The model has settled: the pairs stay as they are (on, or off when the legs could not stand
+    /// clear of the shell).
+    done: bool,
+    /// How long a knee has swung as far as it goes while the pairs are off, seconds.
+    wait_s: f64,
+    /// What the lateral joints held once the model settled, less what the swing then asked of
+    /// them, radians (in `ArticulatedIds::joints` order): their posture holds the settled stance,
+    /// so the springs carry no load at rest.
+    offset_rad: [f64; MAX_LEG_JOINTS],
+}
+
 /// The mechanical model and its state.
 pub struct Physics {
     data: MjData<Box<MjModel>>,
@@ -449,6 +570,8 @@ pub struct Physics {
     sole_normal_n: [f64; 2],
     /// The roll moment each lateral ankle was held to in the last step, N·m (left, right).
     sole_roll_limit_nm: [f64; 2],
+    /// The lateral legs' stance against the shell.
+    stance: Stance,
     /// Requested lift of each articulated foot, radians of hip flexion (left, right).
     foot_lift_target_rad: [f64; 2],
     /// The lift the legs are moving to now: the request at [`FOOT_LIFT_RATE_RAD_S`].
@@ -517,7 +640,7 @@ impl Physics {
             }
             None => None,
         };
-        let articulated_ids = articulated.then(|| ArticulatedIds::resolve(&model, setup.rider.model)).transpose()?;
+        let articulated_ids = articulated.then(|| ArticulatedIds::resolve(&model, &setup)).transpose()?;
         let mut body_ids = vec![(wheel, BodyRole::Wheel, names::WHEEL), (shell, BodyRole::Shell, names::SHELL)];
         if articulated {
             for name in HUMAN_BODIES {
@@ -566,6 +689,7 @@ impl Physics {
             stance_rad: 0.0,
             sole_normal_n: [half_weight; 2],
             sole_roll_limit_nm: [0.0; 2],
+            stance: Stance::default(),
             foot_lift_target_rad: [0.0; 2],
             foot_lift_rad: [0.0; 2],
             feet_off_since: None,
@@ -596,6 +720,28 @@ impl Physics {
     fn settle(&mut self) {
         for _ in 0..(SETTLE_S / TIMESTEP_S).round() as usize {
             self.step(0.0);
+        }
+        // A lateral rider on a wheel with pads stands until the legs are clear of the pads and
+        // the pairs are on, then until the legs rest on the pads.
+        let pads = self.ids.articulated.is_some_and(|legs| legs.pad_pair_count > 0);
+        let mut more = (STANCE_SETTLE_MAX_S / TIMESTEP_S).round() as usize;
+        while pads && !self.stance.pads_on && more > 0 {
+            self.step(0.0);
+            more -= 1;
+        }
+        if pads {
+            self.stance.done = true;
+            for _ in 0..(STANCE_REST_S / TIMESTEP_S).round() as usize {
+                self.step(0.0);
+            }
+        }
+        if let Some(legs) = self.ids.articulated.filter(|_| self.setup.rider.model.has_lateral_legs()) {
+            for (index, joint) in legs.joints().iter().enumerate() {
+                if joint.kind.lateral() {
+                    self.stance.offset_rad[index] = self.data.qpos()[joint.qpos] - self.posture_target(index, joint);
+                }
+            }
+            self.stance.done = true;
         }
         self.data.set_time(0.0);
         self.distance_m = 0.0;
@@ -853,9 +999,8 @@ impl Physics {
                 for weld in legs.welds.into_iter().flatten() {
                     self.data.eq_active_mut()[weld] = false;
                 }
-                if let Some(pairs) = legs.pairs {
-                    self.release_soles(pairs);
-                }
+                let pads = legs.pad_pairs().iter().map(|pad| pad.pair);
+                self.release_pairs(legs.pairs.into_iter().flatten().chain(pads));
                 for joint in legs.joints() {
                     self.data.ctrl_mut()[joint.motor] = 0.0;
                 }
@@ -870,12 +1015,16 @@ impl Physics {
         }
     }
 
-    /// The rider has left: the soles stop meeting the pedals, so the feet pass the decks as the
-    /// welded feet do once released. MuJoCo generates a pair's contacts only within its margin
-    /// (its `gap` does not apply to explicit pairs in 3.9); the same model with both pairs'
-    /// margins far below any penetration goes in. Sizes and state are unchanged, so the swap
-    /// keeps every coordinate and velocity.
-    fn release_soles(&mut self, pairs: [usize; 2]) {
+    /// The rider has left: the soles stop meeting the pedals and the legs the pads, so the feet
+    /// pass the decks as the welded feet do once released. MuJoCo generates a pair's contacts
+    /// only within its margin (its `gap` does not apply to explicit pairs in 3.9); the same model
+    /// with the pairs' margins far below any penetration goes in. Sizes and state are unchanged,
+    /// so the swap keeps every coordinate and velocity.
+    fn release_pairs(&mut self, pairs: impl Iterator<Item = usize>) {
+        let mut pairs = pairs.peekable();
+        if pairs.peek().is_none() {
+            return;
+        }
         let mut released = Box::new(MjModel::clone(self.data.model()));
         for pair in pairs {
             released.pair_margin_mut()[pair] = RELEASED_MARGIN_M;
@@ -998,6 +1147,9 @@ impl Physics {
         let roll_torque = kick + self.roll_aid_torque;
         let [hx, hy] = att.heading;
         if let Some(legs) = ids.articulated {
+            if legs.pad_pair_count > 0 && !rider_off {
+                self.stance(&legs);
+            }
             self.drive_legs(&legs, rider_off);
         } else {
             self.data.ctrl_mut()[ids.ankle] = self.ankle_torque;
@@ -1075,7 +1227,7 @@ impl Physics {
         self.crouch_rad += (self.crouch_target_rad - self.crouch_rad).clamp(-crouch_step, crouch_step);
         self.stance_rad += (self.soft_knee_rad() - self.stance_rad).clamp(-crouch_step, crouch_step);
         let lifted = self.foot_lift_rad.map(|lift| lift > 0.0);
-        for joint in legs.joints() {
+        for (index, joint) in legs.joints().iter().enumerate() {
             let leg = joint.leg;
             let ankle = matches!(joint.kind, JointKind::Ankle | JointKind::AnkleRoll);
             // A rider leans from the ankles with the body straight, as the rigid rider does:
@@ -1085,7 +1237,7 @@ impl Physics {
             // a third as far as the upper body, and the centre of mass leaned (and the wheel
             // accelerated) about half as much as asked. A lifted foot keeps its spring.
             let stiffness = if ankle && !lifted[leg] { 0.0 } else { config.joint_kp };
-            let target = self.posture_target(joint);
+            let target = self.posture_target(index, joint);
             let posture =
                 stiffness * (target - self.data.qpos()[joint.qpos]) - config.joint_kd * self.data.qvel()[joint.dof];
             let mut limit = joint.kind.cap(&self.setup.rider);
@@ -1116,6 +1268,72 @@ impl Physics {
             .filter(|j| j.kind == JointKind::Ankle)
             .map(|j| self.data.ctrl()[j.motor])
             .sum::<f64>();
+    }
+
+    /// The lateral rider's stance against the shell, once a step. While the model settles and
+    /// the legs' contact pairs are off, each knee swings out until its leg stands clear of the
+    /// shell or the knee has swung as far as it goes; the pairs come on once the knees have bent
+    /// to the riding stance and both legs are clear, or have swung out for
+    /// [`STANCE_SWING_WAIT_S`] and press into the shell by less than
+    /// [`STANCE_PENETRATION_MAX_M`]. Then each knee swings slowly so that its leg rests on the
+    /// shell with the preload: out when the shell pushes harder, in when it pushes less.
+    fn stance(&mut self, legs: &ArticulatedIds) {
+        let most = SWING_RATE_RAD_S * TIMESTEP_S;
+        if self.stance.done && !self.stance.pads_on {
+            return;
+        }
+        if self.stance.pads_on {
+            let preload = self.setup.rider.articulation.pad_preload_n;
+            let force = self.leg_shell_forces(legs);
+            for (swing, force) in self.stance.swing_rad.iter_mut().zip(force) {
+                let change = (SWING_PER_N * (force - preload) * TIMESTEP_S).clamp(-most, most);
+                *swing = (*swing + change).clamp(0.0, SWING_MAX_RAD);
+            }
+            return;
+        }
+        let mut gap = [f64::INFINITY; 2];
+        for pad in legs.pad_pairs() {
+            let distance = self.data.geom_distance(pad.part, pad.pad, LEG_PAD_GAP_MAX_M, None);
+            gap[pad.leg] = gap[pad.leg].min(distance);
+        }
+        let clear = gap.map(|gap| gap >= STANCE_CLEARANCE_M);
+        for (swing, clear) in self.stance.swing_rad.iter_mut().zip(clear) {
+            if !clear {
+                *swing = (*swing + most).min(SWING_MAX_RAD);
+            }
+        }
+        let full = self.stance.swing_rad.map(|swing| swing >= SWING_MAX_RAD);
+        self.stance.wait_s = if full.contains(&true) { self.stance.wait_s + TIMESTEP_S } else { 0.0 };
+        let waited = self.stance.wait_s >= STANCE_SWING_WAIT_S;
+        let ready = (0..2).all(|leg| clear[leg] || (waited && gap[leg] >= -STANCE_PENETRATION_MAX_M));
+        if ready && self.stance_rad >= self.soft_knee_rad() {
+            let mut engaged = Box::new(MjModel::clone(self.data.model()));
+            for pad in legs.pad_pairs() {
+                engaged.pair_margin_mut()[pad.pair] = 0.0;
+            }
+            self.data.swap_model(engaged);
+            self.stance.pads_on = true;
+        }
+    }
+
+    /// How hard the shell pushes each lateral leg, newtons (left, right): the normal forces of the
+    /// leg-on-shell contacts of the last step.
+    fn leg_shell_forces(&self, legs: &ArticulatedIds) -> [f64; 2] {
+        let mut force = [0.0; 2];
+        for (index, contact) in self.data.contact().iter().enumerate() {
+            if contact.exclude != 0 {
+                continue;
+            }
+            let geoms = [contact.geom[0] as usize, contact.geom[1] as usize];
+            if let Some(pad) = legs.pad_pairs().iter().find(|p| geoms == [p.part, p.pad] || geoms == [p.pad, p.part]) {
+                // A degenerate contact can come back without a finite force; it carries none.
+                let normal = self.data.contact_force(index)[0].abs();
+                if normal.is_finite() {
+                    force[pad.leg] += normal;
+                }
+            }
+        }
+        force
     }
 
     /// The articulated rider's stepping foot pushes off: the right foot presses its pedal straight
@@ -1283,16 +1501,22 @@ impl Physics {
     /// lift, from the rest stance the model was built in. A standing ankle holds no posture (see
     /// `step`); its target is what it would hold with the body upright and the foot level. The
     /// lateral joints hold the rest stance.
-    fn posture_target(&self, joint: &LegJoint) -> f64 {
+    fn posture_target(&self, index: usize, joint: &LegJoint) -> f64 {
         let lift = self.foot_lift_rad[joint.leg];
         let knee = self.knee_bend_rad();
+        let swing = self.stance.swing_rad[joint.leg];
         let share = if self.setup.rider.model.has_lateral_legs() { LATERAL_CROUCH_HIP_SHARE } else { CROUCH_HIP_SHARE };
         joint.rest
+            + self.stance.offset_rad[index]
             + match joint.kind {
                 JointKind::Hip => -knee * share - lift,
                 JointKind::Knee => knee + 2.0 * lift,
                 JointKind::Ankle => -knee / 2.0 - lift,
-                JointKind::HipAdduction | JointKind::HipRotation | JointKind::AnkleRoll => 0.0,
+                // The knee swings out: the hip turns out, the tibia in, and the hip abducts a little.
+                JointKind::HipRotation => -swing,
+                JointKind::KneeRotation => swing,
+                JointKind::HipAdduction => -ADDUCTION_PER_SWING * swing,
+                JointKind::AnkleRoll => 0.0,
             }
     }
 
@@ -1355,9 +1579,10 @@ impl Physics {
         self.ids.articulated.map_or_else(Vec::new, |legs| {
             legs.joints()
                 .iter()
-                .map(|joint| RiderJointState {
+                .enumerate()
+                .map(|(index, joint)| RiderJointState {
                     name: joint.name,
-                    posture_target_rad: self.posture_target(joint),
+                    posture_target_rad: self.posture_target(index, joint),
                     angle_rad: self.data.qpos()[joint.qpos],
                     rate_rad_s: self.data.qvel()[joint.dof],
                     torque_nm: self.data.ctrl()[joint.motor],
@@ -1380,6 +1605,28 @@ impl Physics {
                 .find(|j| j.leg == leg && j.kind == JointKind::AnkleRoll)
                 .map_or(0.0, |j| self.data.ctrl()[j.motor]);
             SoleLoad { name: ["left", "right"][leg], normal_n, roll_nm, roll_limit_nm: self.sole_roll_limit_nm[leg] }
+        }))
+    }
+
+    /// Each lateral leg against the shell (left, then right); `None` without leg-on-shell contact
+    /// (other riders, a wheel without measured pads). Forces come from the last step's contacts;
+    /// gaps from the kinematics at its start. Needs `&mut` for MuJoCo's distance query.
+    pub fn leg_pads(&mut self) -> Option<[LegPad; 2]> {
+        let legs = self.ids.articulated?;
+        if legs.pad_pair_count == 0 {
+            return None;
+        }
+        let force = if self.stance.pads_on { self.leg_shell_forces(&legs) } else { [0.0; 2] };
+        let mut gap = [f64::INFINITY; 2];
+        for pad in legs.pad_pairs() {
+            let distance = self.data.geom_distance(pad.part, pad.pad, LEG_PAD_GAP_MAX_M, None);
+            gap[pad.leg] = gap[pad.leg].min(distance);
+        }
+        Some(std::array::from_fn(|leg| LegPad {
+            name: ["left", "right"][leg],
+            force_n: force[leg],
+            gap_m: gap[leg],
+            swing_rad: self.stance.swing_rad[leg],
         }))
     }
 
@@ -1464,7 +1711,7 @@ mod articulated_tests {
 
     #[test]
     fn articulated_joint_motors_keep_internal_reactions_in_free_flight() {
-        for (setup, joints) in [(setup(), 6), (lateral_setup(), 12)] {
+        for (setup, joints) in [(setup(), 6), (lateral_setup(), 14)] {
             let mut p = Physics::new(setup).unwrap();
             let legs = p.ids.articulated.unwrap();
             assert_eq!(legs.joints().len(), joints);
@@ -1663,6 +1910,6 @@ mod articulated_tests {
             assert!((qpos0(&format!("{side}_ankle_roll")) - lean).abs() < 1e-12);
             assert_eq!(qpos0(&format!("{side}_hip_rotation")), 0.0);
         }
-        assert_eq!(model.nu(), 12);
+        assert_eq!(model.nu(), 14);
     }
 }

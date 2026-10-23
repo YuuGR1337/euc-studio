@@ -167,7 +167,24 @@ pub struct RecordingContext {
     pub world: Option<WorldRecord>,
     /// External aid strengths.
     pub model_aids: ModelAids,
+    /// The rider's leg joints, for a model whose joints changed under one id while it was built in
+    /// stages (`articulated_lateral_v1`: 12 joints from 2026-10-23, 14 with the knees' rotation
+    /// from L2); absent for the other models.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub rider_joints: Vec<String>,
 }
+
+/// The leg joints a recording of `model` names ([`RecordingContext::rider_joints`]).
+pub fn rider_joints(model: euc_physics::RiderModel) -> Vec<String> {
+    if model.has_lateral_legs() {
+        euc_physics::leg_joint_names(model).into_iter().map(str::to_owned).collect()
+    } else {
+        Vec::new()
+    }
+}
+
+/// The most leg joints a recording may name.
+const MAX_RIDER_JOINTS: usize = 32;
 
 /// A streaming world as a recording names it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -289,6 +306,11 @@ impl RecordingContext {
         {
             return Err("recording model_aids must be finite and not negative".into());
         }
+        if self.rider_joints.len() > MAX_RIDER_JOINTS
+            || self.rider_joints.iter().any(|name| name.is_empty() || name.len() > 64)
+        {
+            return Err("recording rider_joints must name at most 32 joints".into());
+        }
         if serde_json::to_vec(self).map_err(|e| e.to_string())?.len() > MAX_CONTEXT_BYTES {
             return Err("recording context exceeds 128 KiB".into());
         }
@@ -322,6 +344,7 @@ impl RecordingContext {
             height_map: None,
             world: setup.world.as_ref().map(WorldRecord::of),
             model_aids: ModelAids::of(&setup.rider, &setup.assist),
+            rider_joints: rider_joints(setup.rider.model),
         }
     }
 }
@@ -593,6 +616,28 @@ mod tests {
         let json =
             serde_json::json!({ "run_mode": "scenario", "rider_model": "articulated_contact_v1", "model_aids": bad });
         assert!(RecordingContext::from_json(&json).is_err());
+    }
+
+    #[test]
+    fn the_lateral_rider_names_its_joints_and_the_others_do_not() {
+        for model in [
+            euc_physics::RiderModel::RigidAnkleV1,
+            euc_physics::RiderModel::ArticulatedSagittalV1,
+            euc_physics::RiderModel::ArticulatedContactV1,
+        ] {
+            assert!(rider_joints(model).is_empty(), "{model:?}");
+        }
+        let joints = rider_joints(euc_physics::RiderModel::ArticulatedLateralV1);
+        assert_eq!(joints.len(), 14);
+        assert!(joints.iter().any(|name| name == "left_knee_rotation"));
+        let json = serde_json::json!({
+            "run_mode": "scenario", "rider_model": "articulated_lateral_v1", "model_aids": aids(), "rider_joints": joints
+        });
+        let context = RecordingContext::from_json(&json).unwrap();
+        assert_eq!(context.rider_joints.len(), 14);
+        let mut bad = json;
+        bad["rider_joints"] = serde_json::json!([""]);
+        assert!(RecordingContext::from_json(&bad).is_err());
     }
 
     #[test]
