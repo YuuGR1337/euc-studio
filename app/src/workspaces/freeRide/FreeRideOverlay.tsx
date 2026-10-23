@@ -6,7 +6,7 @@ import { Button } from "../../ui/Button.tsx";
 import { RotateCcw } from "../../ui/icons.tsx";
 import { Kbd } from "../../ui/Kbd.tsx";
 import { Pill } from "../../ui/Pill.tsx";
-import { sentShares } from "./controller.ts";
+import { motorReadout, sentShares } from "./controller.ts";
 import { useFreeRideHud } from "./hud.ts";
 
 /**
@@ -44,6 +44,53 @@ function Bar({ read, label, ends }: { read: () => number; label: string; ends: [
 }
 
 // The lean, or the throttle in drive mode.
+/**
+ * Motor headroom at or below this, %, colours the readout and marks it "low". On stock the
+ * simulated modulation sits at 77 to 83 % for 10 to 15 s before a cut (the physics owner's runs),
+ * so a warning from 75 % gives time to ease off.
+ */
+export const HEADROOM_WARN_PCT = 25;
+
+const percent = (value: number) => (Number.isFinite(value) ? `${Math.round(value)} %` : "–");
+
+/**
+ * The firmware's PWM figure and the simulated motor headroom (100 % less the modulation), each
+ * labelled with where it comes from. Written into the DOM on the frame loop, like the bars.
+ */
+function MotorReadout() {
+  const pwm = useRef<HTMLSpanElement>(null);
+  const headroom = useRef<HTMLSpanElement>(null);
+  const row = useRef<HTMLSpanElement>(null);
+  useEffect(
+    () =>
+      onFrame(() => {
+        const left = Number.isFinite(motorReadout.modulation)
+          ? Math.max(0, 100 - motorReadout.modulation)
+          : Number.NaN;
+        const low = left <= HEADROOM_WARN_PCT;
+        if (pwm.current) pwm.current.textContent = percent(motorReadout.pwm);
+        if (headroom.current) headroom.current.textContent = `${percent(left)}${low ? " low" : ""}`;
+        if (row.current) row.current.dataset.low = String(low);
+      }),
+    [],
+  );
+  return (
+    <span className="flex flex-col gap-4">
+      <span className="grid grid-cols-[1fr_auto] items-center gap-8">
+        <span className="label">PWM (firmware)</span>
+        <span ref={pwm} data-testid="hud-pwm" className="num text-right text-12 text-fg" />
+      </span>
+      <span
+        ref={row}
+        className="group grid grid-cols-[1fr_auto] items-center gap-8 text-fg data-[low=true]:text-caution"
+      >
+        <span className="label group-data-[low=true]:text-caution">Motor headroom (sim)</span>
+        <span ref={headroom} data-testid="hud-headroom" className="num text-right text-12" />
+      </span>
+    </span>
+  );
+}
+
 const readLean = () => sentShares.lean;
 // Left fills to the left (the turn's sign is left positive).
 const readTurn = () => -sentShares.turn;
@@ -96,6 +143,7 @@ export function FreeRideOverlay() {
             <>
               <Bar read={readLean} label={drive ? "Drive" : "Lean"} ends={LEAN_ENDS} />
               <Bar read={readTurn} label="Turn" ends={TURN_ENDS} />
+              <MotorReadout />
             </>
           )}
           {prompt && (

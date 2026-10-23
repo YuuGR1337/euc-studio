@@ -54,7 +54,7 @@ const client = {
   targetRtf: 1,
   status: { state: "paused", runEpoch: 1, runMode: "scenario", message: "Fixture" },
   outputs: { controller_powered: true } as { controller_powered: boolean } | null,
-  latest: { speed: 0 },
+  latest: { speed: 0, pwm: Number.NaN, modulation: Number.NaN },
   subscribe(fn: () => void) {
     listeners.add(fn);
     return () => listeners.delete(fn);
@@ -184,6 +184,10 @@ const fixture = {
   },
   refuseInput(value: boolean) {
     refuseInput = value;
+  },
+  /** The motor's PWM figure and the simulated modulation the engine reports, %. */
+  motor(pwm: number, modulation: number) {
+    Object.assign(client.latest, { pwm, modulation });
   },
   /** Reports drive caps (m/s², forward and braking) from now on, or none. */
   driveCaps(accel: number | null, brake = 0) {

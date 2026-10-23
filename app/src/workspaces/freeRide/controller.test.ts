@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { freeRideApi, type FreeRideStatus } from "../../engine/freeRide.ts";
 import type { WorldFrame } from "../../engine/world.ts";
 import type { EngineClient } from "../../engine/types.ts";
-import { DEFAULT_WORLD, FreeRideController } from "./controller.ts";
+import { DEFAULT_WORLD, FreeRideController, motorReadout } from "./controller.ts";
 import { useFreeRideHud } from "./hud.ts";
 vi.mock("../../engine/freeRide.ts", async (original) => ({
   ...(await original<typeof import("../../engine/freeRide.ts")>()),
@@ -284,6 +284,20 @@ describe("drive mode", () => {
     expect(lastSent()?.desired_lean_rad).toBeCloseTo(radians(10), 3);
     expect(lastSent()).not.toHaveProperty("desired_accel_mps2");
     expect(controller.getSnapshot()).toMatchObject({ drive: true, driving: false });
+  });
+});
+
+describe("the motor readout", () => {
+  it("copies the firmware's PWM and the simulated modulation each heartbeat", async () => {
+    await open(ride());
+    expect(motorReadout.pwm).toBeNaN();
+    Object.assign(engine.latest, { pwm: 61, modulation: 79 });
+    await vi.advanceTimersByTimeAsync(100);
+    expect(motorReadout).toEqual({ pwm: 61, modulation: 79 });
+    Object.assign(engine.latest, { pwm: Number.NaN, modulation: Number.POSITIVE_INFINITY });
+    await vi.advanceTimersByTimeAsync(100);
+    expect(motorReadout.pwm).toBeNaN();
+    expect(motorReadout.modulation).toBeNaN();
   });
 });
 

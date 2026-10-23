@@ -19,7 +19,13 @@ The optional `onExit` callback must call `engine.setScenario` with the chosen sc
 
 Mount `FreeRideOverlay` in the 3D view (the Viewport does, next to the Ride manual HUD).
 It shows the prompt, the firmware's boot countdown, the drive (or lean) and turn bars while
-riding, and the respawn buttons. The controller writes it through `hud.ts`; nothing else does.
+riding, the motor readout, and the respawn buttons. The motor readout shows two figures, each
+labelled with its source: "PWM (firmware)", the firmware's own PWM (`latest.pwm`), and "Motor
+headroom (sim)", 100 % less the simulated modulation (`latest.modulation`), the share of the
+battery voltage the inverter really applies. The firmware's figure can read about 70 % while the
+modulation is at its limit, so only the headroom warns: at 25 % or less it turns the caution
+colour and reads "low". No speed or lean limit is drawn from it: the motor plant is still being
+calibrated. The controller writes it through `hud.ts`; nothing else does.
 
 ## Playing
 

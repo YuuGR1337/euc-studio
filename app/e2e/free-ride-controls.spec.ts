@@ -277,6 +277,25 @@ test("drive mode: W drives to the cap, the stick follows, and Lean is a choice k
   ).toBeChecked();
 });
 
+test("the HUD shows the firmware's PWM and the simulated motor headroom, and warns when low", async ({
+  page,
+}) => {
+  await open(page);
+  await page.keyboard.down("w");
+  await expect(hud(page)).toContainText("PWM (firmware)");
+  await expect(hud(page)).toContainText("Motor headroom (sim)");
+  await expect(page.getByTestId("hud-pwm")).toHaveText("–");
+  await page.evaluate(() => window.freeRideFixture.motor(48.4, 55));
+  await expect(page.getByTestId("hud-pwm")).toHaveText("48 %");
+  await expect(page.getByTestId("hud-headroom")).toHaveText("45 %");
+  // The firmware's figure can lag the inverter: the headroom is what warns.
+  await page.evaluate(() => window.freeRideFixture.motor(70, 80));
+  await expect(page.getByTestId("hud-pwm")).toHaveText("70 %");
+  await expect(page.getByTestId("hud-headroom")).toHaveText("20 % low");
+  await expect(page.getByTestId("hud-headroom").locator("..")).toHaveAttribute("data-low", "true");
+  await page.keyboard.up("w");
+});
+
 test("an engine without drive caps leans and shows no drive choice", async ({ page }) => {
   await open(page);
   await expect(page.getByRole("radiogroup", { name: "Forward and back" })).toHaveCount(0);

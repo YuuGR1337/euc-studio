@@ -113,6 +113,14 @@ let lastWorld: WorldChoice | null = null;
  */
 export const sentShares = { lean: 0, turn: 0 };
 
+/**
+ * The motor's two duty readings at the last heartbeat, %, NaN when not reported: the firmware's
+ * own PWM figure (`pwm`), and the share of the battery voltage the simulated inverter really
+ * applies (`modulation`, the true headroom: the firmware's figure can read about 70 % while the
+ * modulation is at its limit).
+ */
+export const motorReadout = { pwm: Number.NaN, modulation: Number.NaN };
+
 /** One heartbeat's input: lean (degrees) or a drive ask (m/s²) with its throttle share, turn
  * (degrees per second) and crouch (a share). */
 interface Sent {
@@ -763,6 +771,11 @@ export class FreeRideController {
     const limits = this.limits();
     const driving = this.state.drive && limits.drive_field;
     sentShares.lean = driving ? sent.throttle : sent.lean / limits.lean_max_deg;
+    const latest = this.engine.latest;
+    motorReadout.pwm = Number.isFinite(latest?.pwm) ? (latest?.pwm as number) : Number.NaN;
+    motorReadout.modulation = Number.isFinite(latest?.modulation)
+      ? (latest?.modulation as number)
+      : Number.NaN;
     // The turn bar shows the share of a full turn at this speed.
     sentShares.turn =
       limits.turn_max_rad_s > 0
