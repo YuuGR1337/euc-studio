@@ -12,6 +12,7 @@ import {
   bindKey,
   clearKeys,
   coerceBindings,
+  driveAsk,
   easeCrouch,
   keyLabel,
   radialDeadZone,
@@ -232,6 +233,38 @@ describe("brake to a stop", () => {
     expect(gate.step(0.5, 0, 0.05)).toBe(0.5);
     expect(gate.step(-1, 0, 0.05)).toBe(0);
     expect(gate.step(-1, -2, 0.05)).toBe(-1);
+  });
+});
+
+describe("drive mode", () => {
+  it("scales the throttle to the caps: full ahead, full brake, and a coast in between", () => {
+    // At 8 m/s the caps are g·tan(22°) ∓ drag: 3.96 - 0.4 and 3.96 + 0.4.
+    const [ahead, brake] = [3.56, 4.36];
+    expect(driveAsk(1, ahead, brake)).toBeCloseTo(3.56, 9);
+    expect(driveAsk(-1, ahead, brake)).toBeCloseTo(-4.36, 9);
+    // Released: what drag does alone, so the wheel coasts.
+    expect(driveAsk(0, ahead, brake)).toBeCloseTo(-0.4, 9);
+    expect(driveAsk(0.5, ahead, brake)).toBeCloseTo(0.5 * 3.96 - 0.4, 9);
+    // Rolling backwards the drag pushes forward: the same formula.
+    expect(driveAsk(0, 4.36, 3.56)).toBeCloseTo(0.4, 9);
+  });
+
+  it("holds the throttle to -1..1 and the ask to the engine's 12 m/s²", () => {
+    expect(driveAsk(3, 3.56, 4.36)).toBeCloseTo(3.56, 9);
+    expect(driveAsk(Number.NaN, 3.56, 4.36)).toBeCloseTo(-0.4, 9);
+    expect(driveAsk(1, 30, 30)).toBe(12);
+    expect(Object.is(driveAsk(0, 2, 2), 0)).toBe(true);
+  });
+
+  it("asks nothing without usable caps", () => {
+    for (const [a, b] of [
+      [null, 4],
+      [3, undefined],
+      [Number.NaN, 4],
+      [-2, 1],
+    ] as const) {
+      expect(driveAsk(1, a, b)).toBeNull();
+    }
   });
 });
 

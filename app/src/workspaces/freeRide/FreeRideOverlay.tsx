@@ -43,6 +43,7 @@ function Bar({ read, label, ends }: { read: () => number; label: string; ends: [
   );
 }
 
+// The lean, or the throttle in drive mode.
 const readLean = () => sentShares.lean;
 // Left fills to the left (the turn's sign is left positive).
 const readTurn = () => -sentShares.turn;
@@ -54,7 +55,7 @@ const TURN_ENDS: [string, string] = ["left", "right"];
  * the respawn buttons (R and Shift+R do the same).
  */
 export function FreeRideOverlay() {
-  const { open, riding, prompt, boot, keys, respawn, onRespawn } = useFreeRideHud();
+  const { open, riding, drive, prompt, boot, keys, respawn, onRespawn } = useFreeRideHud();
   const show = open && (riding || !!prompt || boot !== null || !!respawn);
   return (
     <AnimatePresence>
@@ -93,7 +94,7 @@ export function FreeRideOverlay() {
           )}
           {riding && (
             <>
-              <Bar read={readLean} label="Lean" ends={LEAN_ENDS} />
+              <Bar read={readLean} label={drive ? "Drive" : "Lean"} ends={LEAN_ENDS} />
               <Bar read={readTurn} label="Turn" ends={TURN_ENDS} />
             </>
           )}

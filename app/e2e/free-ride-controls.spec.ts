@@ -240,14 +240,58 @@ test("a gamepad rides when its stick moves; X respawns, Back at the start", asyn
     .toEqual({ epoch: epoch + 1, toStart: true });
 });
 
+test("drive mode: W drives to the cap, the stick follows, and Lean is a choice kept", async ({
+  page,
+}) => {
+  // The fixture lives in the page: report caps from its first status on, then wait as open does.
+  await page.goto(url);
+  await page.evaluate(() => window.freeRideFixture.driveCaps(3.56, 4.36));
+  await expect.poll(async () => (await fixtureOf(page)).status.ready).toBe(true);
+  const choice = page.getByRole("radiogroup", { name: "Forward and back" });
+  await expect(choice.getByRole("radio", { name: "Drive" })).toBeChecked();
+  await page.keyboard.down("w");
+  await expect.poll(async () => (await lastInput(page))?.desired_accel_mps2).toBeCloseTo(3.56);
+  expect((await lastInput(page))?.desired_lean_rad).toBe(0);
+  await expect(hud(page)).toContainText("Drive");
+  await expect(page.getByText("Riding. W drives forward.")).toBeVisible();
+  // Let go: the ask is what drag does alone, so the wheel coasts.
+  await page.keyboard.up("w");
+  await expect.poll(async () => (await lastInput(page))?.desired_accel_mps2).toBeCloseTo(-0.4);
+  // The stick's throttle builds with a lag, then rides at the cap.
+  await page.evaluate(() => window.freeRideFixture.gamepad([0, -1, 0, 0]));
+  await expect.poll(async () => (await lastInput(page))?.source).toBe("gamepad");
+  await expect.poll(async () => (await lastInput(page))?.desired_accel_mps2).toBeCloseTo(3.56);
+  await page.evaluate(() => window.freeRideFixture.gamepad(null));
+  await choice.getByRole("radio", { name: "Lean" }).click();
+  await page.locator("body").click({ position: { x: 600, y: 600 } });
+  await page.keyboard.down("w");
+  await expect.poll(async () => (await lastInput(page))?.desired_lean_rad).toBeCloseTo(deg(10));
+  expect(await lastInput(page)).not.toHaveProperty("desired_accel_mps2");
+  await expect(hud(page)).toContainText("Lean");
+  await page.keyboard.up("w");
+  // The choice is kept for the next session.
+  await page.reload();
+  await page.evaluate(() => window.freeRideFixture.driveCaps(3.56, 4.36));
+  await expect(
+    page.getByRole("radiogroup", { name: "Forward and back" }).getByRole("radio", { name: "Lean" }),
+  ).toBeChecked();
+});
+
+test("an engine without drive caps leans and shows no drive choice", async ({ page }) => {
+  await open(page);
+  await expect(page.getByRole("radiogroup", { name: "Forward and back" })).toHaveCount(0);
+  await rideForward(page);
+  expect(await lastInput(page)).not.toHaveProperty("desired_accel_mps2");
+});
+
 test("a rebound key rides; the studio's keys are refused", async ({ page }) => {
   await open(page);
   await page.getByRole("button", { name: "Keys", exact: true }).click();
-  await page.getByRole("button", { name: "Change Lean forward", exact: true }).click();
+  await page.getByRole("button", { name: "Change Ride forward", exact: true }).click();
   await page.keyboard.press("c");
   await expect(page.getByRole("alert")).toContainText("C is kept for the studio");
   await page.keyboard.press("i");
-  await expect(page.getByLabel("Lean forward keys", { exact: true })).toContainText("I");
+  await expect(page.getByLabel("Ride forward keys", { exact: true })).toContainText("I");
   await page.locator("body").click({ position: { x: 600, y: 600 } });
   await page.keyboard.down("i");
   await expect.poll(async () => (await lastInput(page))?.desired_lean_rad).toBeCloseTo(deg(10));

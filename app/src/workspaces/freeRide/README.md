@@ -18,8 +18,8 @@ The parent owns ground rendering and the viewport route.
 The optional `onExit` callback must call `engine.setScenario` with the chosen scenario.
 
 Mount `FreeRideOverlay` in the 3D view (the Viewport does, next to the Ride manual HUD).
-It shows the prompt, the firmware's boot countdown, the lean and turn bars while riding, and the
-respawn buttons. The controller writes it through `hud.ts`; nothing else does.
+It shows the prompt, the firmware's boot countdown, the drive (or lean) and turn bars while
+riding, and the respawn buttons. The controller writes it through `hud.ts`; nothing else does.
 
 ## Playing
 
@@ -46,7 +46,7 @@ The controller listens in the capture phase; the global command listener uses th
 
 | Key (default)       | Gamepad (standard mapping) | Action                                         |
 | ------------------- | -------------------------- | ---------------------------------------------- |
-| W / ↑, S / ↓        | Left stick, RT / LT, D-pad | Lean forward, lean back (brake)                |
+| W / ↑, S / ↓        | Left stick, RT / LT, D-pad | Ride forward, brake (a throttle, or the lean)  |
 | A / ←, D / →        | Left stick, D-pad          | Turn                                           |
 | Space (hold)        | LB (hold)                  | Crouch                                         |
 | X                   | B                          | Step off                                       |
@@ -77,6 +77,21 @@ shortcuts (C, `.`, `[`, `]`, `?`) cannot be bound. Gamepad buttons are fixed.
   not report the light or pedal mode back, so the panel shows what it sent last. A refused command
   shows in the prompt.
 
+## Drive and lean
+
+Forward and back have two modes, chosen under Riding and kept in localStorage
+(`euc-studio.freeRide.drive`). The choice shows only when the engine reports drive caps.
+
+- Drive (the default): forward and back are a throttle, as in EUC Thrills. Each packet carries
+  `desired_accel_mps2` and a zero lean; the engine's rider leans for the acceleration
+  (`tan(lean) = (a + drag) / g`), tracks the speed the asks add up to, and ends a brake to a stop
+  standing (a clean stop). Full throttle asks for `accel_cap_mps2`, full back for
+  `-brake_cap_mps2`, and a released throttle for minus the drag, so the wheel coasts. The caps
+  are `g·tan(22°) ∓ drag` at the speed now, so the ask is
+  `throttle · (accel_cap + brake_cap) / 2 + (accel_cap - brake_cap) / 2`, held to ±12 m/s².
+- Lean: forward and back set the rider's lean itself (up to 10° on the keys), as before drive
+  mode. An engine without drive caps always rides this way.
+
 ## Input shaping
 
 `lib/rideControls.ts` shapes the input; `docs/design/free-ride.md` explains where each value
@@ -88,8 +103,12 @@ comes from (EUC Thrills by VibezZzCoder, MIT).
 - The stick has a radial, rescaled dead zone (15 %); per axis the strongest of stick, trigger and
   D-pad wins. The device that moved last rides.
 - A full turn asks for the engine's `turn_cap_rad_s` (its speed-scheduled cap).
-- Near a stop (under 0.6 m/s) a back lean stays at zero until back has been held for 0.35 s:
-  the rider stands up and the wheel stops before it rolls backwards. This shapes intent only.
+- In drive mode the keys' throttle has the keys' lag; the stick's throttle follows with EUC
+  Thrills' lean lag (0.14 s, at most 6 shares a second).
+- Lean mode only: near a stop (under 0.6 m/s) a back lean stays at zero until back has been held
+  for 0.35 s: the rider stands up and the wheel stops before it rolls backwards. This shapes
+  intent only. In drive mode the engine's clean stop does this: a brake held after the stop
+  keeps the wheel standing, and back pressed again from a stop rides backwards.
 - Crouch eases with 0.07 s and lands on an exact zero when released.
 
 First-ride hints (turn, brake, then the keys once) are cleared by doing them and remembered in
@@ -108,15 +127,15 @@ their map.
 
 The frontend uses these exact command arguments:
 
-| Command              | Arguments                                                                                                 |
-| -------------------- | --------------------------------------------------------------------------------------------------------- |
-| `free_ride_start`    | `{ spec: { wheel: 'begode-extreme', settings: 'blank', rider_model: 'articulated_sagittal_v1', world } }` |
-| `free_ride_restart`  | `{ epoch, toStart }` (`to_start` natively: false at the last clear spot, true at the world's start)       |
-| `free_ride_step_off` | `{ epoch }`                                                                                               |
-| `free_ride_status`   | none                                                                                                      |
-| `free_ride_world`    | `{ epoch }`                                                                                               |
-| `free_ride_map`      | `{ epoch }` (only for a run on the old test pad)                                                          |
-| `free_ride_input`    | `{ input: { run_epoch, seq, source, desired_lean_rad, heading_rate_rad_s, armed, crouch? } }`             |
+| Command              | Arguments                                                                                                          |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `free_ride_start`    | `{ spec: { wheel: 'begode-extreme', settings: 'blank', rider_model: 'articulated_sagittal_v1', world } }`          |
+| `free_ride_restart`  | `{ epoch, toStart }` (`to_start` natively: false at the last clear spot, true at the world's start)                |
+| `free_ride_step_off` | `{ epoch }`                                                                                                        |
+| `free_ride_status`   | none                                                                                                               |
+| `free_ride_world`    | `{ epoch }`                                                                                                        |
+| `free_ride_map`      | `{ epoch }` (only for a run on the old test pad)                                                                   |
+| `free_ride_input`    | `{ input: { run_epoch, seq, source, desired_lean_rad, heading_rate_rad_s, armed, crouch?, desired_accel_mps2? } }` |
 
 `free_ride_arm` and `free_ride_pause` remain in the engine as no-ops for older frontends; this
 frontend does not call them. `armed` in packets is ignored by the play-mode host and always sent
@@ -128,9 +147,14 @@ true.
   field is null.
 - `heading_rate_rad_s` may reach 2.5 rad/s, the rider's turn cap at a stop. The physics caps it
   further with speed. A packet above 2.5 rad/s is rejected.
+- `desired_accel_mps2` (drive mode) is the asked acceleration, m/s², forward positive, net of
+  drag, at most 12 either way; `desired_lean_rad` must then be 0. The frontend sends it only when
+  the status has an `accel_cap_mps2` field.
 - Status: `ready` (the firmware has booted; `armed` equals it), `turn_cap_rad_s`, `crouch` (0 to
-  1, or `null` when the rider cannot crouch), `on_pedals` and `boot_remaining_s`. A step-off or a
-  fall puts "Stepped off" or "Rider detached" on the timeline and never pauses the run.
+  1, or `null` when the rider cannot crouch), `on_pedals`, `boot_remaining_s`, and in drive-mode
+  engines `accel_cap_mps2`, `brake_cap_mps2` (m/s², positive, drag included) and `accel_mps2`
+  (the achieved acceleration, smoothed). A step-off or a fall puts "Stepped off" or "Rider
+  detached" on the timeline and never pauses the run.
 
 The source values are `keyboard_slider` and `gamepad`.
 Input sequences use uint32 values; the sequence increases across source changes and drawer

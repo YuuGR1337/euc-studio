@@ -8,6 +8,8 @@ export interface FreeRideHud {
   open: boolean;
   /** The rider rides now: ready, on the pedals, powered and playing. */
   riding: boolean;
+  /** Forward and back are a throttle (drive mode), not the rider's lean. */
+  drive: boolean;
   /** One line telling the rider what to do next, or null. */
   prompt: string | null;
   /** Simulated seconds until the firmware has booted, while it boots; else null. */
@@ -23,6 +25,7 @@ export interface FreeRideHud {
 export const CLOSED: FreeRideHud = {
   open: false,
   riding: false,
+  drive: false,
   prompt: null,
   boot: null,
   keys: null,

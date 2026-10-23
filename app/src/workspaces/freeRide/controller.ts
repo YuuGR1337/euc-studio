@@ -19,14 +19,17 @@ import type { EngineClient, WheelButton } from "../../engine/types.ts";
 import { readStored, writeStored } from "../../lib/storage.ts";
 import {
   BrakeGate,
+  DRIVE_TIMING,
   KeyIntent,
   MOTION_ACTIONS,
   PadEdges,
   STILL,
   actionFor,
+  approach,
   bindKey,
   clearKeys,
   coerceBindings,
+  driveAsk,
   easeCrouch,
   keyLabel,
   readPad,
@@ -54,6 +57,12 @@ export interface ControlSnapshot {
   lean: number;
   turn: number;
   crouch: number;
+  /** The rider's choice: the keys and the stick drive (a throttle), else they set the lean. */
+  drive: boolean;
+  /** Drive mode rides now: chosen, and the engine takes a drive ask. */
+  driving: boolean;
+  /** The acceleration asked now in drive mode, m/s² (+ forward); null in lean mode. */
+  accel: number | null;
   /** Near a stop a back lean is held at zero until it has been held (the brake gate). */
   stopping: boolean;
   /** A new world or a respawn is on its way. */
@@ -89,6 +98,7 @@ const NOTICE_MS = 2500;
 /** A start or respawn that brings no new run in this time has failed, ms. */
 const START_TIMEOUT_MS = 20_000;
 const BINDINGS_KEY = "freeRide.bindings";
+const DRIVE_KEY = "freeRide.drive";
 const HINTS_KEY = "freeRide.hints";
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
 // Keep the sequence across drawer unmounts. Native epochs increase.
@@ -97,8 +107,21 @@ let sequence = 0;
 /** The world the last start asked for: a reopened Free Ride without a run starts it again. */
 let lastWorld: WorldChoice | null = null;
 
-/** What the last heartbeat sent, as shares of the run's limits (-1..1), for the 3D view's bars. */
+/**
+ * What the last heartbeat sent, as shares of the run's limits (-1..1), for the 3D view's bars. In
+ * drive mode `lean` is the throttle.
+ */
 export const sentShares = { lean: 0, turn: 0 };
+
+/** One heartbeat's input: lean (degrees) or a drive ask (m/s²) with its throttle share, turn
+ * (degrees per second) and crouch (a share). */
+interface Sent {
+  lean: number;
+  turn: number;
+  crouch: number;
+  accel: number | null;
+  throttle: number;
+}
 
 /** Focus in a place where keys type text: riding keys go to it. */
 function typing(target: EventTarget | null) {
@@ -144,9 +167,11 @@ function wheelControl(target: EventTarget | null) {
  * the firmware and plays. Keys and the stick drive as soon as the firmware is ready; there is no
  * arm step, and a crash never pauses (the engine's play mode). R respawns at the last clear spot,
  * Shift+R at the world's start; Escape pauses, and a riding key goes on. The wheel's buttons and
- * the phone's light, horn and pedal-mode commands have keys too. Lean, turn and crouch are shaped
- * by `lib/rideControls.ts` and sent as rider intent; the native host keeps its own limits and
- * watchdog (input older than 250 ms is neutral).
+ * the phone's light, horn and pedal-mode commands have keys too. Forward and back are a throttle
+ * (drive mode: the rider leans for the asked acceleration, EUC Thrills' feel) or the rider's lean
+ * itself (lean mode). Throttle, lean, turn and crouch are shaped by `lib/rideControls.ts` and sent
+ * as rider intent; the native host keeps its own limits and watchdog (input older than 250 ms is
+ * neutral).
  */
 export class FreeRideController {
   private state: ControlSnapshot = {
@@ -158,6 +183,9 @@ export class FreeRideController {
     lean: 0,
     turn: 0,
     crouch: 0,
+    drive: readStored<unknown>(DRIVE_KEY, true) !== false,
+    driving: false,
+    accel: null,
     stopping: false,
     starting: false,
     startingKind: null,
@@ -182,6 +210,8 @@ export class FreeRideController {
   private buttonKey: string | null = null;
   private padEdges = new PadEdges();
   private brake = new BrakeGate();
+  /** The stick's throttle after its lag (drive mode). */
+  private padThrottle = 0;
   private crouchShare = 0;
   private lastTick = 0;
   private lastPublish = 0;
@@ -259,6 +289,7 @@ export class FreeRideController {
     this.keys.clear();
     this.heldKeys.clear();
     this.brake.reset();
+    this.padThrottle = 0;
     this.crouchShare = 0;
     this.buttonKey = null;
     this.buttons.release();
@@ -269,7 +300,13 @@ export class FreeRideController {
   private limits(): FreeRideLimits {
     return limitsOf(this.state.status);
   }
-  private packet(lean = 0, turn = 0, crouch = 0): FreeRideInput | null {
+  /** `accel`: a drive ask (m/s²) in place of the lean, or null. */
+  private packet(
+    lean = 0,
+    turn = 0,
+    crouch = 0,
+    accel: number | null = null,
+  ): FreeRideInput | null {
     const status = this.state.status;
     if (!status || status.mode !== "free_ride") return null;
     // Native ManualInput uses u32; never wrap or reuse a sequence within an epoch.
@@ -287,9 +324,10 @@ export class FreeRideController {
       run_epoch: status.epoch,
       seq: ++sequence,
       source: this.state.source,
-      desired_lean_rad: lean * rad,
+      desired_lean_rad: accel === null ? lean * rad : 0,
       heading_rate_rad_s: turn * rad,
       ...(limits.crouch_field ? { crouch: limits.can_crouch ? crouch : 0 } : {}),
+      ...(accel !== null && limits.drive_field ? { desired_accel_mps2: accel } : {}),
       // The play-mode host rides every input; the field stays for its wire format.
       armed: true,
     };
@@ -321,6 +359,16 @@ export class FreeRideController {
   private setSource(source: FreeRideSource) {
     if (source !== this.state.source) this.update({ source });
   }
+  /** Drive mode (forward and back are a throttle) or lean mode; kept for the next session. */
+  setDrive = (drive: boolean) => {
+    if (drive === this.state.drive) return;
+    // A held key starts again from still in the other mode: no full lean from a full throttle.
+    this.keys.clear();
+    this.brake.reset();
+    this.padThrottle = 0;
+    this.update({ drive });
+    writeStored(DRIVE_KEY, drive);
+  };
   /** A new run in `world`: the engine builds it and boots the firmware. */
   start = async (world: WorldChoice) => {
     if (!this.active || this.engine.kind !== "live" || this.pending) return;
@@ -556,16 +604,38 @@ export class FreeRideController {
       return { intent: pad && !pad.invalid ? pad.intent : STILL, pad };
     return { intent: keyIntent, pad };
   }
-  /** Lean, turn and crouch to send: intent shaped by the wheel's speed and the run's limits. */
-  private shape(intent: Intent, dt: number): { lean: number; turn: number; crouch: number } {
+  /**
+   * Lean (or a drive ask), turn and crouch to send: intent shaped by the wheel's speed and the
+   * run's limits. In drive mode forward and back are a throttle scaled to the engine's drive caps
+   * (`throttle` is its share); the engine's rider leans for it and ends a brake in a clean stop
+   * itself, so the brake gate stays open.
+   */
+  private shape(intent: Intent, dt: number): Sent {
     const limits = this.limits();
     const speed = this.engine.latest?.speed;
     const speedMps = Number.isFinite(speed) ? (speed as number) / 3.6 : 0;
-    const leanMax =
-      this.state.source === "keyboard_slider"
-        ? Math.min(KEY_LEAN_DEG, limits.lean_max_deg)
-        : limits.lean_max_deg;
-    const lean = this.brake.step(intent.lean, speedMps, dt) * leanMax;
+    let lean = 0;
+    let accel: number | null = null;
+    let throttle = 0;
+    if (this.state.drive && limits.drive_field) {
+      // The keys' throttle has its lag already; the stick's gets EUC Thrills' lean lag here.
+      this.padThrottle =
+        this.state.source === "gamepad"
+          ? approach(this.padThrottle, intent.lean, DRIVE_TIMING.tau, DRIVE_TIMING.maxRate, dt)
+          : 0;
+      throttle = this.state.source === "gamepad" ? this.padThrottle : intent.lean;
+      const status = this.state.status;
+      accel = driveAsk(throttle, status?.accel_cap_mps2, status?.brake_cap_mps2);
+      this.brake.reset();
+    }
+    if (accel === null) {
+      throttle = 0;
+      const leanMax =
+        this.state.source === "keyboard_slider"
+          ? Math.min(KEY_LEAN_DEG, limits.lean_max_deg)
+          : limits.lean_max_deg;
+      lean = this.brake.step(intent.lean, speedMps, dt) * leanMax;
+    }
     // A full turn asks for the engine's own speed-scheduled cap; an older engine without one gets
     // the schedule here, held under its 20° turn lean and 30°/s.
     const authority = limits.turn_scheduled
@@ -573,7 +643,7 @@ export class FreeRideController {
       : turnAuthority(speedMps, 20 * rad, limits.turn_max_rad_s);
     const turn = (intent.steer * authority) / rad;
     this.crouchShare = easeCrouch(this.crouchShare, intent.crouch, dt);
-    return { lean: lean + 0, turn: turn + 0, crouch: this.crouchShare };
+    return { lean: lean + 0, turn: turn + 0, crouch: this.crouchShare, accel, throttle };
   }
   private async poll() {
     if (this.polling || !this.active || this.engine.kind !== "live") return;
@@ -588,6 +658,7 @@ export class FreeRideController {
       if (newRun) {
         this.keys.clear();
         this.brake.reset();
+        this.padThrottle = 0;
         this.crouchShare = 0;
         this.worldEpoch = null;
         this.update({ map: null, world: null });
@@ -683,14 +754,15 @@ export class FreeRideController {
       this.setSource("gamepad");
       if (!this.engine.playing && this.usable()) this.goOn();
     } else if (this.keys.moving && !padPush) this.setSource("keyboard_slider");
-    let sent = { lean: 0, turn: 0, crouch: 0 };
+    let sent: Sent = { lean: 0, turn: 0, crouch: 0, accel: null, throttle: 0 };
     if (riding) {
       sent = this.shape(intent, dt);
-      const input = this.packet(sent.lean, sent.turn, sent.crouch);
+      const input = this.packet(sent.lean, sent.turn, sent.crouch, sent.accel);
       if (input) this.send(input);
     }
     const limits = this.limits();
-    sentShares.lean = sent.lean / limits.lean_max_deg;
+    const driving = this.state.drive && limits.drive_field;
+    sentShares.lean = driving ? sent.throttle : sent.lean / limits.lean_max_deg;
     // The turn bar shows the share of a full turn at this speed.
     sentShares.turn =
       limits.turn_max_rad_s > 0
@@ -719,6 +791,8 @@ export class FreeRideController {
         lean: sent.lean,
         turn: sent.turn,
         crouch: sent.crouch,
+        driving,
+        accel: sent.accel,
         stopping: riding && this.brake.holding,
         powered: typeof powered === "boolean" ? powered : null,
       });
@@ -761,7 +835,9 @@ export class FreeRideController {
           : this.hint === "brake"
             ? pad
               ? "Pull the stick back or squeeze the left trigger to brake"
-              : `${first("back")} leans back to brake`
+              : s.driving
+                ? `${first("back")} brakes`
+                : `${first("back")} leans back to brake`
             : null;
     const keys: FreeRideHud["keys"] =
       riding && this.hint === "keys"
@@ -787,6 +863,7 @@ export class FreeRideController {
     const hud: FreeRideHud = {
       open: true,
       riding: riding && s.playing,
+      drive: s.driving,
       prompt,
       boot,
       keys,
@@ -796,6 +873,7 @@ export class FreeRideController {
     if (
       current.open !== hud.open ||
       current.riding !== hud.riding ||
+      current.drive !== hud.drive ||
       current.prompt !== hud.prompt ||
       current.boot !== hud.boot ||
       JSON.stringify(current.keys) !== JSON.stringify(hud.keys) ||

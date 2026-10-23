@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
-import type { HeightMap } from "../../engine/freeRide.ts";
+import { limitsOf, type HeightMap } from "../../engine/freeRide.ts";
 import type { WorldFrame } from "../../engine/world.ts";
 import type { EngineClient } from "../../engine/types.ts";
 import { keyLabel, type FreeRideAction } from "../../lib/rideControls.ts";
@@ -93,7 +93,7 @@ function FreeRideSession({ engine, active, onGround, onExit }: FreeRidePanelProp
               ? `Off the pedals.${respawnKey ? ` ${respawnKey} respawns here, Shift ${respawnKey} at the start.` : ""}`
               : !state.playing
                 ? "Paused. Esc or a riding key goes on."
-                : `Riding. ${cap("forward") ?? "The stick"} leans forward.`);
+                : `Riding. ${cap("forward") ?? "The stick"} ${state.driving ? "drives" : "leans"} forward.`);
   const pill =
     engine.kind !== "live"
       ? "Desktop only"
@@ -152,6 +152,28 @@ function FreeRideSession({ engine, active, onGround, onExit }: FreeRidePanelProp
             At the start {respawnKey && <Kbd>Shift {respawnKey}</Kbd>}
           </Button>
         </div>
+        {limitsOf(status).drive_field && (
+          <Section title="Riding">
+            <div className="flex flex-wrap items-center justify-between gap-8">
+              <span className="text-12 text-fg-2">Forward and back</span>
+              <SegmentedControl<string>
+                aria-label="Forward and back"
+                size="sm"
+                value={state.drive ? "drive" : "lean"}
+                onValueChange={(value) => controller.setDrive(value === "drive")}
+                options={[
+                  { value: "drive", label: "Drive" },
+                  { value: "lean", label: "Lean" },
+                ]}
+              />
+            </div>
+            <p className="text-12 text-fg-2">
+              {state.drive
+                ? "Drive: a throttle. The rider leans as far as the acceleration or the brake needs, up to the drive limit, and a brake to a stop ends standing. Let go and the wheel coasts."
+                : "Lean: the keys and the stick set the rider's lean itself, up to 10° on the keys."}
+            </p>
+          </Section>
+        )}
         <Section title="Wheel">
           <p className="text-12 text-fg-2">
             Power {cap("power") && <Kbd>{cap("power")}</Kbd>}: a tap is the firmware's tap. Held for

@@ -163,3 +163,68 @@ describe("manual limits (FR2b engines)", () => {
     expect(ipc.invoke).toHaveBeenLastCalledWith("free_ride_restart", { epoch: 4, toStart: true });
   });
 });
+
+describe("drive mode", () => {
+  const base: FreeRideStatus = {
+    epoch: 3,
+    mode: "free_ride",
+    ready: true,
+    armed: true,
+    source: null,
+    reason: "Ready",
+    rider_model: "articulated_sagittal_v1",
+    desired_lean_deg: null,
+    commanded_lean_deg: null,
+    actual_lean_deg: null,
+    heading_deg: null,
+    path_length_m: null,
+    yaw_aid_work_j: null,
+    roll_aid_work_j: null,
+    ground: "world",
+    turn_cap_rad_s: 1.2,
+    crouch: 0,
+    on_pedals: true,
+    boot_remaining_s: 0,
+  };
+  const drive = { ...base, accel_cap_mps2: 3.6, brake_cap_mps2: 4.4, accel_mps2: 0.2 };
+  const input = {
+    run_epoch: 3,
+    seq: 1,
+    source: "keyboard_slider",
+    desired_lean_rad: 0,
+    heading_rate_rad_s: 0,
+    crouch: 0,
+    armed: true,
+  } as const;
+
+  it("is there when the engine reports drive caps, even null ones", () => {
+    expect(limitsOf(base).drive_field).toBe(false);
+    expect(limitsOf(drive).drive_field).toBe(true);
+    expect(limitsOf({ ...base, accel_cap_mps2: null }).drive_field).toBe(true);
+  });
+
+  it("refuses a status whose caps are not numbers", async () => {
+    for (const bad of [{ accel_cap_mps2: "3" }, { brake_cap_mps2: Number.NaN }]) {
+      ipc.invoke.mockResolvedValueOnce({ ...drive, ...bad });
+      await expect(freeRideApi.status()).rejects.toThrow("Invalid status field");
+    }
+    ipc.invoke.mockResolvedValueOnce(drive);
+    expect((await freeRideApi.status()).brake_cap_mps2).toBe(4.4);
+  });
+
+  it("sends an ask up to 12 m/s² with no lean, and only to an engine that takes one", async () => {
+    await freeRideApi.input({ ...input, desired_accel_mps2: -12 }, limitsOf(drive));
+    expect(ipc.invoke).toHaveBeenCalledWith("free_ride_input", {
+      input: { ...input, desired_accel_mps2: -12 },
+    });
+    for (const [bad, limits] of [
+      [{ desired_accel_mps2: 1 }, limitsOf(base)],
+      [{ desired_accel_mps2: 12.5 }, limitsOf(drive)],
+      [{ desired_accel_mps2: Number.NaN }, limitsOf(drive)],
+      [{ desired_accel_mps2: 1, desired_lean_rad: 0.05 }, limitsOf(drive)],
+    ] as const) {
+      await expect(freeRideApi.input({ ...input, ...bad }, limits)).rejects.toThrow(/limits/);
+    }
+    expect(ipc.invoke).toHaveBeenCalledTimes(1);
+  });
+});

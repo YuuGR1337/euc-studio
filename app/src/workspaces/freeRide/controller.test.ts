@@ -237,6 +237,56 @@ describe("riding without arming", () => {
   });
 });
 
+describe("drive mode", () => {
+  // At 8 m/s: g·tan(22°) = 3.96 m/s², drag 0.4 m/s².
+  const caps = { accel_cap_mps2: 3.56, brake_cap_mps2: 4.36, accel_mps2: 0 };
+
+  it("W asks up to the forward cap with no lean, S brakes, and let go the wheel coasts", async () => {
+    await open(ride(caps));
+    press("keydown", "KeyW");
+    await vi.advanceTimersByTimeAsync(1500);
+    expect(lastSent()).toMatchObject({ desired_lean_rad: 0, armed: true });
+    expect(lastSent()?.desired_accel_mps2).toBeCloseTo(3.56, 3);
+    expect(controller.getSnapshot()).toMatchObject({ drive: true, driving: true, lean: 0 });
+    expect(useFreeRideHud.getState().drive).toBe(true);
+    press("keyup", "KeyW");
+    await vi.advanceTimersByTimeAsync(1500);
+    expect(lastSent()?.desired_accel_mps2).toBeCloseTo(-0.4, 3);
+    // No brake gate: at a standstill too, the engine's rider ends a brake in a clean stop.
+    press("keydown", "KeyS");
+    await vi.advanceTimersByTimeAsync(1500);
+    expect(lastSent()?.desired_accel_mps2).toBeCloseTo(-4.36, 3);
+    expect(controller.getSnapshot()).toMatchObject({ stopping: false });
+    expect(controller.getSnapshot().accel).toBeCloseTo(-4.36, 3);
+  });
+
+  it("lean mode sends the lean itself, and the choice can change while riding", async () => {
+    await open(ride(caps));
+    controller.setDrive(false);
+    press("keydown", "KeyW");
+    await vi.advanceTimersByTimeAsync(1500);
+    expect(lastSent()?.desired_lean_rad).toBeCloseTo(radians(10), 3);
+    expect(lastSent()).not.toHaveProperty("desired_accel_mps2");
+    expect(controller.getSnapshot()).toMatchObject({ drive: false, driving: false, accel: null });
+    // The held key starts from still in the other mode.
+    controller.setDrive(true);
+    await vi.advanceTimersByTimeAsync(50);
+    expect(lastSent()?.desired_accel_mps2).toBeCloseTo(-0.4, 3);
+    press("keydown", "KeyW");
+    await vi.advanceTimersByTimeAsync(1500);
+    expect(lastSent()?.desired_accel_mps2).toBeCloseTo(3.56, 3);
+  });
+
+  it("an engine without drive caps gets the lean", async () => {
+    await open(ride());
+    press("keydown", "KeyW");
+    await vi.advanceTimersByTimeAsync(1500);
+    expect(lastSent()?.desired_lean_rad).toBeCloseTo(radians(10), 3);
+    expect(lastSent()).not.toHaveProperty("desired_accel_mps2");
+    expect(controller.getSnapshot()).toMatchObject({ drive: true, driving: false });
+  });
+});
+
 describe("crash and respawn", () => {
   it("a crash never pauses; R respawns at the last clear spot and the keys ride again", async () => {
     await open(ride());

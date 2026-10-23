@@ -37,6 +37,8 @@ const buttons: { button: WheelButton; pressed: boolean; epoch: number }[] = [];
 const commands: { id: string; value: number | undefined }[] = [];
 let pauses = 0;
 let refuseInput = false;
+/** Drive caps the status reports (an engine with drive mode), or none (an older engine). */
+let caps: Pick<FreeRideStatus, "accel_cap_mps2" | "brake_cap_mps2" | "accel_mps2"> | null = null;
 let pad: {
   id: string;
   index: number;
@@ -119,7 +121,7 @@ function newRun(start: [number, number]) {
 export async function invoke(command: string, args: Record<string, unknown> = {}) {
   switch (command) {
     case "free_ride_status":
-      return { ...status };
+      return { ...status, ...caps };
     case "free_ride_world":
       if (args.epoch !== status.epoch || !frame) throw new Error("Fixture world epoch mismatch.");
       return structuredClone(frame);
@@ -128,6 +130,8 @@ export async function invoke(command: string, args: Record<string, unknown> = {}
       inputs.push(input);
       if (refuseInput) throw new Error("Fixture refuses the input.");
       if (input.run_epoch !== status.epoch) throw new Error("Fixture epoch changed.");
+      if (input.desired_accel_mps2 !== undefined && (!caps || input.desired_lean_rad !== 0))
+        throw new Error("Fixture: a drive ask needs drive caps and no lean.");
       status.source = input.source;
       return;
     }
@@ -180,6 +184,10 @@ const fixture = {
   },
   refuseInput(value: boolean) {
     refuseInput = value;
+  },
+  /** Reports drive caps (m/s², forward and braking) from now on, or none. */
+  driveCaps(accel: number | null, brake = 0) {
+    caps = accel === null ? null : { accel_cap_mps2: accel, brake_cap_mps2: brake, accel_mps2: 0 };
   },
   /** A standard pad with these axes and these buttons held (indices), or none. */
   gamepad(axes: number[] | null, held: number[] = []) {

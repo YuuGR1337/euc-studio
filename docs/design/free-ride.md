@@ -213,18 +213,19 @@ Today's mapping, where keys ask for a lean angle, stays as a "direct lean" optio
 
 | Target | Their value | Where (EUC Thrills `src/`, commit `a66dabd`) | Our use |
 | --- | --- | --- | --- |
-| Force-demand lean at full throttle | 0.50 rad | `data/tuning.ts:1005` (`maxLeanPitch`) | Full W or stick asks for 16·sin(0.50) = 7.7 m/s² before drag |
-| Lean response | τ 0.14 s, at most 3.0 rad/s | `data/tuning.ts:1013`, `:1021`; `shared/maths.ts:41` (`approach`); `simulation/EucController.ts:3137` | The demand ramps the same way: a slammed key reverses in at least 0.28 s |
+| Force-demand lean at full throttle | 0.50 rad | `data/tuning.ts:1005` (`maxLeanPitch`) | Planned: full W or stick asks for 16·sin(0.50) = 7.7 m/s² before drag. Built: full throttle asks for the engine's `accel_cap_mps2` (below) |
+| Lean response | τ 0.14 s, at most 3.0 rad/s | `data/tuning.ts:1013`, `:1021`; `shared/maths.ts:41` (`approach`); `simulation/EucController.ts:3137` | The stick's throttle ramps the same way (`DRIVE_TIMING`: 0.14 s, 6 shares a second); the keys keep their own 0.15 s lag |
 | Drive | 16.0 m/s² per unit of sin(lean) | `data/tuning.ts:1027` (`leanToAccel`); `EucController.ts:3157` | Asked acceleration while the demand and the travel agree |
 | Brake | 22.0 m/s² per unit of sin(lean), when the lean opposes travel above 0.05 m/s | `data/tuning.ts:1034` (`brakeAuthority`), `:1094` (`stoppedSpeed`); `EucController.ts:3155-3157` | Asked deceleration |
-| Drag | 0.00867·v·\|v\| m/s² | `data/tuning.ts:1079` (`dragCoefficient`) | Taken off the ask, so a held W levels off at 29.7 m/s (107 km/h) unless the firmware tilts back first. Theirs is 29.1 m/s on pavement with its rolling resistance; ours leaves rolling resistance to the physics |
-| Reverse gate | Below 0.6 m/s, asked for 0.35 s; reverse at most 6.7 m/s | `data/tuning.ts:1105`, `:1114`, `:1132`; `EucController.ts:3214-3236` | Already in FR2 (`BrakeGate`); the cap becomes an asked speed limit |
+| Drag | 0.00867·v·\|v\| m/s² | `data/tuning.ts:1079` (`dragCoefficient`) | Not used: the physics' own drag (rolling resistance and air) is in the caps, and a released throttle asks for minus that drag, so the wheel coasts as theirs does |
+| Reverse gate | Below 0.6 m/s, asked for 0.35 s; reverse at most 6.7 m/s | `data/tuning.ts:1105`, `:1114`, `:1132`; `EucController.ts:3214-3236` | Lean mode keeps FR2's `BrakeGate`. In drive mode the engine's clean stop does the job: a brake to a stop ends standing, and back pressed again from a stop rides backwards. No reverse speed cap yet |
 | Yaw authority | 3.6 rad/s near a stop down to 0.85 rad/s at 9 m/s, by (v/9)^1.5 | `data/tuning.ts:1193`, `:1195`, `:1197`, `:1214`; `EucController.ts:3245-3246` | Already in FR2 (`STEER_SCHEDULE`) |
 | Lateral grip | 0.75 g to 9 m/s, rising to 1.05 g at 22.25 m/s; up to 1.2 g more for a hard steer (0.55 to 0.90 of full), gone by 6 m/s | `data/tuning.ts:1225`, `:1250`, `:1261`, `:1283`, `:1300-1306`; `simulation/lateralCeiling.ts:70`; `EucController.ts:3325-3338` | Caps the asked turn rate at \|v·ω\| ≤ grip·g; the physics' own cap (FR2b: min(2.5, g·tan 35°/\|v\|)) still applies |
 | Steer at a stop | None below 0.05 m/s | `EucController.ts:3272` | Ours differs: the rider turns at a stop through the physics (decision 3) |
 
-Interface, agreed with the physics owner (the lead approved its plan; not built yet):
-`free_ride_input` gains `desired_accel_mps2`, along the heading, + forward, at most 12 m/s².
+Interface, agreed with the physics owner and built (engine: the physics owner; frontend: the
+Free Ride agent, FR-drive): `free_ride_input` gains `desired_accel_mps2`, along the heading,
++ forward, at most 12 m/s².
 When it is present the packet is in drive mode and `desired_lean_rad` must be 0; when it is
 absent the packet is direct lean, as today. The status adds `accel_cap_mps2` and
 `brake_cap_mps2` (the most the rider's lean can ask at the current speed, drag included) and
@@ -232,6 +233,13 @@ absent the packet is direct lean, as today. The status adds `accel_cap_mps2` and
 allows about 20° to 22°: about 3.6 to 4.0 m/s², far below their 7.7 and 10.5 m/s². So full
 throttle means the cap: the ask keeps their shape and lag, scaled to `accel_cap_mps2` or
 `brake_cap_mps2`.
+
+The frontend (`driveAsk` in `lib/rideControls.ts`) reads the caps as `g·tan(22°) ∓ drag`: their
+mean is a full lean's share and half their difference is minus the drag, so the ask is
+`throttle · (accel_cap + brake_cap) / 2 + (accel_cap - brake_cap) / 2`. Full throttle gives the
+forward cap, full back the brake cap, and a released throttle minus the drag (a coast; an ask of
+0 would hold the speed). Drive is the default; "Lean" under Riding keeps the direct lean, and an
+engine without drive caps always rides that way.
 
 ### Wheel and effects
 

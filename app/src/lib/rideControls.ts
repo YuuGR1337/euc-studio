@@ -353,6 +353,41 @@ export class BrakeGate {
 }
 
 // ---------------------------------------------------------------------------------------------
+// Drive mode (Free Ride)
+
+/**
+ * The stick's throttle lag in drive mode: EUC Thrills' force-demand lean follows the throttle with
+ * a 0.14 s time constant, at most 3 rad/s over its 0.5 rad range, so 6 shares a second
+ * (src/data/tuning.ts, `leanTau`, `leanRate`, `maxLean`). The keys build their throttle with
+ * KEY_TIMING's lag already, so only the stick takes this one.
+ */
+export const DRIVE_TIMING = { tau: 0.14, maxRate: 6 } as const;
+
+/**
+ * Drive mode: the acceleration a throttle (-1..1, + forward) asks for, m/s², from the engine's
+ * caps at the speed now (`accel_cap_mps2`, `brake_cap_mps2`, both net of drag). Full throttle asks
+ * for the strongest the rider's drive lean gives, full back for the strongest brake, and a
+ * released throttle for what drag does alone: the wheel coasts, as an EUC Thrills wheel does (its
+ * drive follows the lean demand, with drag on top). The caps are `g·tan(lean) ∓ drag`, so their
+ * mean is a full lean's share and half their difference is minus the drag. Null without usable
+ * caps.
+ */
+export function driveAsk(
+  throttle: number,
+  accelCap: number | null | undefined,
+  brakeCap: number | null | undefined,
+  limit = 12,
+): number | null {
+  if (typeof accelCap !== "number" || typeof brakeCap !== "number") return null;
+  if (!Number.isFinite(accelCap) || !Number.isFinite(brakeCap)) return null;
+  const lean = (accelCap + brakeCap) / 2;
+  if (!(lean > 0)) return null;
+  const coast = (accelCap - brakeCap) / 2;
+  const t = clamp(Number.isFinite(throttle) ? throttle : 0, -1, 1);
+  return clamp(t * lean + coast, -limit, limit) + 0;
+}
+
+// ---------------------------------------------------------------------------------------------
 // Key bindings (Free Ride)
 
 export type FreeRideAction =
@@ -378,8 +413,8 @@ export const MOTION_ACTIONS: ReadonlySet<FreeRideAction> = new Set([
 ]);
 
 export const FREE_RIDE_ACTIONS: { id: FreeRideAction; label: string }[] = [
-  { id: "forward", label: "Lean forward" },
-  { id: "back", label: "Lean back, brake" },
+  { id: "forward", label: "Ride forward" },
+  { id: "back", label: "Brake, ride back" },
   { id: "left", label: "Turn left" },
   { id: "right", label: "Turn right" },
   { id: "crouch", label: "Crouch (hold)" },
