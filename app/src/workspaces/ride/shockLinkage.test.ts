@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import * as THREE from "three";
 import {
+  CABLE_MORPH_TRAVEL,
   type LinkageReading,
   type LinkageRest,
   type P2,
@@ -47,28 +48,56 @@ function profileSuspension(): { ratio: number; strokeMm: number; curve: string }
 
 interface GlbNode {
   name?: string;
+  mesh?: number;
+  children?: number[];
   translation?: number[];
   rotation?: number[];
 }
 
-/** Named nodes of a model level of detail (glTF: x forward, y up). */
-function glbNodes(lod: number): Map<string, GlbNode> {
+interface GlbJson {
+  nodes: GlbNode[];
+  meshes: { weights?: number[]; primitives: { targets?: unknown[] }[] }[];
+}
+
+/** The JSON chunk of a model level of detail. */
+function glbJson(lod: number): GlbJson {
   const bytes = readFileSync(
     new URL(`app/public/models/begode-extreme/begode-extreme-lod${lod}.glb`, root),
   );
-  const json = JSON.parse(bytes.subarray(20, 20 + bytes.readUInt32LE(12)).toString("utf8")) as {
-    nodes: GlbNode[];
-  };
-  return new Map(json.nodes.flatMap((n) => (n.name ? [[n.name, n]] : [])));
+  return JSON.parse(bytes.subarray(20, 20 + bytes.readUInt32LE(12)).toString("utf8")) as GlbJson;
+}
+
+/** Named nodes of a model level of detail (glTF: x forward, y up). */
+function glbNodes(lod: number): Map<string, GlbNode> {
+  return new Map(glbJson(lod).nodes.flatMap((n) => (n.name ? [[n.name, n]] : [])));
 }
 
 /** The linkage nodes as three.js objects under one body, as the GLB loader builds them. */
 function linkageBody(lod: number): THREE.Object3D {
   const body = new THREE.Object3D();
   for (const [name, node] of glbNodes(lod)) {
-    if (!["shock", "shock_mount", "link_bottom", "rocker", "link"].includes(name)) continue;
+    if (
+      ![
+        "shock",
+        "shock_mount",
+        "link_bottom",
+        "rocker",
+        "link",
+        "fender",
+        "axle",
+        "cable",
+      ].includes(name)
+    ) {
+      continue;
+    }
     const o = new THREE.Object3D();
     o.name = name;
+    if (name === "cable") {
+      // the cable's mesh with its travel morph target, as the loader builds it
+      const mesh = new THREE.Mesh();
+      mesh.morphTargetInfluences = [0];
+      o.add(mesh);
+    }
     const [x = 0, y = 0, z = 0] = node.translation ?? [];
     const [qx = 0, qy = 0, qz = 0, qw = 1] = node.rotation ?? [];
     o.position.set(x, y, z);
@@ -196,4 +225,32 @@ describe("rear linkage", () => {
       }
     });
   }
+  it("moves the internal fender and the axle stubs with the carriage and flexes the cable", () => {
+    for (const lod of [0, 1, 2]) {
+      const json = glbJson(lod);
+      const named = (n: string) => json.nodes.find((node) => node.name === n);
+      const meshOf = (n: string) => {
+        const node = named(n);
+        const child = node?.children?.map((i) => json.nodes[i]).find((c) => c?.mesh !== undefined);
+        const index = node?.mesh ?? child?.mesh;
+        return index === undefined ? undefined : json.meshes[index];
+      };
+      expect(meshOf("fender"), `fender mesh, LOD${lod}`).toBeDefined();
+      const cable = meshOf("cable");
+      expect(cable?.weights, `cable morph weights, LOD${lod}`).toEqual([0]);
+      expect(cable?.primitives.every((p) => p.targets?.length === 1)).toBe(true);
+    }
+    const body = linkageBody(0);
+    const rig = shockRig(body);
+    if (!rig) throw new Error("the model has no linkage");
+    expect(rig.carriage.map((c) => c.node.name)).toEqual(["fender", "axle"]);
+    expect(rig.cable).toHaveLength(1);
+    for (const travel of [0, 0.03, 0.08]) {
+      poseShock(rig, travel);
+      for (const { node, rest } of rig.carriage) {
+        expect(node.position.y - rest.y, node.name).toBeCloseTo(travel, 5);
+      }
+      expect(rig.cable[0]?.morphTargetInfluences?.[0]).toBeCloseTo(travel / CABLE_MORPH_TRAVEL, 9);
+    }
+  });
 });
